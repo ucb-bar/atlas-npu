@@ -13,7 +13,12 @@ object atlas extends ScalaModule with ScalafmtModule {
   )
   
   // Override to use standard src/main/scala layout
-  override def sources = Task.Sources(millSourcePath / os.up / "src" / "main" / "scala")
+  override def sources = Task.Sources {
+    Seq(
+      PathRef(millSourcePath / os.up / "src" / "main" / "scala"),
+      PathRef(millSourcePath / os.up / "dependencies" / "fpex" / "src" / "main" / "scala")
+    )
+  }
   
   // Chisel + plugin
   def ivyDeps = Agg(

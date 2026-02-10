@@ -1,0 +1,6 @@
+[submodule "generators/fpex"]
+	path = generators/fpex
+	url = git@github.com:Sh-Anand/fpEX.git
+[submodule "dependencies/fpex"]
+	path = dependencies/fpex
+	url = git@github.com:Sh-Anand/fpEX.git
