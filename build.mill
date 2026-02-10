@@ -16,7 +16,8 @@ object atlas extends ScalaModule with ScalafmtModule {
   override def sources = Task.Sources {
     Seq(
       PathRef(millSourcePath / os.up / "src" / "main" / "scala"),
-      PathRef(millSourcePath / os.up / "dependencies" / "fpex" / "src" / "main" / "scala")
+      PathRef(millSourcePath / os.up / "dependencies" / "fpex" / "src" / "main" / "scala"),
+      PathRef(millSourcePath / os.up / "dependencies" / "fp-units" / "src" / "main" / "scala")
     )
   }
   
