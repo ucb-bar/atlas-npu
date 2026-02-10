@@ -4,3 +4,6 @@
 [submodule "dependencies/fp-units"]
 	path = dependencies/fp-units
 	url = git@github.com:ucb-ee194-tapeout/sp26-fp-units.git
+[submodule "npu-model"]
+	path = npu-model
+	url = git@github.com:ucb-ee194-tapeout/npu_model.git
