@@ -7,7 +7,7 @@ Mill is already included at the root of this repository.
 To test if mill is installed successfully, run the following command:  
 
 ```bash
-./toolchains/mill --version
+./mill --version
 ```
 
 It should print out something like the following:

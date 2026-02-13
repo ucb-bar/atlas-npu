@@ -1,6 +1,6 @@
 
 BUILD_DIR = ./generated-src
-MILL = ./toolchains/mill
+MILL = ./mill
 PROJECT = atlas
 MAIN = atlas.Elaborate
 
