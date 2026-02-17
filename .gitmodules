@@ -1,8 +1,8 @@
 [submodule "dependencies/fpex"]
 	path = dependencies/fpex
 	url = git@github.com:Sh-Anand/fpEX.git
-[submodule "dependencies/fp-units"]
-	path = dependencies/fp-units
+[submodule "dependencies/sp26-fp-units"]
+	path = dependencies/sp26-fp-units
 	url = git@github.com:ucb-ee194-tapeout/sp26-fp-units.git
 [submodule "npu-model"]
 	path = npu-model
