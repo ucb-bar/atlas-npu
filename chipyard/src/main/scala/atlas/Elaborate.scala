@@ -1,7 +1,10 @@
 package atlas
 
 import circt.stage.ChiselStage
+import org.chipsalliance.cde.config.Parameters
+import atlas.config._
 import atlas.top.AtlasCluster
+import chipyard.AtlasDefaultConfig
 
 object Elaborate extends App {
   val firtoolOptions = Array(
@@ -12,6 +15,6 @@ object Elaborate extends App {
     ).mkString(",")
   )
 
-  // Writes AtlasCluster.sv into --target-dir (or current dir if not provided)
+  implicit val p: Parameters = new AtlasDefaultConfig
   ChiselStage.emitSystemVerilogFile(new AtlasCluster, args, firtoolOptions)
 }
