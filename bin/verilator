@@ -1,0 +1,31 @@
+#!/bin/bash
+# bin/verilator — Workaround for Verilator "attempted to destroy locked Thread Pool"
+# bug triggered by -j 0 (unlimited parallelism). EphemeralSimulator hardcodes -j 0
+# and does not expose this setting. This wrapper intercepts -j 0 → -j 1.
+#
+# Referenced automatically by build.mill forkEnv PATH override.
+
+REAL_VERILATOR=""
+SELF="$(realpath "$0")"
+IFS=: read -ra DIRS <<< "$PATH"
+for dir in "${DIRS[@]}"; do
+  candidate="$dir/verilator"
+  if [[ -x "$candidate" && "$(realpath "$candidate" 2>/dev/null)" != "$SELF" ]]; then
+    REAL_VERILATOR="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$REAL_VERILATOR" ]]; then
+  echo "ERROR: Could not find real verilator on PATH" >&2
+  exit 1
+fi
+
+ARGS=(); SKIP=false
+for a in "$@"; do
+  if $SKIP; then [[ "$a" == "0" ]] && a="1"; SKIP=false; fi
+  [[ "$a" == "-j" ]] && SKIP=true
+  ARGS+=("$a")
+done
+
+exec "$REAL_VERILATOR" "${ARGS[@]}"

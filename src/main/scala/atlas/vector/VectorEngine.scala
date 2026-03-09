@@ -1,9 +1,9 @@
 package atlas.vector
 
 import chisel3._
-import atlas.common.AtlasParams
+import atlas.common.VPUParams
 
-class VectorEngine(p: AtlasParams) extends Module {
+class VectorEngine(p: VPUParams) extends Module {
   val io = IO(new Bundle {
     // TODO
   })

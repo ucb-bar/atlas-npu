@@ -5,37 +5,51 @@ import mill.scalalib.TestModule.ScalaTest
 
 object atlas extends ScalaModule with ScalafmtModule {
   def scalaVersion = "2.13.16"
+
   def scalacOptions = Seq(
     "-deprecation",
     "-feature",
     "-unchecked",
     "-language:reflectiveCalls"
   )
-  
+
   // Override to use standard src/main/scala layout
   override def sources = Task.Sources {
     Seq(
       PathRef(millSourcePath / os.up / "src" / "main" / "scala"),
       PathRef(millSourcePath / os.up / "dependencies" / "fpex" / "src" / "main" / "scala"),
-      PathRef(millSourcePath / os.up / "dependencies" / "sp26-fp-units" / "src" / "main" / "scala")
+      PathRef(millSourcePath / os.up / "dependencies" / "sp26-fp-units" / "src" / "main" / "scala"),
     )
   }
-  
+
   // Chisel + plugin
   def ivyDeps = Agg(
     ivy"org.chipsalliance::chisel:7.0.0-RC4"
   )
+
   def scalacPluginIvyDeps = Agg(
     ivy"org.chipsalliance:::chisel-plugin:7.0.0-RC4"
   )
-  
+
   // ScalaTest-based test module (Mill 0.13 requires this)
   object test extends ScalaTests with ScalaTest with ScalafmtModule {
     def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.19"
     )
-    
+
     // Override to use standard src/test/scala layout
     override def sources = Task.Sources(millSourcePath / os.up / os.up / "src" / "test" / "scala")
+
+    override def resources = Task.Sources(millSourcePath / os.up / os.up / "src" / "test" / "resources")
+
+    // Workaround: EphemeralSimulator hardcodes verilator -j 0 which triggers
+    // "attempted to destroy locked Thread Pool" bug. Prepend repo's bin/
+    // (contains a wrapper that rewrites -j 0 → -j 1) to PATH.
+    override def forkEnv = Task {
+      val projectRoot = millSourcePath / os.up / os.up
+      val wrapperDir  = (projectRoot / "bin").toString
+      val currentPath = sys.env.getOrElse("PATH", "")
+      super.forkEnv() ++ Map("PATH" -> s"$wrapperDir:$currentPath")
+    }
   }
 }
