@@ -34,9 +34,9 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers {
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
     if (outcome.isFailed) {
-      println("InnerProductTreesTest=FAILED")
+      println("InnerProductTreesVectorTest=FAILED")
     } else if (outcome.isSucceeded) {
-      println("InnerProductTreesTest=PASSED")
+      println("InnerProductTreesVectorTest=PASSED")
     }
     outcome
   }
