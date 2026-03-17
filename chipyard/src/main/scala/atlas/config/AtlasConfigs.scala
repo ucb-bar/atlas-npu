@@ -6,15 +6,20 @@ import atlas.config._
 
 // Subunit-only configs (for isolated synthesis)
 
-// Matrix unit with default params (16 lanes, vecLen=32, 2-cycle)
+// Matrix unit with default params (16 lanes, vecLen=32, 1-cycle)
 class InnerProductTreesDefaultConfig extends Config(
   new WithInnerProductTrees
+)
+
+class SystolicArrayDefaultConfig extends Config(
+  new WithSystolicArray
 )
 
 // Full Atlas configs
 
 class AtlasDefaultConfig extends Config(
   new WithInnerProductTrees
+  // ++ new WithSystolicArray
   // ++ new WithVectorUnit
   // ++ new WithController
 )
