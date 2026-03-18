@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import atlas.common.VPUParams
 import fpex._
-import sp26FPUnits.hardfloat._
+import sp26FPUnits._
 
 class VectorEngine(val p: VPUParams) extends Module {
   val io = IO(new Bundle {
