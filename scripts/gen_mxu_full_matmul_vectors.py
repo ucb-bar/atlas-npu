@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen_mxu_full_matmul.py: generate MXU test vectors for full tensor-register matrix multiply
+gen_mxu_full_matmul_vectors.py: generate MXU test vectors for full tensor-register matrix multiply
 
 Architecture:
   - Weight tile: vec_len × num_lanes (default 32×16), weight-stationary
@@ -26,16 +26,16 @@ Output format:
 
 Usage:
     # Single tile, no accumulation (simplest)
-    python3 scripts/gen_mxu_full_matmul.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 32
+    python3 scripts/gen_mxu_full_matmul_vectors.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 32
 
     # 2 tiles, tests psum feedback
-    python3 scripts/gen_mxu_full_matmul.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 64
+    python3 scripts/gen_mxu_full_matmul_vectors.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 64
 
     # 8 tiles, stress psum accumulation
-    python3 scripts/gen_mxu_full_matmul.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 256 --num 1
+    python3 scripts/gen_mxu_full_matmul_vectors.py --out src/test/resources/mxu_full_matmul_vectors.txt --inner-dim 256 --num 1
 
     # RUN THIS: Simulate large layer (16384-wide)
-    python3 scripts/gen_mxu_full_matmul.py --out src/test/resources/mxu_full_matmul_vectors.txt --ref fp32_accum --inner-dim 16384 --num 1
+    python3 scripts/gen_mxu_full_matmul_vectors.py --out src/test/resources/mxu_full_matmul_vectors.txt --ref fp32_accum --inner-dim 16384 --num 1
 """
 
 import argparse

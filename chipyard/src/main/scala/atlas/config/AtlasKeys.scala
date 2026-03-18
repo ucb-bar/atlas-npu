@@ -3,9 +3,11 @@ package atlas.config
 
 import org.chipsalliance.cde.config.Field
 import atlas.common.InnerProductTreeParams
+import atlas.common.SystolicArrayParams
 
 // Per-subunit keys
 case object InnerProductTreeKey extends Field[Option[InnerProductTreeParams]](None)
+case object SystolicArrayKey extends Field[Option[SystolicArrayParams]](None)
 
 // Add more subunit keys here as Atlas grows:
 // case object VectorUnitKey extends Field[Option[VectorUnitParams]](None)
