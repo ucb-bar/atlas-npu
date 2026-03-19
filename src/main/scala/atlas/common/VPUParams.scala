@@ -1,13 +1,16 @@
 package atlas.common
 
-import fpex.FPType
+import sp26FPUnits._
 
 case class VPUParams(
-  BF16T: FPType = FPType.BF16T,
-  wordWidth: Int = FPType.BF16T.wordWidth,
-  expWidth: Int = FPType.BF16T.expWidth,
-  sigWidth: Int = FPType.BF16T.sigWidth,
+  BF16: AtlasFPType = AtlasFPType.BF16,
+  wordWidth: Int = AtlasFPType.BF16.wordWidth,
+  expWidth: Int = AtlasFPType.BF16.expWidth,
+  sigWidth: Int = AtlasFPType.BF16.sigWidth,
   numLanes: Int = 16,
   tagWidth: Int = 16,
   numOpMod: Int = 8
-)
+) {
+  require((numLanes > 1) && ((numLanes & (numLanes - 1)) == 0), s"VPU must have >1 lanes and must be power of 2, got $numLanes")
+}
+
