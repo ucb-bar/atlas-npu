@@ -2,7 +2,6 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex._
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.hardfloat.consts._
@@ -26,7 +25,7 @@ class SumReduResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class ReduSumRec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
+class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
     require(isPow2(numLanes), "numLanes must be a power of 2")
 
     val io = IO(new Bundle {

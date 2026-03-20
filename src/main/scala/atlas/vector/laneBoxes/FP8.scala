@@ -2,10 +2,9 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex._
-import hardfloat._
-import hardfloat.consts._
 import sp26FPUnits._
+import sp26FPUnits.hardfloat._ 
+import sp26FPUnits.hardfloat.consts._
 
 // A BF16 -> FP8 (E4M3) converter
 class FP8Req(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
@@ -27,7 +26,7 @@ class FP8Resp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class FP8(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 16)
+class FP8(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16)
     extends Module
     with HasPipelineParams {
 

@@ -2,8 +2,6 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex.hardfloat._
-import fpex._
 import sp26FPUnits._
 
 // Input bundles
@@ -24,13 +22,13 @@ class TanhResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class TanhRec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
+class TanhRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val w    = BF16T.wordWidth
     val expW = BF16T.expWidth
     val sigW = BF16T.sigWidth 
     val n    = BF16T.qmnN     
     val m    = BF16T.qmnM   
-    val n1 = BF16T.lutValN 
+    val n1   = BF16T.lutValN 
 
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new TanhReq(BF16T.wordWidth, numLanes, tagWidth)))
