@@ -2,9 +2,8 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex.hardfloat._
-import fpex._
 import sp26FPUnits._
+import sp26FPUnits.hardfloat._
 
 class FPEXReq(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   val roundingMode = UInt(3.W)
@@ -25,7 +24,7 @@ class FPEXResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class Exp(fpT: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
+class Exp(fpT: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new FPEXReq(fpT.wordWidth, numLanes, tagWidth)))
     val resp = Decoupled(new FPEXResp(fpT.wordWidth, numLanes, tagWidth))
@@ -51,14 +50,15 @@ class Exp(fpT: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module wi
       0.U(fpT.wordWidth.W),
       Seq(
         x.isNaN -> Cat(x.sign, fpT.nanExp, isSigNaNRawFloat(x), fpT.nanSig),
-        (x.isZero || x.isSubNorm) -> fpT.one,
+        //(x.isZero || x.isSubNorm) -> fpT.one,
+        (x.isZero) -> fpT.one,
         (x.isInf && x.sign) -> fpT.zero,
         ((x.isInf && !x.sign) || of) -> Cat(0.U(1.W), fpT.infinity)
       )
     )
   })
   val earlyTerminate = VecInit(rawFloatOf.map { case (x, of) =>
-    x.isInf || x.isZero || x.isSubNorm || x.isNaN || of
+    x.isInf || x.isZero || x.isNaN || of
   })
 
   class CommonStageState extends Bundle {

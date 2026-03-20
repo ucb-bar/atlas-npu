@@ -2,7 +2,6 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex._
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 
@@ -30,7 +29,7 @@ class DivSqrtResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val exceptionFlags = Vec(numLanes, UInt(5.W))
 }
 
-class DivSqrtRec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
+class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new DivSqrtReq(BF16T.wordWidth, numLanes, tagWidth)))
         val resp = Decoupled(new DivSqrtResp(BF16T.wordWidth, numLanes, tagWidth))

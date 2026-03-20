@@ -2,7 +2,6 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex._
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._      
 import sp26FPUnits.hardfloat.consts._
@@ -28,7 +27,7 @@ class MulResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class MulRec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
+class MulRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new MulReq(BF16T.wordWidth, numLanes, tagWidth)))
         val resp = Decoupled(new MulResp(BF16T.wordWidth, numLanes, tagWidth))

@@ -2,9 +2,8 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex.hardfloat._
-import fpex._
 import sp26FPUnits._
+import sp26FPUnits.hardfloat._
 
 // Input bundles
 class Log2Req(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
@@ -25,7 +24,7 @@ class Log2Resp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
 }
 
 
-class Log2Rec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
+class Log2Rec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val w    = BF16T.wordWidth
     val expW = BF16T.expWidth
     val sigW = BF16T.sigWidth 

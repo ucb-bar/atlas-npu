@@ -3,7 +3,6 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import fpex._
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._      
 import sp26FPUnits.hardfloat.consts._
@@ -28,7 +27,7 @@ class SquareCubeResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundl
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
-class SquareCubeRec(BF16T: FPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
+class SquareCubeRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val w = BF16T.wordWidth
     val expW = BF16T.expWidth
     val sigW = BF16T.sigWidth
