@@ -43,6 +43,7 @@
 
 # sbt's target directories
 /target/
+/chipyard/target/
 /project/**/target/
 /test/macro-annot/target/
 /test/files/target/
