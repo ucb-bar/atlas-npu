@@ -6,7 +6,7 @@ import atlas.common.VPUParams
 import sp26FPUnits.hardfloat._
 
 object VPUOp extends ChiselEnum {
-  val add, sub, mul, rcp, sqrt, sin, cos, tanh, log, exp, exp2, square, cube, max, reduSum, fp8 = Value
+  val add, sub, mul, rcp, sqrt, sin, cos, tanh, log, exp, exp2, square, cube, max, reduSum, fp8, relu = Value
 }
 
 class VPUInput(val p: VPUParams) extends Bundle {
