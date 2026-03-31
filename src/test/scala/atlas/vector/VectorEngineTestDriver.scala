@@ -11,13 +11,17 @@ import atlas.common.VPUParams
 
 class VectorEngineTestDriver extends AnyFlatSpec with Matchers {
 
+  //----------- CI/CD INCLUDE --------------
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
     if (outcome.isFailed) {
       println("VectorEngineTestDriver=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("VectorEngineTestDriver=PASSED")
     }
     outcome
   }
+  //----------- CI/CD INCLUDE --------------
 
   // Configuration
   val vectorResource = "/vpu_vectors.txt"  
