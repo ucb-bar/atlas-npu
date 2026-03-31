@@ -1,0 +1,175 @@
+package atlas.vector
+
+
+import chisel3._
+import chisel3.simulator.EphemeralSimulator._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import atlas.common.VPUParams
+import sp26FPUnits.hardfloat._
+
+
+class NewVPUAddSubTest extends AnyFlatSpec with Matchers {
+
+
+ // -------------------------------------------------------------------------
+ // BF16 bit patterns
+ // -------------------------------------------------------------------------
+ val BF16_N2 = 0xC000   // -2.0
+ val BF16_N1 = 0xBF80   // -1.0
+ val BF16_N0 = 0x8000   // -0.0
+ val BF16_0  = 0x0000   // +0.0
+ val BF16_1  = 0x3F80   //  1.0
+ val BF16_2  = 0x4000   //  2.0
+ val BF16_3  = 0x4040   //  3.0
+ val BF16_4  = 0x4080   //  4.0
+
+
+ // Fractions (exact in binary)
+ val BF16_0_5  = 0x3F00 //  0.5
+ val BF16_1_5  = 0x3FC0 //  1.5
+ val BF16_2_5  = 0x4020 //  2.5
+ val BF16_N0_5 = 0xBF00 // -0.5
+
+
+ // Rounding boundary helper
+ val BF16_1_PLUS_EPS = 0x3F81   // 1.0078125 (next representable above 1.0)
+ val BF16_EPS        = 0x3C00   // 0.0078125 = 2^-7 (ULP at 1.0)
+
+
+ val p = VPUParams()
+ behavior of s"VectorEngine (BF16) add/sub lanes=${p.numLanes}"
+
+
+ // -------------------------------------------------------------------------
+ // Helper Functions
+ // -------------------------------------------------------------------------
+ def initializeInterface(dut: VectorEngine, drainCycles: Int = 4): Unit = {
+   dut.io.in.valid.poke(false.B)
+   dut.io.out.ready.poke(true.B)
+   for (i <- 0 until dut.p.numLanes) {
+     dut.io.in.bits.vecDataA(i).poke(0.U)
+     dut.io.in.bits.vecDataB(i).poke(0.U)
+   }
+   if (drainCycles > 0) dut.clock.step(drainCycles)
+ }
+
+
+ // Kat: Return type is now Boolean
+ def runOpAndCheck(dut: VectorEngine, testId: Int, op: VPUOp.Type, a: Int, b: Int, expected: Int, opName: String): Boolean = {
+   dut.io.in.valid.poke(true.B)
+   dut.io.in.bits.instType.poke(op)
+   for (i <- 0 until dut.p.numLanes) {
+     dut.io.in.bits.vecDataA(i).poke(a.U)
+     dut.io.in.bits.vecDataB(i).poke(b.U)
+   }
+
+
+   var cycles = 0
+   while (!dut.io.in.ready.peek().litToBoolean && cycles < 20) {
+     dut.clock.step(1); cycles += 1
+   }
+   dut.io.in.ready.expect(true.B, s"Timed out waiting for in.ready on Case #$testId: $opName")
+
+
+   dut.clock.step(1)
+   dut.io.in.valid.poke(false.B)
+
+
+   cycles = 0
+   while (!dut.io.out.valid.peek().litToBoolean && cycles < 20) {
+     dut.clock.step(1); cycles += 1
+   }
+   dut.io.out.valid.expect(true.B, s"Timed out waiting for out.valid on Case #$testId: $opName")
+
+
+   println(s"--- Test #$testId | $opName ---")
+   println(f"Input A : 0x$a%04X")
+   println(f"Input B : 0x$b%04X")
+   println(f"Expected: 0x$expected%04X")
+
+
+   var casePassed = true
+
+
+   for (i <- 0 until dut.p.numLanes) {
+     val actualVal = dut.io.out.bits.vectorOutputData(i).peek().litValue.toInt
+     if (i == 0) println(f"Output  : 0x$actualVal%04X")
+    
+     if (actualVal != expected) {
+       println(f"  -> ERROR on lane $i: got 0x$actualVal%04X, expected 0x$expected%04X")
+       casePassed = false
+     }
+   }
+   println("---------------------\n")
+
+
+   dut.clock.step(1)
+   casePassed
+ }
+
+
+ // -------------------------------------------------------------------------
+ // Test Cases
+ // -------------------------------------------------------------------------
+ // New TestCase class to hold all test arguments (op, a, b, expected, desc)
+ case class TestCase(op: VPUOp.Type, a: Int, b: Int, expected: Int, desc: String)
+
+
+ val allTestCases = Seq(
+   // ADD tests
+   TestCase(VPUOp.add, BF16_1, BF16_2, BF16_3, "ADD: 1.0 + 2.0 = 3.0"),
+   TestCase(VPUOp.add, BF16_1_5, BF16_1, BF16_2_5, "ADD: 1.5 + 1.0 = 2.5"),
+   TestCase(VPUOp.add, BF16_N0_5, BF16_1, BF16_0_5, "ADD: -0.5 + 1.0 = 0.5"),
+   TestCase(VPUOp.add, BF16_N0, BF16_0, BF16_0, "ADD: -0.0 + 0.0 = 0.0"),
+   // TestCase(VPUOp.add, BF16_1_PLUS_EPS, BF16_EPS, 0x3F83, "ADD: (1+eps) + eps = 1.0234375")
+
+
+   // SUB tests
+   TestCase(VPUOp.sub, BF16_3, BF16_2, BF16_1, "SUB: 3.0 - 2.0 = 1.0"),
+   TestCase(VPUOp.sub, BF16_1, BF16_2, BF16_N1, "SUB: 1.0 - 2.0 = -1.0"),
+   TestCase(VPUOp.sub, BF16_0, BF16_0, BF16_0, "SUB: 0.0 - 0.0 = 0.0"),
+   TestCase(VPUOp.sub, BF16_N0, BF16_0, BF16_N0, "SUB: -0.0 - 0.0 = -0.0"),
+   TestCase(VPUOp.sub, BF16_2, BF16_1_5, BF16_0_5, "SUB: 2.0 - 1.5 = 0.5")
+ )
+
+
+ // -------------------------------------------------------------------------
+ // Singular Should Block
+ // -------------------------------------------------------------------------
+   // Kat: Instead of exiting the whole test on a failure, I collect all the failures and report at the end so we can still test all cases
+ it should "execute all ADD and SUB tests efficiently and report all failures at the end" in {
+   simulate(new VectorEngine(p)) { dut =>
+     initializeInterface(dut)
+    
+     var failedCases = Seq.empty[String]
+
+
+     // Using .zipWithIndex to index/number test cases
+     for ((tc, index) <- allTestCases.zipWithIndex) {
+       val testId = index + 1 // Starting index at 1 (instead of 0)
+      
+       val passed = runOpAndCheck(dut, testId, tc.op, tc.a, tc.b, tc.expected, tc.desc)
+      
+       // If it failed, save a formatted string containing the ID and the desc
+       if (!passed) {
+         failedCases = failedCases :+ s"Test #$testId (${tc.desc})"
+       }
+     }
+
+
+     // Print a summary at the end
+     if (failedCases.nonEmpty) {
+       println("\n" + "="*50)
+       println("SUMMARY OF FAILED CASES:")
+       failedCases.foreach(failureInfo => println(s"$failureInfo"))
+       println("="*50 + "\n")
+     } else {
+       println("\nYIPPEEEE All cases passed!\n")
+     }
+
+
+     failedCases shouldBe empty
+   }
+ }
+}
