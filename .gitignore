@@ -63,3 +63,8 @@ project/**/metals.sbt
 
 .bsp
 .history
+
+/src/test/resources/assembly/generators/__pycache__
+/src/test/resources/ipt_test_vectors
+/src/test/resources/vpu_test_vectors
+/scripts/.env

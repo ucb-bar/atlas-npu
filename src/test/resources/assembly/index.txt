@@ -1,0 +1,21 @@
+# Assembly tests — one .S filename per line
+
+# ---- Scalar core ----
+alu_basic.S
+branch_delay_slots.S
+jal_jalr.S
+csr_scale.S
+mem_scalar.S
+
+# ---- DMA ----
+dma_loopback.S
+dma_stress.S
+
+# ---- MXU: matrix unit ----
+mxu_push_pop.S
+mxu_single_input_tile_bf16.S
+mxu_single_output_tile_bf16.S
+mxu_qk_scores.S
+
+# ---- XLU: transpose unit ----
+xlu_transpose.S
