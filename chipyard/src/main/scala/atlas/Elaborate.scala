@@ -1,3 +1,5 @@
+// chipyard/generators/sp26-atlas-acc/chipyard/src/main/scala/atlas/Elaborate.scala
+
 package atlas
 
 import circt.stage.ChiselStage

@@ -1,384 +1,327 @@
-/*
-InnerProductTreesFullMatmulTest.scala
-Full tensor-register matrix multiply test for weight-stationary MXU.
-
-Architecture under test:
-  - Weight tile:  32×16 (vecLen × numLanes), loaded once per tile
-  - Activation:   64×32 tensor register, streamed one row per cycle
-  - Per cycle:    [1×32] act × [32×16] wgt = [1×16] BF16 partial sums
-  - Full op:      [64×K] × [K×16] = [64×16]  (K = inner_dim, tiled in chunks of 32)
-
-Test flow per case:
-  For each tile t in 0..<numTiles:
-    1. Load 32×16 weights (16 lanes × 32 elements each)
-    2. Stream all 64 activation rows back-to-back (pipelined)
-    3. Collect 64 output rows; store as psum for next tile
-  After last tile, compare final outputs against Python expected values.
-
-Run:
-  mill atlas.test.testOnly atlas.ipt.InnerProductTreesFullMatmulTest
-*/
-
 package atlas.ipt
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.util._
+import chisel3.simulator._
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
-import atlas.common.InnerProductTreeParams
+import atlas.common._
+import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
+import java.io.PrintWriter
 
-class InnerProductTreesFullMatmulTest extends AnyFlatSpec with Matchers {
-
-  //----------- CI/CD INCLUDE --------------
-  override def withFixture(test: NoArgTest): Outcome = {
-    val outcome = super.withFixture(test)
-    if (outcome.isFailed) {
-      println("InnerProductTreesFullMatmulTest=FAILED")
-    } else if (outcome.isSucceeded) {
-      println("InnerProductTreesFullMatmulTest=PASSED")
-    }
-    outcome
+object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+  private val runDir: Path = {
+    val p = Paths.get("test_run_dir", "full_matmul_vcs")
+    Files.createDirectories(p)
+    p.toAbsolutePath
   }
-  //----------- CI/CD INCLUDE --------------
 
-  // Configuration
+  override val backend: VcsBackend = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String = "full_matmul_vcs"
+  override val workspacePath: String = runDir.toString
 
-  val vectorResource = "/mxu_full_matmul_vectors.txt"
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
 
-  // Tolerances:
-  // - absTolerance: treat both |value| <= absTolerance (in BF16 magnitude bits) as equal
-  // - relTolerance: non-symmetric relative error threshold: |a-e| / max(|e|, eps)
-  val absTolerance = 0x0040
-  val relTolerance = 0.01
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(line = true, cond = true, branch = true, fsm = true, tgl = true)
+    Backend.CompilationSettings(
+      coverageSettings = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName = Some(Backend.CoverageName("full_matmul_test_coverage"))
+      )
+    )
+  }
+}
 
-  // Test vector data
+class InnerProductTreesFullMatmulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+  override def withFixture(test: NoArgTest): Outcome = {
+    val o = super.withFixture(test)
+    if (o.isFailed) println("InnerProductTreesFullMatmulTest=FAILED")
+    else if (o.isSucceeded) println("InnerProductTreesFullMatmulTest=PASSED")
+    o
+  }
 
-  case class FullMatmulVector(
-    id:       Int,
-    numRows:  Int,
-    numTiles: Int,
-    weights:  Seq[Seq[Seq[Int]]], // [tile][lane][col]
-    act:      Seq[Seq[Seq[Int]]], // [tile][row][col]
-    expected: Seq[Seq[Int]]       // [row][lane] (final result after all tiles)
+  val vectorResource = "/ipt_test_vectors/mxu_full_matmul_vectors.txt"
+  val absTol = 0x0040
+  val relTol = 0.01
+
+  val WGT = 0
+  val ACT = 2
+  val OUT_LO = 8
+  val OUT_HI = 9
+
+  case class FMV(
+    id: Int,
+    nr: Int,
+    nt: Int,
+    wgt: Seq[Seq[Seq[Int]]],
+    act: Seq[Seq[Seq[Int]]],
+    exp: Seq[Seq[Int]]
   )
 
-  // Parser
+  def h2i(h: String): Int = Integer.parseUnsignedInt(h, 16)
 
-  def hexToInt(h: String): Int = Integer.parseUnsignedInt(h, 16)
+  def bf16f(b: Int): Float =
+    java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
 
-  def loadVectors(resourcePath: String): Seq[FullMatmulVector] = {
-    val stream = getClass.getResourceAsStream(resourcePath)
-    require(stream != null,
-      s"Resource '$resourcePath' not found. Run the Python generator first.")
-    val src = Source.fromInputStream(stream)
-    val vectors = ArrayBuffer[FullMatmulVector]()
+  private val relEps = java.lang.Float.MIN_NORMAL.toDouble
 
-    var id       = 0
-    var numRows  = 64
-    var numTiles = 1
+  case class Errs(absErr: Double, relErr: Double)
 
-    var wgtMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-    var actMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-    var expMap = scala.collection.mutable.Map[Int, Seq[Int]]()
-    var inCase = false
+  def tolWithErr(a: Int, e: Int): (Boolean, Errs) = {
+    val am = a & 0x7FFF
+    val em = e & 0x7FFF
+    if (am <= absTol && em <= absTol) {
+      (true, Errs(0.0, 0.0))
+    } else {
+      val af = bf16f(a).toDouble
+      val ef = bf16f(e).toDouble
+      val absErr = math.abs(af - ef)
+      val relErr = absErr / math.max(math.abs(ef), relEps)
+      (relErr < relTol, Errs(absErr, relErr))
+    }
+  }
 
-    def flush(): Unit = {
-      if (inCase) {
-        val weights = (0 until numTiles).map { t =>
-          val tileMap = wgtMap.getOrElse(t, scala.collection.mutable.Map.empty)
-          (0 until tileMap.size).map(r => tileMap(r))
+  def tol(a: Int, e: Int): Boolean = tolWithErr(a, e)._1
+
+  def pack(es: Seq[Int], w: Int): BigInt =
+    es.zipWithIndex.foldLeft(BigInt(0)) { case (a, (v, i)) =>
+      a | (BigInt(v & ((1 << w) - 1)) << (i * w))
+    }
+
+  def loadVectors(rp: String): Seq[FMV] = {
+    val s = Source.fromInputStream(getClass.getResourceAsStream(rp))
+    val vs = ArrayBuffer[FMV]()
+
+    var id = 0
+    var nr = 32
+    var nt = 1
+    var wm = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+    var am = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+    var em = scala.collection.mutable.Map[Int, Seq[Int]]()
+    var in = false
+
+    def f(): Unit = {
+      if (in) {
+        val w = (0 until nt).map { t =>
+          val m = wm.getOrElse(t, scala.collection.mutable.Map.empty)
+          (0 until m.size).map(r => m(r))
         }
-        val act = (0 until numTiles).map { t =>
-          val tileMap = actMap.getOrElse(t, scala.collection.mutable.Map.empty)
-          (0 until tileMap.size).map(i => tileMap(i))
+        val a = (0 until nt).map { t =>
+          val m = am.getOrElse(t, scala.collection.mutable.Map.empty)
+          (0 until m.size).map(i => m(i))
         }
-        val expected = (0 until expMap.size).map(i => expMap(i))
+        val e = (0 until em.size).map(i => em(i))
+        vs += FMV(id, nr, nt, w, a, e)
 
-        vectors += FullMatmulVector(id, numRows, numTiles, weights, act, expected)
-
-        wgtMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-        actMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-        expMap = scala.collection.mutable.Map[Int, Seq[Int]]()
-        inCase = false
+        wm = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+        am = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+        em = scala.collection.mutable.Map[Int, Seq[Int]]()
+        in = false
       }
     }
 
     try {
-      for (raw <- src.getLines()) {
-        val line = raw.trim
-        if (line.isEmpty) {
-          flush()
-        } else if (line.startsWith("#")) {
-          flush()
-          val parts = line.drop(1).trim.split("\\s+")
-          id = parts(0).toInt
-          inCase = true
+      for (raw <- s.getLines()) {
+        val l = raw.trim
+        if (l.isEmpty) f()
+        else if (l.startsWith("#")) {
+          f()
+          val p = l.drop(1).trim.split("\\s+")
+          id = p(0).toInt
+          in = true
         } else {
-          val parts = line.split("\\s+")
-          parts(0) match {
-            case "num_rows"  => numRows  = parts(1).toInt
-            case "num_tiles" => numTiles = parts(1).toInt
+          val p = l.split("\\s+")
+          p(0) match {
+            case "num_rows"  => nr = p(1).toInt
+            case "num_tiles" => nt = p(1).toInt
             case "wgt" =>
-              val tile = parts(1).toInt
-              val lane = parts(2).toInt
-              val data = parts.drop(3).map(hexToInt).toSeq
-              wgtMap.getOrElseUpdate(tile, scala.collection.mutable.Map.empty)(lane) = data
+              wm.getOrElseUpdate(p(1).toInt, scala.collection.mutable.Map.empty)(p(2).toInt) =
+                p.drop(3).map(h2i).toSeq
             case "act" =>
-              val tile = parts(1).toInt
-              val row  = parts(2).toInt
-              val data = parts.drop(3).map(hexToInt).toSeq
-              actMap.getOrElseUpdate(tile, scala.collection.mutable.Map.empty)(row) = data
+              am.getOrElseUpdate(p(1).toInt, scala.collection.mutable.Map.empty)(p(2).toInt) =
+                p.drop(3).map(h2i).toSeq
             case "exp" =>
-              val row  = parts(1).toInt
-              val data = parts.drop(2).map(hexToInt).toSeq
-              expMap(row) = data
+              em(p(1).toInt) = p.drop(2).map(h2i).toSeq
             case _ =>
           }
         }
       }
-      flush()
-    } finally {
-      src.close()
-    }
+      f()
+    } finally s.close()
 
-    vectors.toSeq
+    vs.toSeq
   }
 
-  // BF16 helpers + error computations
+  def idle(dut: InnerProductTreesUnitHarness): Unit = {
+    dut.io.cmd.valid.poke(false.B)
+    dut.io.cmd.bits.op.poke(Mxu0Op.PushWeight)
+    dut.io.cmd.bits.trfBank.poke(0.U)
+    dut.io.cmd.bits.accSel.poke(false.B)
+    dut.io.cmd.bits.weightSlot.poke(false.B)
+    dut.io.cmd.bits.scaleE8M0.poke(127.U)
 
-  def bf16BitsToFloat(bits16: Int): Float = {
-    java.lang.Float.intBitsToFloat((bits16 & 0xFFFF) << 16)
+    dut.io.dmaWriteIn.valid.poke(false.B)
+    dut.io.dmaWriteIn.bits.whichBank.poke(0.U)
+    dut.io.dmaWriteIn.bits.wRow.poke(0.U)
+    dut.io.dmaWriteIn.bits.wData.poke(0.U)
+
+    dut.io.dmaReadIn.valid.poke(false.B)
+    dut.io.dmaReadIn.bits.whichBank.poke(0.U)
+    dut.io.dmaReadIn.bits.rRow.poke(0.U)
   }
 
-  // Non-symmetric relative error (relative-to-expected):
-  //   relErr = |a - e| / max(|e|, eps)
-  // eps avoids division by zero; choose a tiny float-scale value.
-  private val relEps: Double = java.lang.Float.MIN_NORMAL.toDouble // ~1.175e-38
-
-  // Pass condition:
-  //  1) absTiny: both BF16 magnitudes <= absTolerance (bit-magnitude, sign stripped)
-  //  2) rel:     |a-e| / max(|e|, eps) < relTolerance
-  def bf16WithinTolerance(actual16: Int, expected16: Int, absTol: Int, relTol: Double): Boolean = {
-    val a16 = actual16   & 0xFFFF
-    val e16 = expected16 & 0xFFFF
-
-    val aMag = a16 & 0x7FFF
-    val eMag = e16 & 0x7FFF
-
-    // Treat tiny magnitudes as equal (raw BF16 magnitude bits)
-    if (aMag <= absTol && eMag <= absTol) return true
-
-    // Relative error check (float space, relative-to-expected)
-    val aF = bf16BitsToFloat(a16).toDouble
-    val eF = bf16BitsToFloat(e16).toDouble
-    val absErr = math.abs(aF - eF)
-    val denom  = math.max(math.abs(eF), relEps)
-    val relErr = absErr / denom
-
-    relErr < relTol
-  }
-
-  // Metrics for printing/debugging:
-  // - absErr: |aF - eF| (float-space)
-  // - relErr: absErr / max(|eF|, eps) (float-space, non-symmetric)
-  case class Bf16Errors(absErr: Double, relErr: Double)
-
-  def bf16Errors(actual16: Int, expected16: Int): Bf16Errors = {
-    val a16 = actual16   & 0xFFFF
-    val e16 = expected16 & 0xFFFF
-
-    val aF = bf16BitsToFloat(a16).toDouble
-    val eF = bf16BitsToFloat(e16).toDouble
-    val absErr = math.abs(aF - eF)
-
-    // Make printing sane for exact matches (including 0 vs 0)
-    if (absErr == 0.0) return Bf16Errors(0.0, 0.0)
-
-    val denom  = math.max(math.abs(eF), relEps)
-    val relErr = absErr / denom
-    Bf16Errors(absErr, relErr)
-  }
-
-  // DUT helpers
-
-  def idle(dut: InnerProductTrees, p: InnerProductTreeParams): Unit = {
-    dut.io.compute.valid.poke(false.B)
-    dut.io.weightLoad.valid.poke(false.B)
-    for (j <- 0 until p.vecLen) dut.io.compute.bits.act(j).poke(0.U)
-    for (r <- 0 until p.numLanes) {
-      dut.io.compute.bits.bias(r).poke(0.U)
-      dut.io.compute.bits.psum(r).poke(0.U)
-    }
-    dut.io.compute.bits.addendSel.poke(AddendSel.UseAct)
-    dut.io.weightLoad.bits.weightSel.poke(WeightSel.UseTr)
-    dut.io.weightLoad.bits.laneIdx.poke(0.U)
-    dut.io.weightLoad.bits.last.poke(false.B)
-    for (c <- 0 until p.vecLen) {
-      dut.io.weightLoad.bits.weightsDma(c).poke(0.U)
-      dut.io.weightLoad.bits.weightsTr(c).poke(0.U)
-    }
-  }
-
-  def loadWeights(
-    dut: InnerProductTrees,
-    p: InnerProductTreeParams,
-    weights: Seq[Seq[Int]]
-  ): Unit = {
-    dut.io.weightLoad.valid.poke(true.B)
-    dut.io.weightLoad.bits.weightSel.poke(WeightSel.UseTr)
-    for (r <- 0 until p.numLanes) {
-      dut.io.weightLoad.bits.laneIdx.poke(r.U)
-      dut.io.weightLoad.bits.last.poke((r == p.numLanes - 1).B)
-      for (c <- 0 until p.vecLen) {
-        dut.io.weightLoad.bits.weightsTr(c).poke(weights(r)(c).U)
-        dut.io.weightLoad.bits.weightsDma(c).poke(0.U)
-      }
+  def w8(dut: InnerProductTreesUnitHarness, c: => Boolean, m: Int): Boolean = {
+    var i = 0
+    while (i < m && !c) {
       dut.clock.step()
+      i += 1
     }
-    dut.io.weightLoad.valid.poke(false.B)
+    c
   }
 
-  def selToEnum(sel: Int): AddendSel.Type = sel match {
-    case 0 => AddendSel.UseAct
-    case 1 => AddendSel.UseBias
-    case 2 => AddendSel.UsePsum
-    case _ => AddendSel.UseAct
+  def wr(dut: InnerProductTreesUnitHarness, b: Int, r: Int, d: BigInt): Unit = {
+    dut.io.dmaWriteIn.valid.poke(true.B)
+    dut.io.dmaWriteIn.bits.whichBank.poke(b.U)
+    dut.io.dmaWriteIn.bits.wRow.poke(r.U)
+    dut.io.dmaWriteIn.bits.wData.poke(d.U)
+    dut.clock.step()
+    dut.io.dmaWriteIn.valid.poke(false.B)
   }
 
-  // Test body
+  def rd(dut: InnerProductTreesUnitHarness, b: Int, r: Int): BigInt = {
+    dut.io.dmaReadIn.valid.poke(true.B)
+    dut.io.dmaReadIn.bits.whichBank.poke(b.U)
+    dut.io.dmaReadIn.bits.rRow.poke(r.U)
+    dut.clock.step()
+    dut.io.dmaReadIn.valid.poke(false.B)
+    require(dut.io.dmaReadOut.valid.peek().litToBoolean)
+    dut.io.dmaReadOut.bits.peek().litValue
+  }
 
-  "InnerProductTrees" should "compute full tensor-register matmul correctly" in {
+  def cmd(
+    dut: InnerProductTreesUnitHarness,
+    op: Mxu0Op.Type,
+    tb: Int = 0,
+    as: Boolean = false,
+    ws: Boolean = false,
+    sc: Int = 127
+  ): Unit = {
+    dut.io.cmd.valid.poke(true.B)
+    dut.io.cmd.bits.op.poke(op)
+    dut.io.cmd.bits.trfBank.poke(tb.U)
+    dut.io.cmd.bits.accSel.poke(as.B)
+    dut.io.cmd.bits.weightSlot.poke(ws.B)
+    dut.io.cmd.bits.scaleE8M0.poke(sc.U)
+    dut.clock.step()
+    dut.io.cmd.valid.poke(false.B)
+  }
+
+  "InnerProductTrees sequencer+TRF (VCS full matmul)" should "compute full matmul correctly" in {
     val p = InnerProductTreeParams()
+    val rfP = RegFileParams()
     val vectors = loadVectors(vectorResource)
-    require(vectors.nonEmpty, s"No test vectors found at $vectorResource")
+    require(vectors.nonEmpty)
 
-    simulate(new InnerProductTrees(p)) { dut =>
-      var totalPassed = 0
-      var totalFailed = 0
+    var totalPassed = 0
+    var totalFailed = 0
 
-      val outFile =
-        new java.io.PrintWriter("../../../../../src/test/resources/rtl_full_matmul_outputs.txt")
-      outFile.println(
-        "# case_id  tile  row  lane  actual_hex  expected_hex  actual_float  expected_float  match"
-      )
+    val outFile = new PrintWriter("../../../../../src/test/resources/ipt_test_vectors/rtl_full_matmul_outputs.txt")
+    outFile.println("# case_id row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match")
 
-      for (tv <- vectors) {
-        println(f"═══ Case ${tv.id}: ${tv.numRows} rows × ${tv.numTiles} tile(s) ═══")
+    try {
+      PersistentVcsFullMatmulSimulator.simulate(new InnerProductTreesUnitHarness(p, rfP)) { module =>
+        val dut = module.wrapped
+        dut.reset.poke(true.B)
+        dut.clock.step(5)
+        dut.reset.poke(false.B)
+        dut.clock.step(1)
+        idle(dut)
+        dut.clock.step(1)
 
-        // psumBuf holds intermediate results between tiles: [row][lane]
-        val psumBuf = Array.fill(tv.numRows, p.numLanes)(0)
+        for (tv <- vectors) {
+          require(tv.nr == p.tileRows)
+          println(f"═══ Case ${tv.id}: ${tv.nr} rows × ${tv.nt} tile(s) ═══")
 
-        for (t <- 0 until tv.numTiles) {
-          val sel = if (t == 0) 0 else 2
+          for (t <- 0 until tv.nt) {
+            idle(dut)
 
-          // 1. Load weights for this tile
-          idle(dut, p)
-          loadWeights(dut, p, tv.weights(t))
+            for (lane <- 0 until p.numLanes)
+              wr(dut, WGT, lane, pack(tv.wgt(t)(lane), 8))
 
-          // 2. Stream all activation rows and collect results (pipelined)
-          val results = Array.fill(tv.numRows, p.numLanes)(0)
-          var resultsCollected = 0
-          val totalCycles = tv.numRows + p.latency
+            cmd(dut, Mxu0Op.PushWeight, tb = WGT)
+            require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
-          for (cycle <- 0 until totalCycles) {
-            // Collect output if valid
-            if (dut.io.out.valid.peek().litToBoolean) {
-              require(
-                resultsCollected < tv.numRows,
-                s"Case ${tv.id} tile $t: got more outputs than expected"
+            for (r <- 0 until tv.nr)
+              wr(dut, ACT, r, pack(tv.act(t)(r), 8))
+
+            val op = if (t == 0) Mxu0Op.Matmul else Mxu0Op.MatmulAcc
+            cmd(dut, op, tb = ACT)
+            require(w8(dut, !dut.io.computeBusy.peek().litToBoolean, p.tileRows + p.latency + 200))
+          }
+
+          cmd(dut, Mxu0Op.PopAccBF16, tb = OUT_LO)
+          require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
+
+          var cp = 0
+          var cf = 0
+
+          for (r <- 0 until tv.nr) {
+            val ol = rd(dut, OUT_LO, r)
+            val oh = rd(dut, OUT_HI, r)
+
+            for (l <- 0 until p.numLanes) {
+              val a =
+                if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
+                else ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
+              val e = tv.exp(r)(l) & 0xFFFF
+
+              val af = bf16f(a).toDouble
+              val ef = bf16f(e).toDouble
+              val (ok, errs) = tolWithErr(a, e)
+
+              outFile.println(
+                f"${tv.id}%8d $r%4d $l%4d 0x${a}%04x 0x${e}%04x ${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f ${if (ok) "PASS" else "FAIL"}"
               )
-              for (r <- 0 until p.numLanes) {
-                results(resultsCollected)(r) = dut.io.out.bits(r).peek().litValue.toInt
+
+              if (ok) cp += 1
+              else {
+                cf += 1
+                println(
+                  f"  FAIL r$r l$l: 0x${a}%04x(${af}%.6g) vs 0x${e}%04x(${ef}%.6g), rel_err=${errs.relErr}%.6e"
+                )
               }
-              resultsCollected += 1
             }
-
-            // Fire compute for this row
-            if (cycle < tv.numRows) {
-              dut.io.compute.valid.poke(true.B)
-              for (j <- 0 until p.vecLen)
-                dut.io.compute.bits.act(j).poke(tv.act(t)(cycle)(j).U)
-              for (r <- 0 until p.numLanes) {
-                dut.io.compute.bits.bias(r).poke(0.U)
-                dut.io.compute.bits.psum(r).poke(psumBuf(cycle)(r).U)
-              }
-              dut.io.compute.bits.addendSel.poke(selToEnum(sel))
-            } else {
-              dut.io.compute.valid.poke(false.B)
-            }
-
-            dut.clock.step()
           }
 
-          // Drain any remaining result
-          if (dut.io.out.valid.peek().litToBoolean && resultsCollected < tv.numRows) {
-            for (r <- 0 until p.numLanes)
-              results(resultsCollected)(r) = dut.io.out.bits(r).peek().litValue.toInt
-            resultsCollected += 1
-          }
+          outFile.flush()
 
-          require(
-            resultsCollected == tv.numRows,
-            s"Case ${tv.id} tile $t: expected ${tv.numRows} results, got $resultsCollected"
-          )
-
-          // Store results as psum for next tile
-          for (i <- 0 until tv.numRows; r <- 0 until p.numLanes)
-            psumBuf(i)(r) = results(i)(r)
+          println(f"  Result: $cp/${tv.nr * p.numLanes} passed" + (if (cf > 0) f", $cf FAILED" else ""))
+          totalPassed += cp
+          totalFailed += cf
+          idle(dut)
+          dut.clock.step(2)
         }
-
-        // 3. Compare final results against expected
-        var casePassed = 0
-        var caseFailed = 0
-
-        for (i <- 0 until tv.numRows) {
-          for (r <- 0 until p.numLanes) {
-            val actual   = psumBuf(i)(r)
-            val expected = tv.expected(i)(r)
-
-            val a16 = actual   & 0xFFFF
-            val e16 = expected & 0xFFFF
-            val aFloat = bf16BitsToFloat(a16)
-            val eFloat = bf16BitsToFloat(e16)
-
-            val ok = bf16WithinTolerance(a16, e16, absTolerance, relTolerance)
-
-            outFile.println(
-              f"${tv.id}%8d ${tv.numTiles - 1}%4d $i%4d $r%4d   0x${a16}%04x       0x${e16}%04x" +
-                f" ${aFloat}%14.4g ${eFloat}%14.4g ${if (ok) "PASS" else "FAIL"}"
-            )
-
-            if (ok) {
-              casePassed += 1
-            } else {
-              caseFailed += 1
-              val errs = bf16Errors(a16, e16)
-
-              println(
-                f"  FAIL row $i lane $r: got 0x${a16}%04x ($aFloat%.6g) " +
-                  f"exp 0x${e16}%04x ($eFloat%.6g) " +
-                  f"[absErr=${errs.absErr}%.6g relErr=${errs.relErr}%.6g] " +
-                  f"(tol: abs<=0x${absTolerance}%04x rel<${relTolerance}%.5f)"
-              )
-            }
-          }
-        }
-
-        val totalLaneChecks = tv.numRows * p.numLanes
-        println(
-          f"  Result: $casePassed/$totalLaneChecks passed" +
-            (if (caseFailed > 0) f", $caseFailed FAILED" else "")
-        )
-        totalPassed += casePassed
-        totalFailed += caseFailed
       }
-
+    } finally {
       outFile.close()
-      println(s"\nTotal: $totalPassed passed, $totalFailed failed")
-      totalFailed shouldBe 0
     }
+
+    println(s"\nTotal: $totalPassed passed, $totalFailed failed")
+    totalFailed shouldBe 0
   }
 }

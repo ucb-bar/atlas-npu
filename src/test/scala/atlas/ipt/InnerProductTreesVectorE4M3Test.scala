@@ -13,68 +13,54 @@ import atlas.common._
 import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
-import scala.util.Try
 import java.io.PrintWriter
 
-object PersistentVcsVectorSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+object PersistentVcsVectorE4M3Simulator extends Simulator[VcsBackend] with PeekPokeAPI {
   private val runDir: Path = {
-    val p = Paths.get("test_run_dir", "vector_vcs")
+    val p = Paths.get("test_run_dir", "vector_e4m3_vcs")
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
   override val backend: VcsBackend = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String = "vector_vcs"
+  override val tag: String = "vector_e4m3_vcs"
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
     CommonCompilationSettings(
       availableParallelism =
-        CommonCompilationSettings.AvailableParallelism.UpTo(
-          Runtime.getRuntime.availableProcessors()
-        )
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
     )
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
-    val cov = Backend.CoverageSettings(
-      line = true,
-      cond = true,
-      branch = true,
-      fsm = true,
-      tgl = true
-    )
+    val cov = Backend.CoverageSettings(line = true, cond = true, branch = true, fsm = true, tgl = true)
     Backend.CompilationSettings(
       coverageSettings = cov,
       coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
       simulationSettings = Backend.SimulationSettings(
         coverageSettings = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName = Some(Backend.CoverageName("vector_test_coverage"))
+        coverageName = Some(Backend.CoverageName("vector_e4m3_test_coverage"))
       )
     )
   }
 }
 
-class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+class InnerProductTreesVectorE4M3Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
   override def withFixture(test: NoArgTest): Outcome = {
     val o = super.withFixture(test)
-    if (o.isFailed) println("InnerProductTreesVectorTest=FAILED")
-    else if (o.isSucceeded) println("InnerProductTreesVectorTest=PASSED")
+    if (o.isFailed) println("InnerProductTreesVectorE4M3Test=FAILED")
+    else if (o.isSucceeded) println("InnerProductTreesVectorE4M3Test=PASSED")
     o
   }
 
-  val vectorResource = "/ipt_test_vectors/mxu_vectors.txt"
-  val absTolerance = 0x0040
-  val relTolerance = 0.01
-  val relEps = 1e-8
-
+  val vectorResource = "/ipt_test_vectors/mxu_vectors_e4m3.txt"
   val WGT = 0
   val ACT = 2
   val BIAS = 4
   val PSUM_LO = 8
   val PSUM_HI = 9
-  val OUT_LO = 10
-  val OUT_HI = 11
+  val OUT = 10
 
   case class TV(
     id: Int,
@@ -84,10 +70,17 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     wgt: Seq[Seq[Int]],
     bias: Seq[Int],
     psum: Seq[Int],
-    exp: Seq[Int]
+    scaleExp: Int,
+    expE4M3: Seq[Int],
+    reconBf16: Seq[Int]
   )
 
   def h2i(h: String): Int = Integer.parseUnsignedInt(h, 16)
+
+  def s8h(h: String): Int = {
+    val u = Integer.parseUnsignedInt(h, 16) & 0xFF
+    if ((u & 0x80) != 0) u - 256 else u
+  }
 
   def loadVectors(rp: String): Seq[TV] = {
     val s = Source.fromInputStream(getClass.getResourceAsStream(rp))
@@ -100,13 +93,21 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     var wgt = ArrayBuffer[Seq[Int]]()
     var bias = Seq.empty[Int]
     var psum = Seq.empty[Int]
-    var exp = Seq.empty[Int]
+    var se = 0
+    var ee = Seq.empty[Int]
+    var rb = Seq.empty[Int]
     var in = false
 
     def f(): Unit = {
       if (in) {
-        vs += TV(id, ct, sel, act, wgt.toSeq, bias, psum, exp)
+        vs += TV(id, ct, sel, act, wgt.toSeq, bias, psum, se, ee, rb)
         wgt = ArrayBuffer[Seq[Int]]()
+        act = Seq.empty
+        bias = Seq.empty
+        psum = Seq.empty
+        se = 0
+        ee = Seq.empty
+        rb = Seq.empty
         in = false
       }
     }
@@ -114,9 +115,8 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     try {
       for (raw <- s.getLines()) {
         val l = raw.trim
-        if (l.isEmpty) {
-          f()
-        } else if (l.startsWith("#")) {
+        if (l.isEmpty) f()
+        else if (l.startsWith("#")) {
           f()
           val p = l.drop(1).trim.split("\\s+")
           id = p(0).toInt
@@ -125,13 +125,15 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
         } else {
           val p = l.split("\\s+")
           p(0) match {
-            case "sel"  => sel = p(1).toInt
-            case "act"  => act = p.drop(1).map(h2i).toSeq
-            case "wgt"  => wgt += p.drop(2).map(h2i).toSeq
-            case "bias" => bias = p.drop(1).map(h2i).toSeq
-            case "psum" => psum = p.drop(1).map(h2i).toSeq
-            case "exp"  => exp = p.drop(1).map(h2i).toSeq
-            case _      =>
+            case "sel"       => sel = p(1).toInt
+            case "act"       => act = p.drop(1).map(h2i).toSeq
+            case "wgt"       => wgt += p.drop(2).map(h2i).toSeq
+            case "bias"      => bias = p.drop(1).map(h2i).toSeq
+            case "psum"      => psum = p.drop(1).map(h2i).toSeq
+            case "scale_exp" => se = s8h(p(1))
+            case "exp_e4m3"  => ee = p.drop(1).map(h2i).toSeq
+            case "recon_bf16"=> rb = p.drop(1).map(h2i).toSeq
+            case _           =>
           }
         }
       }
@@ -140,27 +142,6 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
 
     vs.toSeq
   }
-
-  def bf16f(b: Int): Float =
-    java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
-
-  case class Errs(absErr: Double, relErr: Double)
-
-  def tolWithErr(a: Int, e: Int): (Boolean, Errs) = {
-    val am = a & 0x7FFF
-    val em = e & 0x7FFF
-    if (am <= absTolerance && em <= absTolerance) {
-      (true, Errs(0.0, 0.0))
-    } else {
-      val af = bf16f(a).toDouble
-      val ef = bf16f(e).toDouble
-      val absErr = math.abs(af - ef)
-      val relErr = absErr / math.max(math.abs(ef), relEps)
-      (relErr <= relTolerance, Errs(absErr, relErr))
-    }
-  }
-
-  def tol(a: Int, e: Int): Boolean = tolWithErr(a, e)._1
 
   def pack(es: Seq[Int], w: Int): BigInt =
     es.zipWithIndex.foldLeft(BigInt(0)) { case (a, (v, i)) =>
@@ -231,7 +212,7 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     dut.io.cmd.valid.poke(false.B)
   }
 
-  "InnerProductTrees sequencer+TRF (VCS vectors)" should "match Python ground truth" in {
+  "InnerProductTrees sequencer+TRF (VCS vectors, E4M3)" should "match E4M3-scaled Python ground truth" in {
     val p = InnerProductTreeParams()
     val rfP = RegFileParams()
     val vectors = loadVectors(vectorResource)
@@ -240,11 +221,11 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     var passed = 0
     var failed = 0
 
-    val outFile = new PrintWriter("../../../../../src/test/resources/ipt_test_vectors/rtl_vector_outputs.txt")
-    outFile.println("# case_id case_type row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match")
+    val outFile = new PrintWriter("../../../../../src/test/resources/ipt_test_vectors/rtl_vector_e4m3_outputs.txt")
+    outFile.println("# case_id case_type row lane actual_hex expected_hex match")
 
     try {
-      PersistentVcsVectorSimulator.simulate(new InnerProductTreesUnitHarness(p, rfP)) { module =>
+      PersistentVcsVectorE4M3Simulator.simulate(new InnerProductTreesUnitHarness(p, rfP)) { module =>
         val dut = module.wrapped
         dut.reset.poke(true.B)
         dut.clock.step(5)
@@ -258,19 +239,16 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
           require(tv.wgt.length == p.numLanes)
           idle(dut)
 
-          // Load weights
           for (lane <- 0 until p.numLanes)
             wr(dut, WGT, lane, pack(tv.wgt(lane), 8))
 
           cmd(dut, Mxu0Op.PushWeight, tb = WGT)
           require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
-          // Load activations (replicate across rows)
           val ap = pack(tv.act, 8)
           for (r <- 0 until p.tileRows)
             wr(dut, ACT, r, ap)
 
-          // Preload bias/psum
           if (tv.sel == 1) {
             val bp = pack(tv.bias, 8)
             for (r <- 0 until p.tileRows)
@@ -294,30 +272,24 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
           cmd(dut, mop, tb = ACT)
           require(w8(dut, !dut.io.computeBusy.peek().litToBoolean, p.tileRows + p.latency + 200))
 
-          cmd(dut, Mxu0Op.PopAccBF16, tb = OUT_LO)
+          val e8m0 = (tv.scaleExp + 127) & 0xFF
+          cmd(dut, Mxu0Op.PopAccFP8, tb = OUT, sc = e8m0)
           require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
           var ok = true
           for (r <- 0 until p.tileRows) {
-            val ol = rd(dut, OUT_LO, r)
-            val oh = rd(dut, OUT_HI, r)
+            val op = rd(dut, OUT, r)
             for (l <- 0 until p.numLanes) {
-              val a =
-                if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
-                else ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
-              val e = tv.exp(l) & 0xFFFF
-
-              val af = bf16f(a).toDouble
-              val ef = bf16f(e).toDouble
-              val (matchOk, errs) = tolWithErr(a, e)
+              val a = ((op >> (l * 8)) & 0xFF).toInt
+              val e = tv.expE4M3(l) & 0xFF
 
               outFile.println(
-                f"${tv.id}%8d ${tv.ct}%-16s $r%4d $l%4d 0x${a}%04x 0x${e}%04x ${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f ${if (matchOk) "PASS" else "FAIL"}"
+                f"${tv.id}%8d ${tv.ct}%-16s $r%4d $l%4d 0x${a}%02x 0x${e}%02x ${if (a == e) "PASS" else "FAIL"}"
               )
 
-              if (!matchOk) {
+              if (a != e) {
                 ok = false
-                println(f"FAIL case ${tv.id} [${tv.ct}] r$r l$l: 0x${a}%04x vs 0x${e}%04x")
+                println(f"FAIL case ${tv.id} [${tv.ct}] r$r l$l: e4m3=0x${a}%02x vs 0x${e}%02x")
               }
             }
           }
@@ -333,7 +305,7 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
       outFile.close()
     }
 
-    println(s"\nVector: $passed passed, $failed failed out of ${vectors.length}")
+    println(s"E4M3 vector: $passed passed, $failed failed out of ${vectors.length}")
     failed shouldBe 0
   }
 }
