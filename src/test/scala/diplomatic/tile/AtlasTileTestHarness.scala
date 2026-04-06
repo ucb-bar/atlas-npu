@@ -96,6 +96,11 @@ class AtlasTileTestHarness(
     sinkBits = 1, sizeBits = 3,
     echoFields = Nil, requestFields = Nil, responseFields = Nil, hasBCE = false)
 
+  private val vmemBP = TLBundleParameters(
+    addressBits = 32, dataBits = 32, sourceBits = 4,
+    sinkBits = 1, sizeBits = 3,
+    echoFields = Nil, requestFields = Nil, responseFields = Nil, hasBCE = false)
+
   val io = IO(new Bundle {
     val imemWrite     = Flipped(Valid(new TestImemWritePort))
     val halted        = Output(Bool())
@@ -116,7 +121,7 @@ class AtlasTileTestHarness(
     })
   })
 
-  val core = Module(new AtlasCore(tp, imemBP, csrBP, dmaBP))
+  val core = Module(new AtlasCore(tp, imemBP, csrBP, dmaBP, vmemBP))
 
   val dmaRam = Module(new TLBundleSRAM(dramBase, dramSizeBytes, dmaBP))
   dmaRam.io.tl           <> core.io.dmaTL
@@ -130,6 +135,11 @@ class AtlasTileTestHarness(
   core.io.csrTL.a.valid := false.B
   core.io.csrTL.a.bits  := DontCare
   core.io.csrTL.d.ready := true.B
+
+  // VMEM TL — tied off 
+  core.io.vmemTL.a.valid := false.B
+  core.io.vmemTL.a.bits  := DontCare
+  core.io.vmemTL.d.ready := true.B
 
   // IMEM write FSM
   val imIdle :: imWaitD :: Nil = Enum(2)

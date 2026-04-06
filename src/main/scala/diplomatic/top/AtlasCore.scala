@@ -75,7 +75,8 @@ class AtlasCore(
   tp:     AtlasParams        = AtlasParams(),
   imemBP: TLBundleParameters,
   csrBP:  TLBundleParameters,
-  dmaBP:  TLBundleParameters
+  dmaBP:  TLBundleParameters,
+  vmemBP: TLBundleParameters
 ) extends Module {
 
   private val iptP = tp.ipt
@@ -88,6 +89,7 @@ class AtlasCore(
     val imemTL = Flipped(new TLBundle(imemBP))
     val csrTL  = Flipped(new TLBundle(csrBP))
     val dmaTL  = new TLBundle(dmaBP)
+    val vmemTL = Flipped(new TLBundle(vmemBP)) 
     val halted = Output(Bool())
     val dbg = Output(new Bundle {
       val mxu0DataBusy = Bool()
@@ -104,7 +106,7 @@ class AtlasCore(
   // ── Sub-modules ───────────────────────────────────────────────────
   val imem    = Module(new InstrMem(imemBP))
   val csrfile = Module(new CSRFile(csrBP))
-  val vmem    = Module(new ScratchpadMem(spP))
+  val vmem    = Module(new ScratchpadMem(spP, vmemBP))
   val scalar  = Module(new ScalarCore(spP))
   val dma     = Module(new DMASplitInterface(tp, dmaBP))
   val lsu     = Module(new LSU(spP, rfP))
@@ -120,6 +122,7 @@ class AtlasCore(
   csrfile.io.tl <> io.csrTL
   io.dmaTL      <> dma.io.tl
   io.halted     := scalar.io.halted
+  vmem.io.tl <> io.vmemTL
 
   // ── CSR ──────────────────────────────────────────────────────────
   csrfile.io.csr <> scalar.io.csrPort
