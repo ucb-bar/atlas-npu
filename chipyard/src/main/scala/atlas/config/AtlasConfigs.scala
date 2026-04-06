@@ -39,7 +39,7 @@ class AtlasPlainRocketConfig extends Config(
   new EE290BaseConfig
 )
 
-class AtlasRocketConfig extends Config(
+class AtlasShuttleVectorConfig extends Config(
   new WithAtlasTile() ++
   new saturn.shuttle.WithShuttleVectorUnit(256, 128, VectorParams.genParams) ++
   new chipyard.config.WithSystemBusWidth(256) ++
