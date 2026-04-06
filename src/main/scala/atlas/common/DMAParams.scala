@@ -9,4 +9,5 @@ case class DMAParams(
   maxInFlight:     Int = 64,
   maxSize:         Int = 4096,
   maxSizeBits:     Int = 13,
+  name:            String = "dma"
 )

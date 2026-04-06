@@ -2,31 +2,22 @@
 package atlas.config
 
 import org.chipsalliance.cde.config._
-import atlas.common.InnerProductTreeParams
-import sp26FPUnits.AtlasFPType
+import atlas.common.{InnerProductTreeParams}
 
-// Default matrix unit config
 class WithInnerProductTrees(
-  numLanes: Int = 16,
+  numLanes: Int = 32,
   vecLen: Int = 32,
-  pipelineDepth: Int = 2,
-  inputFmt: AtlasFPType = AtlasFPType.E4M3,
-  mulFmt: AtlasFPType = AtlasFPType.FP16,
-  biasFmt: AtlasFPType = AtlasFPType.E4M3,
-  psumFmt: AtlasFPType = AtlasFPType.BF16,
-  outputFmt: AtlasFPType = AtlasFPType.BF16,
+  tileRows: Int = 32,
+  pipelineDepth: Int = 1,
   accumIntWidth: Int = 0
 ) extends Config((site, here, up) => {
   case InnerProductTreeKey => Some(
     InnerProductTreeParams.withPipelineDepth(
       depth = pipelineDepth,
       base = InnerProductTreeParams(
-        inputFmt = inputFmt,
-        biasFmt = biasFmt,
-        psumFmt = psumFmt,
-        outputFmt = outputFmt,
         numLanes = numLanes,
         vecLen = vecLen,
+        tileRows = tileRows,
         accumIntWidth = accumIntWidth
       )
     )
