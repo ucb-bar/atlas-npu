@@ -1,249 +1,371 @@
-/*
-SystolicArrayVectorTest.scala: data-driven tests from Python-generated vectors
-
-Reads src/test/resources/mxu_vectors.txt (generate with gen_mxu_vectors.py).
-Drives SystolicArray with fractional FP values. Collects abs, ULP, rel error;
-pass/fail based on relative error only (1% or both near zero).
-
-Generate:  python3 scripts/gen_mxu_vectors.py --out src/test/resources/mxu_vectors.txt
-Run:       mill atlas.test.testOnly atlas.sa.SystolicArrayVectorTest
-*/
+// ============================================================================
+// SystolicArrayVectorTest.scala — BF16 output vector tests for the
+// systolic-array MXU under VCS.
+//
+// RUN: (from sp26-atlas-acc) 
+//    mill atlas.test.testOnly atlas.sa.SystolicArrayVectorTest 
+// ============================================================================
 
 package atlas.sa
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.util._
+import chisel3.simulator._
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
-import atlas.common.SystolicArrayParams
+import atlas.common._
+import atlas.mxu.MxuOp
+import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
+import java.io.PrintWriter
 
-class SystolicArrayVectorTest extends AnyFlatSpec with Matchers {
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
 
-  override def withFixture(test: NoArgTest): Outcome = {
-    val outcome = super.withFixture(test)
-    if (outcome.isFailed) {
-      println("SystolicArrayVectorTest=FAILED")
-    } else if (outcome.isSucceeded) {
-      println("SystolicArrayVectorTest=PASSED")
-    }
-    outcome
+object PersistentVcsSAVectorSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val runDir: Path = {
+    val p = Paths.get("test_run_dir", "sa_vector_vcs")
+    Files.createDirectories(p)
+    p.toAbsolutePath
   }
 
-  val vectorResource = "/mxu_vectors.txt"
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = "sa_vector_vcs"
+  override val workspacePath: String = runDir.toString
 
-  // Systolic array latency: rows + cols - 1
-  def latency(p: SystolicArrayParams): Int = p.rows + p.cols - 1
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
 
-  // Test vector data class (same format as IPT: weights are numLanes x vecLen = cols x rows)
-  case class TestVector(
-    id:       Int,
-    caseType: String,
-    sel:      Int,
-    act:      Seq[Int],
-    weights:  Seq[Seq[Int]], // cols x rows (IPT: numLanes x vecLen)
-    bias:     Seq[Int],
-    psum:     Seq[Int],
-    expected: Seq[Int],
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName("sa_vector_test_coverage"))
+      )
+    )
+  }
+}
+
+// ============================================================================
+// BF16 vector test
+// ============================================================================
+
+class SystolicArrayVectorTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val o = super.withFixture(test)
+    if (o.isFailed)         println("SystolicArrayVectorTest=FAILED")
+    else if (o.isSucceeded) println("SystolicArrayVectorTest=PASSED")
+    o
+  }
+
+  // ── Resource & tolerance configuration ──
+
+  val vectorResource = "/mxu_test_vectors/mxu_vectors.txt"
+
+  val absTolerance = 0x0040
+  val relTolerance = 0.01
+  val relEps       = 1e-8
+
+  // ── MREG bank IDs ──
+
+  val WGT     = 0
+  val ACT     = 2
+  val BIAS    = 4
+  val PSUM_LO = 8
+  val PSUM_HI = 9
+  val OUT_LO  = 10
+  val OUT_HI  = 11
+
+  // ── Data types ──
+
+  case class TV(
+    id:   Int,
+    ct:   String,
+    sel:  Int,
+    act:  Seq[Int],
+    wgt:  Seq[Seq[Int]],
+    bias: Seq[Int],
+    psum: Seq[Int],
+    exp:  Seq[Int]
   )
 
-  // Parser for the flat hex format (same as InnerProductTreesVectorTest)
-  //
-  //   # <id> <type>
-  //   sel <n>
-  //   act <hex> <hex> ...
-  //   wgt <r> <hex> <hex> ...    (repeated per lane/column)
-  //   bias <hex> <hex> ...
-  //   psum <hex> <hex> ...
-  //   exp <hex> <hex> ...
+  case class Errs(absErr: Double, relErr: Double)
 
-  def hexToInt(h: String): Int = Integer.parseUnsignedInt(h, 16)
+  // ── Numeric helpers ──
 
-  def loadVectors(resourcePath: String): Seq[TestVector] = {
-    val stream = getClass.getResourceAsStream(resourcePath)
-    require(
-      stream != null,
-      s"Resource '$resourcePath' not found. Run: python3 scripts/gen_mxu_vectors.py --out src/test/resources${resourcePath}",
-    )
-    val src = Source.fromInputStream(stream)
-    val vectors = ArrayBuffer[TestVector]()
+  def h2i(h: String): Int = Integer.parseUnsignedInt(h, 16)
 
-    var id       = 0
-    var caseType = ""
-    var sel      = 0
-    var act      = Seq.empty[Int]
-    var weights  = ArrayBuffer[Seq[Int]]()
-    var bias     = Seq.empty[Int]
-    var psum     = Seq.empty[Int]
-    var expected = Seq.empty[Int]
-    var inCase   = false
+  def bf16f(b: Int): Float = java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
+
+  def tolWithErr(a: Int, e: Int): (Boolean, Errs) = {
+    val am = a & 0x7FFF
+    val em = e & 0x7FFF
+    if (am <= absTolerance && em <= absTolerance) {
+      (true, Errs(0.0, 0.0))
+    } else {
+      val af     = bf16f(a).toDouble
+      val ef     = bf16f(e).toDouble
+      val absErr = math.abs(af - ef)
+      val relErr = absErr / math.max(math.abs(ef), relEps)
+      (relErr <= relTolerance, Errs(absErr, relErr))
+    }
+  }
+
+  def pack(es: Seq[Int], w: Int): BigInt =
+    es.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (v, i)) =>
+      acc | (BigInt(v & ((1 << w) - 1)) << (i * w))
+    }
+
+  // ── Vector file parser ──
+
+  def loadVectors(rp: String): Seq[TV] = {
+    val s  = Source.fromInputStream(getClass.getResourceAsStream(rp))
+    val vs = ArrayBuffer[TV]()
+
+    var id   = 0
+    var ct   = ""
+    var sel  = 0
+    var act  = Seq.empty[Int]
+    var wgt  = ArrayBuffer[Seq[Int]]()
+    var bias = Seq.empty[Int]
+    var psum = Seq.empty[Int]
+    var exp  = Seq.empty[Int]
+    var in   = false
 
     def flush(): Unit = {
-      if (inCase) {
-        vectors += TestVector(id, caseType, sel, act, weights.toSeq, bias, psum, expected)
-        weights = ArrayBuffer[Seq[Int]]()
-        inCase = false
-      }
+      if (!in) return
+      vs += TV(id, ct, sel, act, wgt.toSeq, bias, psum, exp)
+      wgt = ArrayBuffer[Seq[Int]]()
+      in  = false
     }
 
     try {
-      for (raw <- src.getLines()) {
-        val line = raw.trim
-        if (line.isEmpty) {
+      for (raw <- s.getLines()) {
+        val l = raw.trim
+        if (l.isEmpty) {
           flush()
-        } else if (line.startsWith("#")) {
+        } else if (l.startsWith("#")) {
           flush()
-          val parts = line.drop(1).trim.split("\\s+")
-          id = parts(0).toInt
-          caseType = if (parts.length > 1) parts(1) else "unknown"
-          inCase = true
+          val p = l.drop(1).trim.split("\\s+")
+          id = p(0).toInt
+          ct = if (p.length > 1) p(1) else "?"
+          in = true
         } else {
-          val parts = line.split("\\s+")
-          parts(0) match {
-            case "sel"  => sel = parts(1).toInt
-            case "act"  => act = parts.drop(1).map(hexToInt).toSeq
-            case "wgt"  => weights += parts.drop(2).map(hexToInt).toSeq
-            case "bias" => bias = parts.drop(1).map(hexToInt).toSeq
-            case "psum" => psum = parts.drop(1).map(hexToInt).toSeq
-            case "exp"  => expected = parts.drop(1).map(hexToInt).toSeq
+          val p = l.split("\\s+")
+          p(0) match {
+            case "sel"  => sel  = p(1).toInt
+            case "act"  => act  = p.drop(1).map(h2i).toSeq
+            case "wgt"  => wgt += p.drop(2).map(h2i).toSeq
+            case "bias" => bias = p.drop(1).map(h2i).toSeq
+            case "psum" => psum = p.drop(1).map(h2i).toSeq
+            case "exp"  => exp  = p.drop(1).map(h2i).toSeq
             case _      =>
           }
         }
       }
       flush()
     } finally {
-      src.close()
+      s.close()
     }
-
-    vectors.toSeq
+    vs.toSeq
   }
 
-  def bf16BitsToFloat(bits: Int): Float = Bf16Compare.bf16BitsToFloat(bits)
+  // ── DUT helpers ──
 
-  def selToEnum(sel: Int): AddendSel.Type = {
-    sel match {
-      case 0 => AddendSel.UseZero
-      case 1 => AddendSel.UseBias
-      case 2 => AddendSel.UsePsum
-      case _ => AddendSel.UseZero
-    }
+  def idle(dut: SystolicArrayUnitHarness): Unit = {
+    dut.io.cmd.valid.poke(false.B)
+    dut.io.cmd.bits.op.poke(MxuOp.PushWeight)
+    dut.io.cmd.bits.mregId.poke(0.U)
+    dut.io.cmd.bits.accSel.poke(false.B)
+    dut.io.cmd.bits.weightSlot.poke(false.B)
+    dut.io.cmd.bits.scaleE8M0.poke(127.U)
+
+    dut.io.testWrite.valid.poke(false.B)
+    dut.io.testWrite.bits.mregId.poke(0.U)
+    dut.io.testWrite.bits.row.poke(0.U)
+    dut.io.testWrite.bits.data.poke(0.U)
+
+    dut.io.testRead.valid.poke(false.B)
+    dut.io.testRead.bits.mregId.poke(0.U)
+    dut.io.testRead.bits.row.poke(0.U)
   }
 
-  // Test helpers
-  def idle(dut: SystolicArray, p: SystolicArrayParams): Unit = {
-    dut.io.computeReq.valid.poke(false.B)
-    dut.io.weightLoadReq.valid.poke(false.B)
-    for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(0.U)
-    for (j <- 0 until p.cols) {
-      dut.io.computeReq.bits.bias(j).poke(0.U)
-      dut.io.computeReq.bits.psum(j).poke(0.U)
-    }
-    dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-    dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-    dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(0.U)
-    dut.io.weightLoadReq.bits.colIdx.poke(0.U)
-    for (i <- 0 until p.rows) {
-      dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(0.U)
-    }
+  def w8(dut: SystolicArrayUnitHarness, c: => Boolean, m: Int): Boolean = {
+    var i = 0
+    while (i < m && !c) { dut.clock.step(); i += 1 }
+    c
   }
 
-  def waitForResult(dut: SystolicArray, p: SystolicArrayParams): Unit = {
-    val lat = latency(p)
-    if (lat > 1) dut.clock.step(lat - 1)
+  def wr(dut: SystolicArrayUnitHarness, bank: Int, row: Int, data: BigInt): Unit = {
+    dut.io.testWrite.valid.poke(true.B)
+    dut.io.testWrite.bits.mregId.poke(bank.U)
+    dut.io.testWrite.bits.row.poke(row.U)
+    dut.io.testWrite.bits.data.poke(data.U)
+    dut.clock.step()
+    dut.io.testWrite.valid.poke(false.B)
   }
 
-  // Test body
-  "SystolicArray" should "match Python ground truth for fractional FP vectors" in {
-    val p = SystolicArrayParams()
-    require(p.rows == 32 && p.cols == 16,
-      s"Vector test expects 32x16 array; got ${p.rows}x${p.cols}. Use default SystolicArrayParams().")
+  def rd(dut: SystolicArrayUnitHarness, bank: Int, row: Int): BigInt = {
+    dut.io.testRead.valid.poke(true.B)
+    dut.io.testRead.bits.mregId.poke(bank.U)
+    dut.io.testRead.bits.row.poke(row.U)
+    dut.clock.step()
+    dut.io.testRead.valid.poke(false.B)
+    require(dut.io.testReadOut.valid.peek().litToBoolean)
+    dut.io.testReadOut.bits.peek().litValue
+  }
 
+  def cmd(
+    dut: SystolicArrayUnitHarness,
+    op:  MxuOp.Type,
+    tb:  Int     = 0,
+    as:  Boolean = false,
+    ws:  Boolean = false,
+    sc:  Int     = 127
+  ): Unit = {
+    dut.io.cmd.valid.poke(true.B)
+    dut.io.cmd.bits.op.poke(op)
+    dut.io.cmd.bits.mregId.poke(tb.U)
+    dut.io.cmd.bits.accSel.poke(as.B)
+    dut.io.cmd.bits.weightSlot.poke(ws.B)
+    dut.io.cmd.bits.scaleE8M0.poke(sc.U)
+    dut.clock.step()
+    dut.io.cmd.valid.poke(false.B)
+  }
+
+  // ── Main test ──
+
+  "SystolicArray sequencer+MREG (VCS vectors)" should "match Python ground truth" in {
+    val p       = SystolicArrayParams()
+    val mregP   = MregParams()
+    val saLat   = p.rows + p.cols - 1
     val vectors = loadVectors(vectorResource)
-    require(vectors.nonEmpty, "No test vectors found. Run gen_mxu_vectors.py first.")
+    require(vectors.nonEmpty)
 
-    simulate(new SystolicArray(p)) { dut =>
-      var passed = 0
-      var failed = 0
+    var passed = 0
+    var failed = 0
 
-      val outFile =
-        new java.io.PrintWriter("../../../../../src/test/resources/systolic_array_vector_outputs.txt")
-      outFile.println("# case_id case_type        col  actual_hex expected_hex  actual_float expected_float abs_err rel_err ulp match")
+    val outFile = new PrintWriter(
+      "../../../../../src/test/resources/mxu_test_vectors/sa_rtl_vector_outputs.txt"
+    )
+    outFile.println(
+      "# case_id case_type row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match"
+    )
 
-      for (tv <- vectors) {
-        idle(dut, p)
+    try {
+      PersistentVcsSAVectorSimulator.simulate(new SystolicArrayUnitHarness(p, mregP)) { module =>
+        val dut = module.wrapped
 
-        // Load weights one column at a time via weightsTensorReg
-        // IPT weights[lane][col] -> SA col j gets weights(j) (column j = output j)
-        dut.io.weightLoadReq.valid.poke(true.B)
-        dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-        dut.io.weightLoadReq.bits.weightBufWriteSel.poke(0.U)
-        for (j <- 0 until p.cols) {
-          dut.io.weightLoadReq.bits.colIdx.poke(j.U)
-          for (i <- 0 until p.rows) {
-            dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(tv.weights(j)(i).U)
-            dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
+        // Reset sequence
+        dut.reset.poke(true.B)
+        dut.clock.step(5)
+        dut.reset.poke(false.B)
+        dut.clock.step(1)
+        idle(dut)
+        dut.clock.step(1)
+
+        for (tv <- vectors) {
+          require(tv.act.length == p.rows)
+          require(tv.wgt.length == p.cols)
+          idle(dut)
+
+          // ── Load weights ──
+          for (lane <- 0 until p.cols)
+            wr(dut, WGT, lane, pack(tv.wgt(lane), 8))
+          cmd(dut, MxuOp.PushWeight, tb = WGT)
+          require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
+
+          // ── Load activations (replicated across all rows) ──
+          val ap = pack(tv.act, 8)
+          for (r <- 0 until p.accSize)
+            wr(dut, ACT, r, ap)
+
+          // ── Optionally preload accumulator ──
+          if (tv.sel == 1) {
+            val bp = pack(tv.bias, 8)
+            for (r <- 0 until p.accSize)
+              wr(dut, BIAS, r, bp)
+            cmd(dut, MxuOp.PushAccFP8, tb = BIAS)
+            require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
+          } else if (tv.sel == 2) {
+            val pl = pack(tv.psum.take(16), 16)
+            val ph = pack(tv.psum.drop(16), 16)
+            for (r <- 0 until p.accSize) {
+              wr(dut, PSUM_LO, r, pl)
+              wr(dut, PSUM_HI, r, ph)
+            }
+            cmd(dut, MxuOp.PushAccBF16, tb = PSUM_LO)
+            require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
           }
-          dut.clock.step()
-        }
-        dut.io.weightLoadReq.valid.poke(false.B)
 
-        // Fire compute
-        dut.io.computeReq.valid.poke(true.B)
-        for (i <- 0 until p.rows)
-          dut.io.computeReq.bits.activationRow(i).poke(tv.act(i).U)
-        for (j <- 0 until p.cols) {
-          dut.io.computeReq.bits.bias(j).poke(tv.bias(j).U)
-          dut.io.computeReq.bits.psum(j).poke(tv.psum(j).U)
-        }
-        dut.io.computeReq.bits.addendSel.poke(selToEnum(tv.sel))
-        dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-        dut.clock.step()
-        dut.io.computeReq.valid.poke(false.B)
+          // ── Compute ──
+          val mop = if (tv.sel == 0) MxuOp.Matmul else MxuOp.MatmulAcc
+          cmd(dut, mop, tb = ACT)
+          require(w8(dut, !dut.io.computeBusy.peek().litToBoolean, p.accSize + saLat + 200))
 
-        waitForResult(dut, p)
+          // ── Pop as BF16 ──
+          cmd(dut, MxuOp.PopAccBF16, tb = OUT_LO)
+          require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
-        // Check outputs
-        dut.io.outputRow.valid.expect(true.B)
-        var caseOk = true
-        for (j <- 0 until p.cols) {
-          val actual   = dut.io.outputRow.bits(j).peek().litValue
-          val expected = tv.expected(j)
+          // ── Compare outputs ──
+          var ok = true
+          for (r <- 0 until p.accSize) {
+            val ol = rd(dut, OUT_LO, r)
+            val oh = rd(dut, OUT_HI, r)
 
-          val a16 = actual.toInt & 0xFFFF
-          val e16 = expected & 0xFFFF
+            for (l <- 0 until p.cols) {
+              val a = if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
+                      else        ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
+              val e = tv.exp(l) & 0xFFFF
 
-          val aFloat = bf16BitsToFloat(a16)
-          val eFloat = bf16BitsToFloat(e16)
+              val af              = bf16f(a).toDouble
+              val ef              = bf16f(e).toDouble
+              val (matchOk, errs) = tolWithErr(a, e)
 
-          val (ok, errs) = Bf16Compare.compare(a16, e16)
-
-          outFile.println(
-            f"${tv.id}%8d ${tv.caseType}%-16s $j%4d   0x${a16}%04x       0x${e16}%04x " +
-              f"$aFloat%14.6g $eFloat%14.6g ${errs.absErr}%10.6g ${errs.relErr}%10.6g ${errs.ulpDiff}%4d ${if (ok) "PASS" else "FAIL"}"
-          )
-
-          if (!ok) {
-            caseOk = false
-            println(
-              f"  FAIL case ${tv.id} col $j: got 0x${a16}%04x ($aFloat%.6g) " +
-                f"exp 0x${e16}%04x ($eFloat%.6g) " +
-                f"[absErr=${errs.absErr}%.6g relErr=${errs.relErr}%.6g ulp=${errs.ulpDiff}] " +
-                f"(pass: rel<=1%% or both near zero)"
-            )
+              outFile.println(
+                f"${tv.id}%8d ${tv.ct}%-16s $r%4d $l%4d 0x${a}%04x 0x${e}%04x " +
+                f"${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f " +
+                f"${if (matchOk) "PASS" else "FAIL"}"
+              )
+              if (!matchOk) {
+                ok = false
+                println(
+                  f"FAIL case ${tv.id} [${tv.ct}] r$r l$l: " +
+                  f"got 0x${a}%04x, expected 0x${e}%04x   [rel err = ${errs.relErr}%.5f]"
+                )
+              }
+            }
           }
-        }
 
-        if (caseOk) passed += 1 else failed += 1
+          outFile.flush()
+          if (ok) passed += 1 else failed += 1
+          idle(dut)
+          dut.clock.step(2)
+        }
       }
-
+    } finally {
       outFile.close()
-      println(s"\nWrote sp26-atlas-acc/src/test/resources/systolic_array_vector_outputs.txt")
-      println(s"Vector test results: $passed passed, $failed failed out of ${vectors.length}")
-      failed shouldBe 0
     }
+
+    println(s"\nVector: $passed passed, $failed failed out of ${vectors.length}")
+    failed shouldBe 0
   }
 }

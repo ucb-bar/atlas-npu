@@ -6,7 +6,7 @@ Updated: default num_lanes=32, num_rows=32 (matching tileRows)
 
 Usage:
     python3 scripts/gen_mxu_full_matmul.py --ref fp32_accum --inner-dim 16384 \
-      --out src/test/resources/ipt_test_vectors/mxu_full_matmul_vectors.txt
+      --out src/test/resources/mxu_test_vectors/mxu_full_matmul_vectors.txt
 """
 
 import argparse, struct

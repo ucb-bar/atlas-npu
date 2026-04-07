@@ -1,6 +1,6 @@
 /*
 PcControl.scala
-Program counter control for the SALU.
+Program counter control for the scalar pipeline frontend.
 
 The PC is a word index (not byte address) starting at 0.
 It directly addresses IMEM words. Increments by 1 per cycle.
@@ -19,12 +19,17 @@ package atlas.scalar
 import chisel3._
 import chisel3.util._
 
+/** Program-counter controller with architectural delay-slot handling.
+  *
+  * @param resetPC  Initial IMEM word index after reset.
+  */
 class PcControl(resetPC: Int = 0) extends Module {
   val io = IO(new Bundle {
     val redirect        = Input(Bool())
     val redirect_target = Input(UInt(32.W))
     val stall           = Input(Bool())
     val halted          = Input(Bool())
+    val softReset       = Input(Bool())
     val pc              = Output(UInt(32.W))   // word index for IMEM fetch
     val s1_pc           = Output(UInt(32.W))   // PC of instruction in execute
     val s1_valid        = Output(Bool())
@@ -39,7 +44,12 @@ class PcControl(resetPC: Int = 0) extends Module {
   val delay_count  = RegInit(0.U(2.W))
   val saved_target = Reg(UInt(32.W))
 
-  when(io.halted) {
+  when(io.softReset) {
+    pc_reg        := resetPC.U
+    fetch_pc_reg  := resetPC.U
+    s1_valid_reg  := false.B
+    delay_count   := 0.U
+  }.elsewhen(io.halted) {
     s1_valid_reg := false.B
   }.elsewhen(io.stall) {
     fetch_pc_reg := pc_reg

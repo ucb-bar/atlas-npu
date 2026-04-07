@@ -1,3 +1,10 @@
+// ============================================================================
+// SquareCubeRec.scala — Vector square / cube lane box.
+//
+// Reuses a small multiply pipeline to compute either x^2 or x^3 lane-wise and
+// packages the resulting vector back into a Decoupled response.
+// ============================================================================
+
 package atlas.vector
 
 
@@ -27,6 +34,12 @@ class SquareCubeResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundl
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector square / cube pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class SquareCubeRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val w = BF16T.wordWidth
     val expW = BF16T.expWidth

@@ -25,8 +25,8 @@ class SystolicArrayDefaultConfig extends Config(
 
 class AtlasDefaultConfig extends Config(
   new WithInnerProductTrees ++
-  new WithDMA() ++
-  new WithScratchpad(base=0x20000000L, sizeBytes = (1 << 20)) ++ 
+  new WithDma() ++
+  new WithVmem(base=0x20000000L, capacityBytes = (256 * 1024)) ++ 
   new WithAtlasTile()
   // ++ new WithSystolicArray
   // ++ new WithVectorUnit

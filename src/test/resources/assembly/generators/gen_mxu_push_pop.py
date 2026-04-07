@@ -2,7 +2,7 @@
 """
 gen_mxu_push_pop.py
 
-Generate test vectors for mxu_push_pop_check.S.
+Generate test vectors for mxu*_push_pop_check.S.
 
 This generator matches the assembly exactly:
 
@@ -12,12 +12,12 @@ DRAM layout (32-byte DMA beats / "word offsets"):
   Output:       word offsets 64..95   (1024 bytes)
 
 Assembly flow:
-  DRAM -> VMEM -> VLOAD -> TRF -> MXU -> TRF -> VSTORE -> VMEM -> DRAM
+  DRAM -> VMEM -> VLOAD -> TRF -> MXU* -> TRF -> VSTORE -> VMEM -> DRAM
 
 Important:
 - Inputs are 32x32 E4M3 tiles, all values = 1.0 (0x38)
-- MXU computes a 32x32 matmul
-- VMATPOP.BF16.MXU0 2, 0 writes BF16 results starting at m2
+- MXU* computes a 32x32 matmul
+- VMATPOP.BF16.MXU* 2, 0 writes BF16 results starting at m2
 - VSTORE 2 writes only 1024 bytes, i.e. only the lower 16 BF16 columns
   (32 rows x 16 cols x 2 bytes = 1024 bytes)
 

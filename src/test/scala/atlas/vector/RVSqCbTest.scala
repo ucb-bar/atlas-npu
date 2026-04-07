@@ -1,3 +1,10 @@
+// ============================================================================
+// RVSqCbTest.scala — Legacy square/cube vector tests kept in commented form.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.RVSqCbTest
+// ============================================================================
+
 // package atlas.vector
 
 // import chisel3._
@@ -5,7 +12,7 @@
 // import org.scalatest.flatspec.AnyFlatSpec
 // import org.scalatest.matchers.should.Matchers
 // import org.scalatest.Outcome 
-// import atlas.common.VPUParams
+// import atlas.common.VpuParams
 // import svsim.CommonCompilationSettings.Timescale.Unit.s
 // import sp26FPUnits.hardfloat._
 // import sp26FPUnits.AtlasFPType.BF16
@@ -26,7 +33,7 @@
 //     }
 //     //----------- CI/CD INCLUDE --------------
 
-//     val p = VPUParams()
+//     val p = VpuParams()
 
 //     it should "Verify the correctness of square" in {
 //         simulate(new SquareCubeRec(BF16)) { dut =>

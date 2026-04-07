@@ -4,7 +4,7 @@ convert_exp_to_e4m3.py: convert BF16 expected outputs to E4M3 with scaling
 
 Usage:
   python3 scripts/convert_exp_to_e4m3.py \
-    src/test/resources/mxu_vectors.txt src/test/resources/ipt_test_vectors/mxu_vectors_e4m3.txt
+    src/test/resources/mxu_test_vectors/mxu_vectors.txt src/test/resources/mxu_test_vectors/mxu_vectors_e4m3.txt
 """
 
 import argparse, math, struct

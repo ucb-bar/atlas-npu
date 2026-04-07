@@ -52,8 +52,12 @@ class DecodedInstr extends Bundle {
   val is_mem_load  = Bool()   // any scalar load (LB/LH/LW/LBU/LHU/SELD)
   val is_mem_store = Bool()   // any scalar store (SB/SH/SW)
   val is_lsu       = Bool()   // vload or vstore
+  val is_ecall     = Bool()   // environment call (halt)
+  val is_ebreak    = Bool()   // breakpoint (halt)
+  val is_delay     = Bool()   // frontend delay (stall for imm cycles)
 }
 
+/** Combinational decoder for the scalar ISA plus Atlas custom extensions. */
 class ScalarDecoder extends Module {
   val io = IO(new Bundle {
     val instr   = Input(UInt(32.W))
@@ -150,6 +154,14 @@ class ScalarDecoder extends Module {
      dec.mem_cmd === MEM_LBU || dec.mem_cmd === MEM_LHU || dec.mem_cmd === MEM_SELD)
   dec.is_mem_store := dec.mem_cmd === MEM_SB || dec.mem_cmd === MEM_SH || dec.mem_cmd === MEM_SW
   dec.is_lsu       := dec.lsu_cmd =/= LSU_NONE
+
+  // ecall:  fixed encoding 0x00000073
+  dec.is_ecall  := dec.legal && io.instr === "h00000073".U
+  // ebreak: fixed encoding 0x00100073
+  dec.is_ebreak := dec.legal && io.instr === "h00100073".U
+  // delay:  opcode=1100111, funct3=001
+  dec.is_delay  := dec.legal &&
+    io.instr(6, 0) === "b1100111".U && funct3 === "b001".U
 
   io.decoded := dec
 }

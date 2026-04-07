@@ -1,3 +1,10 @@
+// ============================================================================
+// DivSqrtRec.scala — Vector reciprocal / square-root lane box.
+//
+// Wraps one HardFloat div/sqrt pipeline per lane and repackages the lane-wise
+// results into a vector response bundle.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -29,6 +36,12 @@ class DivSqrtResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val exceptionFlags = Vec(numLanes, UInt(5.W))
 }
 
+/** Vector reciprocal / square-root wrapper.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new DivSqrtReq(BF16T.wordWidth, numLanes, tagWidth)))

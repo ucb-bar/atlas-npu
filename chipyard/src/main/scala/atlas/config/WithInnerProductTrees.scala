@@ -2,22 +2,24 @@
 package atlas.config
 
 import org.chipsalliance.cde.config._
-import atlas.common.{InnerProductTreeParams}
+import atlas.common.InnerProductTreeParams
+import atlas.mxu.MxuParams
 
+// Default inner-product-trees config
 class WithInnerProductTrees(
-  numLanes: Int = 32,
-  vecLen: Int = 32,
-  tileRows: Int = 32,
-  pipelineDepth: Int = 1,
+  arrayRows: Int = 32,
+  arrayCols: Int = 32,
+  pipelineDepth: Int = 2,
   accumIntWidth: Int = 0
 ) extends Config((site, here, up) => {
   case InnerProductTreeKey => Some(
     InnerProductTreeParams.withPipelineDepth(
       depth = pipelineDepth,
       base = InnerProductTreeParams(
-        numLanes = numLanes,
-        vecLen = vecLen,
-        tileRows = tileRows,
+        mxu = MxuParams(
+          arrayRows = arrayRows,
+          arrayCols = arrayCols
+        ),
         accumIntWidth = accumIntWidth
       )
     )

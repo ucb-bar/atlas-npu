@@ -1,8 +1,18 @@
-/*
-DMA.scala — 8-channel DMA engine.
-Transfers data between external memory (via TileLink) and VMEM (via line ports).
-Width matches system bus / VMEM line width (default 256 bits = 32 bytes).
-*/
+// ============================================================================
+// DMA.scala — Multi-channel DMA engine for the Atlas accelerator.
+//
+// Transfers data between external DRAM (via TileLink) and on-chip VMEM
+// (via dedicated line-granularity read/write ports).
+//
+// Data-path width matches DMA_ALIGN (default 32 bytes = 256 bits per beat).
+//
+// Key components:
+//   • TileLinkAdapter  – Thin shim that maps generic load/store requests
+//                        onto TileLink Channel-A/D transactions.
+//   • DmaEngine        – Queues DMA commands across DMA_CHANNELS slots,
+//                        sequences TileLink requests, and steers data
+//                        between VMEM and DRAM.
+// ============================================================================
 
 package atlas.dma
 
@@ -11,195 +21,362 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
 
-class MemRequest(bytes: Int, tagBits: Int) extends Bundle {
-  val addr    = UInt(64.W)
-  val data    = UInt((bytes * 8).W)
-  val mask    = UInt(bytes.W)
-  val tag     = UInt(tagBits.W)
-  val isStore = Bool()
+// ============================================================================
+// Generic memory-request / memory-response bundles
+// ============================================================================
+
+/** A single load or store request to external memory.
+  *
+  * @param dataBytes  Width of the data bus in bytes (e.g. 32 for 256-bit).
+  * @param tagBits    Width of the source-ID / tag field.
+  */
+class MemoryRequest(dataBytes: Int, tagBits: Int) extends Bundle {
+  val address = UInt(64.W)              // Byte address in DRAM.
+  val data    = UInt((dataBytes * 8).W) // Write payload (ignored for loads).
+  val mask    = UInt(dataBytes.W)       // Per-byte write-enable mask.
+  val tag     = UInt(tagBits.W)         // Caller-assigned ID echoed in resp.
+  val isStore = Bool()                  // true → store, false → load.
 }
 
-class MemResponse(bytes: Int, tagBits: Int) extends Bundle {
-  val data = UInt((bytes * 8).W)
-  val tag  = UInt(tagBits.W)
+/** Response returned for a completed memory transaction. */
+class MemoryResponse(dataBytes: Int, tagBits: Int) extends Bundle {
+  val data = UInt((dataBytes * 8).W)    // Read payload (undefined for stores).
+  val tag  = UInt(tagBits.W)            // Echoed source ID.
 }
 
-class DMAInterface(
-  widthBytes: Int, tagBits: Int, tlBundleParams: TLBundleParameters
+// ============================================================================
+// TileLinkAdapter — maps MemoryRequest/Response onto TileLink A/D channels
+// ============================================================================
+
+/** Adapter that converts a simple ready/valid request interface into TileLink
+  * Get and PutFullData messages.  Responses are forwarded back with the
+  * original tag so the caller can match them to outstanding requests.
+  *
+  * @param dataBytes       Beat width in bytes.
+  * @param tagBits         Source-ID width (limits max in-flight requests).
+  * @param tlBundleParams  TileLink bundle parameters for the attached port.
+  */
+class TileLinkAdapter(
+    dataBytes:      Int,
+    tagBits:        Int,
+    tlBundleParams: TLBundleParameters
 ) extends Module {
-  private val offBits = log2Ceil(widthBytes)
+
+  // Number of low-order address bits to mask for natural alignment.
+  private val alignmentBits = log2Ceil(dataBytes)
+
+  // ---------- IO ----------
 
   val io = IO(new Bundle {
-    val req           = Flipped(Decoupled(new MemRequest(widthBytes, tagBits)))
-    val resp          = Valid(new MemResponse(widthBytes, tagBits))
-    val busy          = Output(Bool())
-    val inflightCount = Output(UInt(tagBits.W))
-    val tl            = new TLBundle(tlBundleParams)
+    /** Incoming load/store requests. */
+    val request  = Flipped(Decoupled(new MemoryRequest(dataBytes, tagBits)))
+    /** Outgoing responses (one per completed TileLink D-channel beat). */
+    val response = Valid(new MemoryResponse(dataBytes, tagBits))
+    /** High when at least one request is still in flight. */
+    val busy     = Output(Bool())
+    /** Saturating count of outstanding (un-answered) requests. */
+    val inFlightCount = Output(UInt(tagBits.W))
+    /** Raw TileLink port to the system interconnect. */
+    val tl = new TLBundle(tlBundleParams)
   })
 
-  val inflights = RegInit(0.U(tagBits.W))
-  when(io.tl.a.fire || io.tl.d.fire) {
-    inflights := inflights + io.tl.a.fire - io.tl.d.fire
-  }
-  io.busy          := inflights =/= 0.U
-  io.inflightCount := inflights
+  // ---------- In-flight tracking ----------
 
-  io.req.ready  := io.tl.a.ready
-  io.tl.a.valid := io.req.valid
-  val alignedAddr = (io.req.bits.addr >> offBits.U) << offBits.U
-  io.tl.a.bits.opcode  := Mux(io.req.bits.isStore, TLMessages.PutFullData, TLMessages.Get)
+  val inFlightReg = RegInit(0.U(tagBits.W))
+
+  when(io.tl.a.fire || io.tl.d.fire) {
+    inFlightReg := inFlightReg + io.tl.a.fire - io.tl.d.fire
+  }
+
+  io.busy          := inFlightReg =/= 0.U
+  io.inFlightCount := inFlightReg
+
+  // ---------- Channel A (requests) ----------
+
+  io.request.ready := io.tl.a.ready
+  io.tl.a.valid    := io.request.valid
+
+  // Force the address to be naturally aligned to the beat width.
+  val alignedAddress = (io.request.bits.address >> alignmentBits.U) << alignmentBits.U
+
+  io.tl.a.bits.opcode  := Mux(io.request.bits.isStore,
+                               TLMessages.PutFullData,
+                               TLMessages.Get)
   io.tl.a.bits.param   := 0.U
-  io.tl.a.bits.size    := log2Ceil(widthBytes).U
-  io.tl.a.bits.source  := io.req.bits.tag
-  io.tl.a.bits.address := alignedAddr
-  io.tl.a.bits.mask    := Mux(io.req.bits.isStore, io.req.bits.mask,
-                               Fill(widthBytes, 1.U(1.W)))
-  io.tl.a.bits.data    := io.req.bits.data
+  io.tl.a.bits.size    := alignmentBits.U
+  io.tl.a.bits.source  := io.request.bits.tag
+  io.tl.a.bits.address := alignedAddress
+  io.tl.a.bits.mask    := Mux(io.request.bits.isStore,
+                               io.request.bits.mask,
+                               Fill(dataBytes, 1.U(1.W)))
+  io.tl.a.bits.data    := io.request.bits.data
   io.tl.a.bits.corrupt := false.B
 
-  io.tl.d.ready     := true.B
-  io.resp.valid      := io.tl.d.valid
-  io.resp.bits.data  := io.tl.d.bits.data
-  io.resp.bits.tag   := io.tl.d.bits.source
+  // ---------- Channel D (responses) ----------
+
+  io.tl.d.ready        := true.B   // Always accept responses immediately.
+  io.response.valid     := io.tl.d.valid
+  io.response.bits.data := io.tl.d.bits.data
+  io.response.bits.tag  := io.tl.d.bits.source
 }
 
-// DMA instruction type
-object dma_instruction_type extends ChiselEnum {
-  val LOAD_TO_VMEM, STORE_FROM_VMEM = Value
-}
-import dma_instruction_type._
+// ============================================================================
+// DMA command definition
+// ============================================================================
 
-class dma_instruction(spP: ScratchpadParams, dmaP: DMAParams) extends Bundle {
-  val type_of_instruction = dma_instruction_type()
-  val channelId    = UInt(3.W)
-  val vmemLineAddr = UInt(spP.lineAddrBits.W) // starting VMEM line address
-  val address      = UInt(64.W)               // DRAM byte address
-  val size         = UInt(dmaP.maxSizeBits.W) // transfer size in bytes
+/** Direction of a DMA transfer. */
+object DmaDirection extends ChiselEnum {
+  val LoadToVmem    = Value  // DRAM → VMEM  (read from memory).
+  val StoreFromVmem = Value  // VMEM → DRAM  (write to memory).
 }
 
-class DMASplitInterface(
-  params: AtlasParams, tlBundleParams: TLBundleParameters
+import DmaDirection._
+
+/** A single DMA command describing one bulk transfer.
+  *
+  * @param vmemParams  VMEM geometry (provides `lineAddrBits`).
+  * @param dmaParams   DMA engine parameters (provides `transferSizeBits`).
+  */
+class DmaCommand(vmemParams: VmemParams, dmaParams: DmaParams) extends Bundle {
+  val opType       = DmaDirection()                       // Load or store.
+  val channelId    = UInt(dmaParams.channelIdBits.W)      // Owning DMA channel.
+  val vmemLineAddr = UInt(vmemParams.lineAddrBits.W)      // First VMEM line address.
+  val dramAddress  = UInt(64.W)                           // Starting DRAM byte addr.
+  val transferSize = UInt(dmaParams.transferSizeBits.W)   // Transfer length in bytes.
+}
+
+// ============================================================================
+// DmaEngine — the main DMA controller
+// ============================================================================
+
+/** DMA engine that accepts bulk-transfer commands and sequences them into
+  * individual TileLink beats, reading from or writing to VMEM as needed.
+  *
+  * Architecture overview (for a single transfer):
+  *
+  *   LOAD (DRAM → VMEM):
+  *     1. Issue TileLink Get requests, one per VMEM line.
+  *     2. On each response, write the returned data to the VMEM line whose
+  *        address was recorded in `sourceIdTable` at issue time.
+  *
+  *   STORE (VMEM → DRAM):
+  *     1. Pre-read VMEM lines into `storeDataQueue`.
+  *     2. Issue TileLink PutFullData requests, attaching queued data.
+  *     3. Count D-channel acknowledgements to know when done.
+  *
+  * Commands are queued in a circular buffer (`commandQueue`) and processed
+  * strictly in order, one at a time, on both the request and response paths.
+  *
+  * @param params          Top-level Atlas parameters.
+  * @param tlBundleParams  TileLink bundle parameters for the memory port.
+  */
+class DmaEngine(
+    params:         AtlasParams,
+    tlBundleParams: TLBundleParameters
 ) extends Module {
-  private val dma_p  = params.dma
-  private val sp_p   = params.scratchpad
-  private val tagBits    = dma_p.tagBits
-  private val widthBytes = dma_p.widthBytes
-  private val dataW      = widthBytes * 8
+
+  // Shorthand for sub-parameter objects.
+  private val dmaP  = params.dma
+  private val vmemP = params.vmem
+
+  private val tagBits   = dmaP.tagBits
+  private val beatBytes = dmaP.beatBytes
+  private val beatBits  = beatBytes * 8
+
+  // ---------- IO ----------
 
   val io = IO(new Bundle {
-    val inst_received = Flipped(Valid(new dma_instruction(sp_p, dma_p)))
-    val busy          = Output(Vec(dma_p.numInterfaces, Bool()))
+    /** New DMA command from the control path. */
+    val command     = Flipped(Valid(new DmaCommand(vmemP, dmaP)))
+    /** Per-channel busy flags (high while that channel's transfer is active). */
+    val channelBusy = Output(Vec(dmaP.numChannels, Bool()))
 
-    // VMEM line ports (replacing TRF ports)
-    val vmemRead     = Valid(new ScratchpadLineReadPort(sp_p))
-    val vmemReadData = Flipped(Valid(UInt(dataW.W)))
-    val vmemWrite    = Valid(new ScratchpadLineWritePort(sp_p))
+    // VMEM line-granularity access ports.
+    val vmemRead     = Valid(new VmemLineReadPort(vmemP))
+    val vmemReadData = Flipped(Valid(UInt(beatBits.W)))
+    val vmemWrite    = Valid(new VmemLineWritePort(vmemP))
 
-    val tl            = new TLBundle(tlBundleParams)
-    val debug_inflight = Output(UInt(tagBits.W))
+    /** TileLink port to the system interconnect. */
+    val tl = new TLBundle(tlBundleParams)
+
+    /** Debug: number of TileLink transactions currently in flight. */
+    val debugInFlight = Output(UInt(tagBits.W))
   })
 
-  val tlClient = Module(new DMAInterface(widthBytes, tagBits, tlBundleParams))
-  io.tl <> tlClient.io.tl
+  // ==========================================================================
+  // TileLink adapter instantiation
+  // ==========================================================================
 
-  val instructions_queue   = Reg(Vec(dma_p.numInterfaces, new dma_instruction(sp_p, dma_p)))
-  val active_instructions  = RegInit(VecInit(Seq.fill(dma_p.numInterfaces)(false.B)))
-  val empty_index          = RegInit(0.U(dma_p.numInterfaceBits.W))
-  val inst_requesting_index = RegInit(0.U(dma_p.numInterfaceBits.W))
-  val inst_responding_index = RegInit(0.U(dma_p.numInterfaceBits.W))
-  val busy_slots = RegInit(VecInit(Seq.fill(dma_p.numInterfaces)(false.B)))
-  io.busy := busy_slots
+  val tlAdapter = Module(new TileLinkAdapter(beatBytes, tagBits, tlBundleParams))
+  io.tl <> tlAdapter.io.tl
 
-  val request_transaction_counter  = RegInit(0.U((sp_p.lineAddrBits + 1).W))
-  val respond_transaction_counter  = RegInit(0.U((sp_p.lineAddrBits + 1).W))
-  val sourceIdCounter              = RegInit(0.U(tagBits.W))
-  val inflightCount = tlClient.io.inflightCount
+  // ==========================================================================
+  // Command queue (circular buffer, one slot per DMA channel)
+  // ==========================================================================
 
-  // Total transactions = size / widthBytes (each transaction moves one VMEM line)
-  val total_request_transactions_needed =
-    instructions_queue(inst_requesting_index).size >> log2Ceil(widthBytes).U
-  val total_respond_transactions_needed =
-    instructions_queue(inst_responding_index).size >> log2Ceil(widthBytes).U
+  /** Circular buffer holding pending DMA commands. */
+  val commandQueue = Reg(Vec(dmaP.numChannels, new DmaCommand(vmemP, dmaP)))
+  /** Slot-valid flags for the command queue. */
+  val slotActive   = RegInit(VecInit(Seq.fill(dmaP.numChannels)(false.B)))
+  /** Per-channel busy flags exposed to the outside world. */
+  val channelBusy  = RegInit(VecInit(Seq.fill(dmaP.numChannels)(false.B)))
+  io.channelBusy := channelBusy
 
-  // Source ID table: maps in-flight tag → VMEM line address
-  val sourceID_table = Reg(Vec(dma_p.maxInFlight, UInt(sp_p.lineAddrBits.W)))
+  // Circular-buffer indices (wrap via +%).
+  val enqueueIdx  = RegInit(0.U(dmaP.channelIdBits.W))  // Next free slot.
+  val requestIdx  = RegInit(0.U(dmaP.channelIdBits.W))  // Slot being issued.
+  val responseIdx = RegInit(0.U(dmaP.channelIdBits.W))  // Slot being retired.
 
-  val is_current_inst_store =
-    instructions_queue(inst_requesting_index).type_of_instruction === STORE_FROM_VMEM
+  // ==========================================================================
+  // Per-command beat counters
+  // ==========================================================================
 
-  // ── VMEM read port (for STORE_FROM_VMEM: read VMEM → send to DRAM) ──
-  val storeReadCounter = RegInit(0.U(sp_p.lineAddrBits.W))
-  val storeReadDone    = RegInit(false.B)
+  /** Number of TileLink beats issued so far for the current request-side cmd. */
+  val requestBeatCount  = RegInit(0.U((vmemP.lineAddrBits + 1).W))
+  /** Number of TileLink responses received for the current response-side cmd. */
+  val responseBeatCount = RegInit(0.U((vmemP.lineAddrBits + 1).W))
 
-  io.vmemRead.valid     := active_instructions(inst_requesting_index) &&
-                           is_current_inst_store && !storeReadDone
-  io.vmemRead.bits.addr := instructions_queue(inst_requesting_index).vmemLineAddr +
-                           storeReadCounter
+  // Total beats required = transferSize / beatBytes.
+  val requestBeatsNeeded =
+    commandQueue(requestIdx).transferSize >> log2Ceil(beatBytes).U
+  val responseBeatsNeeded =
+    commandQueue(responseIdx).transferSize >> log2Ceil(beatBytes).U
 
-  when(active_instructions(inst_requesting_index) && is_current_inst_store && !storeReadDone) {
-    storeReadCounter := storeReadCounter + 1.U
-    when(storeReadCounter === (total_request_transactions_needed - 1.U)) {
-      storeReadDone := true.B
+  // Rolling source-ID counter (wraps within tagBits width).
+  val nextSourceId = RegInit(0.U(tagBits.W))
+
+  // Current in-flight count from the TileLink adapter.
+  val currentInFlight = tlAdapter.io.inFlightCount
+
+  // Is the command at `requestIdx` a VMEM→DRAM store?
+  val currentCmdIsStore =
+    commandQueue(requestIdx).opType === StoreFromVmem
+
+  // ==========================================================================
+  // Source-ID → VMEM address lookup table
+  // ==========================================================================
+
+  /** Maps an in-flight source ID back to the VMEM line address that should
+    * receive the load response.  Only meaningful for LoadToVmem commands.
+    */
+  val sourceIdTable = Reg(Vec(dmaP.maxInFlight, UInt(vmemP.lineAddrBits.W)))
+
+  // ==========================================================================
+  // VMEM read sequencer (used by STORE commands)
+  // ==========================================================================
+  //
+  // Before we can issue PutFullData beats we must pre-read the corresponding
+  // VMEM lines.  A small FSM walks through the lines and pushes the returned
+  // data into `storeDataQueue`.  The queue decouples the VMEM read latency
+  // from the TileLink request path.
+
+  val vmemReadBeatCount = RegInit(0.U(vmemP.lineAddrBits.W))
+  val vmemReadComplete  = RegInit(false.B)
+
+  io.vmemRead.valid := slotActive(requestIdx) &&
+                       currentCmdIsStore &&
+                       !vmemReadComplete
+
+  io.vmemRead.bits.addr := commandQueue(requestIdx).vmemLineAddr +
+                           vmemReadBeatCount
+
+  when(slotActive(requestIdx) && currentCmdIsStore && !vmemReadComplete) {
+    vmemReadBeatCount := vmemReadBeatCount + 1.U
+    when(vmemReadBeatCount === (requestBeatsNeeded - 1.U)) {
+      vmemReadComplete := true.B
     }
   }
 
-  // Queue for store data read from VMEM
-  val request_data_queue = Module(new Queue(UInt(dataW.W), 128))
-  request_data_queue.io.enq.valid := io.vmemReadData.valid
-  request_data_queue.io.enq.bits  := io.vmemReadData.bits
-  request_data_queue.io.deq.ready := tlClient.io.req.fire &&
-    active_instructions(inst_requesting_index) && is_current_inst_store
+  /** FIFO holding VMEM data waiting to be sent as TileLink store payloads. */
+  val storeDataQueue = Module(new Queue(UInt(beatBits.W), entries = 128))
 
-  // ── Instruction enqueueing ───────────────────────────────────────
-  when(io.inst_received.valid) {
-    instructions_queue(empty_index)  := io.inst_received.bits
-    active_instructions(empty_index) := true.B
-    empty_index                      := empty_index +% 1.U
-    busy_slots(io.inst_received.bits.channelId) := true.B
+  storeDataQueue.io.enq.valid := io.vmemReadData.valid
+  storeDataQueue.io.enq.bits  := io.vmemReadData.bits
+
+  // Dequeue one entry each time a store beat fires on TileLink.
+  storeDataQueue.io.deq.ready := tlAdapter.io.request.fire &&
+                                 slotActive(requestIdx) &&
+                                 currentCmdIsStore
+
+  // ==========================================================================
+  // Command enqueueing
+  // ==========================================================================
+
+  when(io.command.valid) {
+    commandQueue(enqueueIdx) := io.command.bits
+    slotActive(enqueueIdx)   := true.B
+    channelBusy(io.command.bits.channelId) := true.B
+    enqueueIdx := enqueueIdx +% 1.U
   }
 
-  // ── TileLink request issue ───────────────────────────────────────
-  tlClient.io.req.valid := active_instructions(inst_requesting_index) &&
-    (inflightCount < dma_p.maxInFlight.U) &&
-    Mux(is_current_inst_store, request_data_queue.io.deq.valid, true.B)
-  tlClient.io.req.bits.addr    := instructions_queue(inst_requesting_index).address +
-                                  (request_transaction_counter * widthBytes.U)
-  tlClient.io.req.bits.tag     := sourceIdCounter
-  tlClient.io.req.bits.isStore := is_current_inst_store
-  tlClient.io.req.bits.data    := request_data_queue.io.deq.bits
-  tlClient.io.req.bits.mask    := Fill(widthBytes, 1.U(1.W))
+  // ==========================================================================
+  // TileLink request issue (Channel A)
+  // ==========================================================================
+  //
+  // We issue one beat per clock whenever:
+  //   • The current slot is active,
+  //   • The in-flight limit has not been reached,
+  //   • For stores: the data queue has a payload ready.
 
-  when(tlClient.io.req.fire) {
-    // Record VMEM destination for this source ID (for loads)
-    sourceID_table(sourceIdCounter) :=
-      instructions_queue(inst_requesting_index).vmemLineAddr + request_transaction_counter
-    request_transaction_counter := request_transaction_counter + 1.U
-    sourceIdCounter             := sourceIdCounter +% 1.U
-    when(request_transaction_counter === (total_request_transactions_needed - 1.U)) {
-      request_transaction_counter := 0.U
-      storeReadCounter := 0.U
-      storeReadDone := false.B
-      inst_requesting_index := inst_requesting_index +% 1.U
+  tlAdapter.io.request.valid :=
+    slotActive(requestIdx) &&
+    (currentInFlight < dmaP.maxInFlight.U) &&
+    Mux(currentCmdIsStore, storeDataQueue.io.deq.valid, true.B)
+
+  tlAdapter.io.request.bits.address := commandQueue(requestIdx).dramAddress +
+                                       (requestBeatCount * beatBytes.U)
+  tlAdapter.io.request.bits.tag     := nextSourceId
+  tlAdapter.io.request.bits.isStore := currentCmdIsStore
+  tlAdapter.io.request.bits.data    := storeDataQueue.io.deq.bits
+  tlAdapter.io.request.bits.mask    := Fill(beatBytes, 1.U(1.W))
+
+  when(tlAdapter.io.request.fire) {
+    // Record which VMEM line this source ID maps to (needed for load writeback).
+    sourceIdTable(nextSourceId) :=
+      commandQueue(requestIdx).vmemLineAddr + requestBeatCount
+
+    requestBeatCount := requestBeatCount + 1.U
+    nextSourceId     := nextSourceId +% 1.U
+
+    // If this was the last beat, advance to the next queued command.
+    when(requestBeatCount === (requestBeatsNeeded - 1.U)) {
+      requestBeatCount  := 0.U
+      vmemReadBeatCount := 0.U
+      vmemReadComplete  := false.B
+      requestIdx        := requestIdx +% 1.U
     }
   }
 
-  // ── Response handling (LOAD: write to VMEM) ──────────────────────
-  val respTag = tlClient.io.resp.bits.tag
+  // ==========================================================================
+  // Response handling (Channel D) — VMEM writeback for loads
+  // ==========================================================================
 
-  io.vmemWrite.valid     := (instructions_queue(inst_responding_index).type_of_instruction === LOAD_TO_VMEM) &&
-                            tlClient.io.resp.valid
-  io.vmemWrite.bits.addr := sourceID_table(respTag)
-  io.vmemWrite.bits.data := tlClient.io.resp.bits.data
+  val responseTag = tlAdapter.io.response.bits.tag
 
-  when(tlClient.io.resp.valid) {
-    respond_transaction_counter := respond_transaction_counter + 1.U
-    when(respond_transaction_counter === (total_respond_transactions_needed - 1.U)) {
-      busy_slots(instructions_queue(inst_responding_index).channelId) := false.B
-      active_instructions(inst_responding_index) := false.B
-      respond_transaction_counter := 0.U
-      inst_responding_index := inst_responding_index +% 1.U
+  // For LoadToVmem: write the incoming data to the VMEM line recorded in
+  // `sourceIdTable` when the request was originally issued.
+  io.vmemWrite.valid :=
+    (commandQueue(responseIdx).opType === LoadToVmem) &&
+    tlAdapter.io.response.valid
+
+  io.vmemWrite.bits.addr := sourceIdTable(responseTag)
+  io.vmemWrite.bits.data := tlAdapter.io.response.bits.data
+
+  // Count responses and retire the command once all beats are accounted for.
+  when(tlAdapter.io.response.valid) {
+    responseBeatCount := responseBeatCount + 1.U
+
+    when(responseBeatCount === (responseBeatsNeeded - 1.U)) {
+      channelBusy(commandQueue(responseIdx).channelId) := false.B
+      slotActive(responseIdx) := false.B
+      responseBeatCount       := 0.U
+      responseIdx             := responseIdx +% 1.U
     }
   }
 
-  io.debug_inflight := inflightCount
+  // ==========================================================================
+  // Debug output
+  // ==========================================================================
+
+  io.debugInFlight := currentInFlight
 }

@@ -2,8 +2,8 @@
 AtlasAssemblyTests.scala
 ScalaTest suite that discovers and runs all assembly .S test programs.
 
-Run all:
-  sbt "project sp26atlas" "testOnly atlas.tile.assembly.AtlasAssemblyTests"
+Run all: (from the chipyard root)
+  SBT_OPTS="-Xmx8G -Xss4M -XX:+UseG1GC" sbt "project sp26atlas" "testOnly atlas.tile.assembly.AtlasAssemblyTests"
 */
 
 package atlas.tile.assembly
@@ -26,7 +26,7 @@ class AtlasAssemblyTests extends AnyFlatSpec with Matchers {
 
   private def category(file: String): String = {
     val name = file.stripSuffix(".S")
-    if (name.startsWith("mxu_"))         "MXU"
+    if      (name.startsWith("mxu"))     "MXU"
     else if (name.startsWith("xlu_"))    "XLU"
     else if (name.startsWith("dma_"))    "DMA"
     else if (name.startsWith("alu_"))    "Scalar"

@@ -1,8 +1,16 @@
+// ============================================================================
+// Assembler.scala — Tiny assembler for diplomatic Atlas tile tests.
+//
+// Parses a small assembly subset, resolves local labels, expands `LI`, and
+// lowers mnemonics into instruction words using [[RV32Encode]].
+// ============================================================================
+
 package atlas.tile
 
 import scala.collection.mutable.ArrayBuffer
 import RV32Encode._
 
+/** Minimal assembler used by the diplomatic tile test framework. */
 object Assembler {
   private def parseReg(s: String): Int = {
     val n = s.stripPrefix("x").stripSuffix(",").trim.toInt
@@ -73,6 +81,9 @@ object Assembler {
             case "JAL"    => code += JAL(parseReg(p(1)), resolve(p(2))); pc += 1
             case "JALR"   => code += JALR(parseReg(p(1)), parseReg(p(2)), parseImm(p(3)).toInt); pc += 1
             case "FENCE"  => code += FENCE; pc += 1
+            case "ECALL"  => code += ECALL; pc += 1
+            case "EBREAK" => code += EBREAK; pc += 1
+            case "DELAY"  => code += DELAY(parseImm(p(1)).toInt); pc += 1
             case "CSRW"   => code += CSRRW(0, parseImm(p(2)).toInt, parseReg(p(1))); pc += 1
             case "CSRR"   => code += CSRRS(parseReg(p(1)), parseImm(p(2)).toInt, 0); pc += 1
             case "CSRRW"  => code += CSRRW(parseReg(p(1)), parseImm(p(2)).toInt, parseReg(p(3))); pc += 1
@@ -128,6 +139,10 @@ object Assembler {
             case "VRECIP.BF16"  => code += VRECIP_BF16(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
             case "VEXP"         => code += VEXP(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
             case "VRELU"        => code += VRELU(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
+            case "VLI.ALL"      => code += VLI_ALL(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
+            case "VLI.ROW"      => code += VLI_ROW(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
+            case "VLI.COL"      => code += VLI_COL(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
+            case "VLI.ONE"      => code += VLI_ONE(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
             case "VTRPOSE.XLU"  => code += VTRPOSE_XLU(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
             case "VREDMAX.XLU"  => code += VREDMAX_XLU(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1
             case "VREDSUM.XLU"  => code += VREDSUM_XLU(parseImm(p(1)).toInt, parseImm(p(2)).toInt); pc += 1

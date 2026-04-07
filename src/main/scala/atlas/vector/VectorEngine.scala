@@ -1,11 +1,22 @@
+// ============================================================================
+// VectorEngine.scala — Standalone vector-engine wrapper.
+//
+// Dispatches one decoded vector operation to the appropriate lane-box module
+// and forwards the resulting vector back through a small Decoupled interface.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import atlas.common.VPUParams
+import atlas.common.VpuParams
 import sp26FPUnits._
 
-class VectorEngine(val p: VPUParams) extends Module {
+/** Standalone vector-engine wrapper around the lane-box functional units.
+  *
+  * @param p  Vector-engine geometry and floating-point parameters.
+  */
+class VectorEngine(val p: VpuParams) extends Module {
   val io = IO(new Bundle {
     val in1   = Flipped(Decoupled(new VPUInput(p)))
     val in2   = Flipped(Decoupled(new VPUInput(p)))

@@ -1,3 +1,11 @@
+// ============================================================================
+// VectorEngineTestDriver.scala — Integration tests for the vector engine using
+// test vectors from vpu_vectors.txt.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.VectorEngineTestDriver
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -7,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
-import atlas.common.VPUParams
+import atlas.common.VpuParams
 
 class VectorEngineTestDriver extends AnyFlatSpec with Matchers {
 
@@ -220,7 +228,7 @@ class VectorEngineTestDriver extends AnyFlatSpec with Matchers {
 
   // Test body
   "Vector Engine" should "match Python ground truth for fractional FP vectors" in {
-    val p = VPUParams()
+    val p = VpuParams()
     val vectors = loadVectors(vectorResource)
     require(vectors.nonEmpty, "No test vectors found. Run gen_vpu_vectors.py first.")
 

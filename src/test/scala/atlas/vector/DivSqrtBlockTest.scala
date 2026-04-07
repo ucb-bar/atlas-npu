@@ -1,3 +1,11 @@
+// ============================================================================
+// DivSqrtBlockTest.scala — BF16 divide/sqrt block tests for the vector
+// datapath.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.DivSqrtBlockTest
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._

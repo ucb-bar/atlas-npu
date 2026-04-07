@@ -53,7 +53,7 @@ object IDecode {
 
     JAL   -> List(Y, ALU_ADD, BR_X, OP1_PC,  OP2_IMM, IMM_J, Y, Y, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     JALR  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, Y, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
-    DELAY -> List(Y, ALU_X,  BR_X, OP1_X,   OP2_X,   IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    DELAY -> List(Y, ALU_X,  BR_X, OP1_X,   OP2_X,   IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     LUI   -> List(Y, ALU_PASS_B, BR_X, OP1_X,  OP2_IMM, IMM_U, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     AUIPC -> List(Y, ALU_ADD,    BR_X, OP1_PC, OP2_IMM, IMM_U, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
@@ -64,8 +64,8 @@ object IDecode {
     CSRRWI -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_Z, Y, N, N, CSR_RWI, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     CSRRSI -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_Z, Y, N, N, CSR_RSI, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     CSRRCI -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_Z, Y, N, N, CSR_RCI, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
-    ECALL  -> List(N, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
-    EBREAK -> List(N, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    ECALL  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    EBREAK -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     FENCE  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
     // ── Scalar loads/stores ─────────────────────────────────────────
@@ -90,7 +90,7 @@ object IDecode {
     DMA_CONFIG_ANY -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_CONFIG, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     DMA_WAIT_ANY   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_WAIT,   MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
-    // ── MXU0/1, VPU, VLI, XLU — unchanged ──────────────────────────
+    // ── MXU0/1, VPU, VLI, XLU ──────────────────────────────────────
     VMATPUSH_W_MXU0     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_WEIGHT,   MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATPUSH_AFP8_MXU0  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_ACC_FP8,  MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATPUSH_ABF16_MXU0 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_ACC_BF16, MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),

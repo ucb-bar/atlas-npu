@@ -128,13 +128,9 @@
 pass:
     ADDI  x1, x0, 1
     CSRRW x0, 0xC10, x1    # DBG0 = 1 (PASS)
-    JAL   x0, 0
-    NOP
-    NOP
+    ECALL
 
 fail:
     CSRRW x0, 0xC10, x28   # DBG0 = test case number
-    JAL   x0, 0
-    NOP
-    NOP
+    ECALL
     

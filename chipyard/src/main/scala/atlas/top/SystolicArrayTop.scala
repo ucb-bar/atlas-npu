@@ -3,7 +3,8 @@ package atlas.top
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import atlas.config._
-import atlas.sa._
+import atlas.common.MregParams
+import atlas.sa.{SystolicArrayTop => SystolicArrayTopInner}
 
 class SystolicArrayTop(implicit p: Parameters) extends Module {
   val params = p(SystolicArrayKey).getOrElse(
@@ -13,7 +14,7 @@ class SystolicArrayTop(implicit p: Parameters) extends Module {
     )
   )
 
-  val inner = Module(new SystolicArray(params))
+  val inner = Module(new SystolicArrayTopInner(params, MregParams()))
 
   val io = IO(inner.io.cloneType)
   io <> inner.io
