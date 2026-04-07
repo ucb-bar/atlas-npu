@@ -1,6 +1,8 @@
 # Assembly tests — one .S filename per line
+# RUN (from the chipyard root): SBT_OPTS="-Xmx8G -Xss4M -XX:+UseG1GC" sbt "project sp26atlas" "testOnly atlas.tile.assembly.AtlasAssemblyTests"
 
 # ---- Scalar core ----
+scalar_isa.S
 alu_basic.S
 branch_delay_slots.S
 jal_jalr.S
@@ -11,11 +13,18 @@ mem_scalar.S
 dma_loopback.S
 dma_stress.S
 
-# ---- MXU: matrix unit ----
-mxu_push_pop.S
-mxu_single_input_tile_bf16.S
-mxu_single_output_tile_bf16.S
-mxu_qk_scores.S
+# ---- MXU0: systolic array ----
+mxu0_push_pop.S
+mxu0_single_input_tile_bf16.S
+mxu0_single_output_tile_bf16.S
+mxu0_qk_scores.S
+
+# ---- MXU1: inner product trees ----
+# dependency: pip install numba torch
+mxu1_push_pop.S
+mxu1_single_input_tile_bf16.S
+mxu1_single_output_tile_bf16.S
+mxu1_qk_scores.S
 
 # ---- XLU: transpose unit ----
 xlu_transpose.S

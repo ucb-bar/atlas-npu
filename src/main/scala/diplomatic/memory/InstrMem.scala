@@ -10,6 +10,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
 
+/** SRAM-backed instruction memory with TileLink load and scalar fetch ports.
+  *
+  * @param tlBundleParams  TileLink bundle parameters for the program-load port.
+  */
 class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
   val io = IO(new Bundle {
     val fetch = Flipped(new ImemFetchPort)

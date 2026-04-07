@@ -10,8 +10,8 @@ import testchipip.soc.SubsystemInjectorKey
 import atlas.tile.{AtlasTileKey, AtlasTileParams,AtlasTileInjector}
 
 class WithAtlasTile(
-  base:            BigInt               = AtlasParams().scratchpad.base,
-  size:            BigInt               = AtlasParams().scratchpad.sizeBytes,
+  base:            BigInt               = AtlasParams().vmem.base,
+  size:            BigInt               = AtlasParams().vmem.sizeBytes,
   busWhere:        TLBusWrapperLocation = SBUS,
   name:            String               = "atlas-tile",
   disableMonitors: Boolean              = false,

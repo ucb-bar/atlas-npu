@@ -37,7 +37,5 @@ loop:
 done:
     ADDI  x30, x0, 1
     CSRRW x0, 0xC10, x30
-    JAL   x0, 0
-    NOP
-    NOP
+    ECALL
     

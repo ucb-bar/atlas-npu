@@ -55,13 +55,9 @@
 pass:
     ADDI  x1, x0, 1
     CSRRW x0, 0xC10, x1
-    JAL   x0, 0
-    NOP
-    NOP
+    ECALL
 
 fail:
     CSRRW x0, 0xC10, x28
-    JAL   x0, 0
-    NOP
-    NOP
+    ECALL
     

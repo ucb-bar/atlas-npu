@@ -1,8 +1,17 @@
+/*
+ScalarALU.scala
+Combinational integer ALU for the scalar pipeline.
+
+Implements the RV32I arithmetic, logical, comparison, and shift operations
+selected by the decoder's ALU function field.
+*/
+
 package atlas.scalar
 
 import chisel3._
 import chisel3.util._
 
+/** Combinational scalar ALU for 32-bit integer operations. */
 class ScalarALU extends Module {
   val io = IO(new Bundle {
     val op  = Input(UInt(4.W))

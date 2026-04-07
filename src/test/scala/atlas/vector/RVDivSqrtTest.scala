@@ -1,3 +1,11 @@
+// ============================================================================
+// RVDivSqrtTest.scala — BF16 divide/sqrt vector tests for the RV-style vector
+// datapath.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.RVDivSqrtTest
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -5,7 +13,7 @@ import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome 
-import atlas.common.VPUParams
+import atlas.common.VpuParams
 import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
@@ -27,7 +35,7 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers {
    //----------- CI/CD INCLUDE --------------
 
 
-    val p = VPUParams()
+    val p = VpuParams()
     
     def fpTobf(f: Float): Int = {
         val x = java.lang.Float.floatToRawIntBits(f)

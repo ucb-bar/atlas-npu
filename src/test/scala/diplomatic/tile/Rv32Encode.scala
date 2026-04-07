@@ -1,5 +1,13 @@
+// ============================================================================
+// Rv32Encode.scala — Integer helpers for encoding Atlas test instructions.
+//
+// Provides small constructors for RV32I instructions plus the Atlas-specific
+// DMA, MXU, VPU, XLU, and vector-immediate encodings used by the tile tests.
+// ============================================================================
+
 package atlas.tile
 
+/** Instruction-encoding helpers used by the diplomatic tile tests. */
 object RV32Encode {
   private def rType(f7: Int, rs2: Int, rs1: Int, f3: Int, rd: Int, op: Int): Int =
     ((f7 & 0x7F) << 25) | ((rs2 & 0x1F) << 20) | ((rs1 & 0x1F) << 15) |
@@ -30,6 +38,8 @@ object RV32Encode {
   private def vlsType(imm12: Int, rs1: Int, f2: Int, vd: Int, op: Int): Int =
     ((imm12 & 0xFFF) << 20) | ((rs1 & 0x1F) << 15) |
     ((f2 & 0x3) << 13) | ((vd & 0x3F) << 7) | (op & 0x7F)
+  private def viType(imm16: Int, f3: Int, vd: Int, op: Int): Int =
+    ((imm16 & 0xFFFF) << 16) | ((f3 & 0x7) << 13) | ((vd & 0x3F) << 7) | (op & 0x7F)
 
   // ── RV32I ─────────────────────────────────────────────────────
   def ADD(rd: Int, rs1: Int, rs2: Int): Int  = rType(0x00, rs2, rs1, 0, rd, 0x33)
@@ -69,6 +79,9 @@ object RV32Encode {
   def CSRRCI(rd: Int, csr: Int, z: Int): Int  = iType(csr, z & 0x1F, 7, rd, 0x73)
   def NOP: Int = ADDI(0, 0, 0)
   def FENCE: Int = iType(0, 0, 0, 0, 0x0F)
+  def ECALL: Int = 0x00000073
+  def EBREAK: Int = 0x00100073
+  def DELAY(imm: Int): Int = iType(imm, 0, 1, 0, 0x67)
 
   // ── Scalar loads/stores ───────────────────────────────────────
   def LB(rd: Int, rs1: Int, imm: Int): Int   = iType(imm, rs1, 0, rd, 0x03)
@@ -128,4 +141,10 @@ object RV32Encode {
   def VTRPOSE_XLU(vd: Int, vs1: Int): Int          = vrType(0x00, 0, vs1, vd, 0x6B)
   def VREDMAX_XLU(vd: Int, vs1: Int): Int          = vrType(0x01, 0, vs1, vd, 0x6B)
   def VREDSUM_XLU(vd: Int, vs1: Int): Int          = vrType(0x02, 0, vs1, vd, 0x6B)
+
+  // ── VLI (opcode 0x5F), VI format ──────────────────────────────
+  def VLI_ALL(vd: Int, imm: Int): Int = viType(imm, 0, vd, 0x5F)
+  def VLI_ROW(vd: Int, imm: Int): Int = viType(imm, 1, vd, 0x5F)
+  def VLI_COL(vd: Int, imm: Int): Int = viType(imm, 2, vd, 0x5F)
+  def VLI_ONE(vd: Int, imm: Int): Int = viType(imm, 3, vd, 0x5F)
 }

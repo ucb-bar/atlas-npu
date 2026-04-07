@@ -1,8 +1,17 @@
+/*
+ScalarRegFile.scala
+Integer register file for the scalar pipeline.
+
+Provides three combinational read ports and one write port over the RV32I
+general-purpose register set, with x0 hard-wired to zero.
+*/
+
 package atlas.scalar
 
 import chisel3._
 import chisel3.util._
 
+/** 32-entry scalar integer register file with x0 hard-wired to zero. */
 class ScalarRegFile extends Module {
   val io = IO(new Bundle {
     val rs1_addr = Input(UInt(5.W))

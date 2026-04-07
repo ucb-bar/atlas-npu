@@ -416,17 +416,97 @@ def assemble(source):
     return code
 
 def emit_c_file(code, test_name="test"):
-    lines = []
-    lines.append(f"/* Auto-generated from {test_name} by assembler.py */")
-    lines.append("#include <stdint.h>")
-    lines.append("")
-    lines.append("static uint32_t program[] = {")
+    n = len(code)
+    array_body = ""
     for i, word in enumerate(code):
-        comma = "," if i < len(code) - 1 else ""
-        lines.append(f"    0x{word & 0xFFFFFFFF:08X}{comma}")
-    lines.append("};")
-    lines.append("")
-    return "\n".join(lines) + "\n"
+        comma = "," if i < n - 1 else ""
+        array_body += f"    0x{word & 0xFFFFFFFF:08X}{comma}\n"
+
+    return f"""\
+/* Auto-generated from {test_name} by assembler.py */
+#include <stdio.h>
+#include <stdint.h>
+
+static inline uint32_t mmio_read32(uintptr_t a) {{ return *(volatile uint32_t *)a; }}
+static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t *)a = v; }}
+
+/* Atlas memory map */
+#define ATLAS_IMEM_BASE   0x00020000UL
+#define ATLAS_CSR_BASE    0x00030000UL
+
+#define CSR_CYCLE         (ATLAS_CSR_BASE + 0x00)
+#define CSR_INSTCNT       (ATLAS_CSR_BASE + 0x04)
+#define CSR_STATUS        (ATLAS_CSR_BASE + 0x08)
+#define CSR_ILLEGAL_PC    (ATLAS_CSR_BASE + 0x0C)
+#define CSR_DBG0          (ATLAS_CSR_BASE + 0x10)
+#define CSR_DBG1          (ATLAS_CSR_BASE + 0x14)
+#define CSR_SOFT_RESET    (ATLAS_CSR_BASE + 0x18)
+
+#define ATLAS_PROGRAM_LEN {n}
+
+static const uint32_t atlas_program[ATLAS_PROGRAM_LEN] = {{
+{array_body}}};
+
+int main(void)
+{{
+    uint32_t i;
+    int fail = 0;
+
+    printf("Writing program to ATLAS IMEM (%u words) ...\\n", ATLAS_PROGRAM_LEN);
+    for (i = 0; i < ATLAS_PROGRAM_LEN; i++) {{
+        mmio_write32(ATLAS_IMEM_BASE + i * 4, atlas_program[i]);
+    }}
+    asm volatile ("fence" ::: "memory");
+
+    printf("Reading back IMEM and verifying ...\\n");
+    for (i = 0; i < ATLAS_PROGRAM_LEN; i++) {{
+        uint32_t got = mmio_read32(ATLAS_IMEM_BASE + i * 4);
+        if (got != atlas_program[i]) {{
+            printf("MISMATCH word[%u]: expected 0x%08x, got 0x%08x\\n",
+                   i, atlas_program[i], got);
+            fail++;
+        }}
+    }}
+
+    if (fail) {{
+        printf("FAIL: %d IMEM mismatches\\n", fail);
+        return 1;
+    }}
+
+    printf("IMEM readback OK\\n");
+
+    printf("Issuing soft-reset to start Atlas core ...\\n");
+    mmio_write32(CSR_SOFT_RESET, 1);
+    asm volatile ("fence" ::: "memory");
+
+    printf("Waiting for Atlas core to execute ...\\n");
+    uint32_t dbg0 = 0;
+    for (i = 0; i < 200000000U; i++) {{
+        dbg0 = mmio_read32(CSR_DBG0);
+        if (dbg0 != 0) break;
+    }}
+
+    uint32_t cycles   = mmio_read32(CSR_CYCLE);
+    uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
+    uint32_t status   = mmio_read32(CSR_STATUS);
+
+    printf("  DBG0    = %u\\n", dbg0);
+    printf("  cycles  = %u\\n", cycles);
+    printf("  instcnt = %u\\n", instcnt);
+    printf("  status  = 0x%08x\\n", status);
+
+    if (dbg0 == 0) {{
+        printf("FAIL: Atlas core did not complete (timeout)\\n");
+        return 1;
+    }} else if (dbg0 == 1) {{
+        printf("PASS: {test_name} passed\\n");
+        return 0;
+    }} else {{
+        printf("FAIL: {test_name} test %u failed\\n", dbg0);
+        return 1;
+    }}
+}}
+"""
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────

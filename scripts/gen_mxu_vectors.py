@@ -14,7 +14,7 @@ Output format (one block per test):
     exp <hex> <hex> ...
 
 Usage:
-    python3 scripts/gen_mxu_vectors.py --ref fp32_accum --out src/test/resources/ipt_test_vectors/mxu_vectors.txt --num 50 --seed 42
+    python3 scripts/gen_mxu_vectors.py --ref fp32_accum --out src/test/resources/mxu_test_vectors/mxu_vectors.txt --num 50 --seed 42
 """
 
 import argparse, struct

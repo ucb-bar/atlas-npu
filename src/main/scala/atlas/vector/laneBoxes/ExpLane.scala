@@ -1,3 +1,10 @@
+// ============================================================================
+// ExpLane.scala — Vector exp / exp2 lane box.
+//
+// Uses lookup-table-assisted per-lane exponentiation and forwards the vector
+// result through a Decoupled response interface.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -24,6 +31,12 @@ class FPEXResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector exp / exp2 pipeline.
+  *
+  * @param fpT       Floating-point format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class Exp(fpT: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new FPEXReq(fpT.wordWidth, numLanes, tagWidth)))

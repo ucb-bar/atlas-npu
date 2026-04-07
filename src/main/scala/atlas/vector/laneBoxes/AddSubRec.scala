@@ -1,3 +1,10 @@
+// ============================================================================
+// AddSubRec.scala — Vector BF16 add/subtract lane box.
+//
+// Accepts two BF16 vectors plus per-lane enables, performs vector addition or
+// subtraction, and returns the result with request metadata forwarded.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -6,6 +13,7 @@ import sp26FPUnits._
 import sp26FPUnits.hardfloat._      
 import sp26FPUnits.hardfloat.consts._
 
+/** Small helpers shared across the vector lane-box pipelines. */
 trait HasPipelineParams {
     def numFP16Lanes = 16
     def tagWidth = 16
@@ -44,6 +52,12 @@ class AddSubResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector BF16 add/subtract pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class AddSubRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new AddSubReq(BF16T.wordWidth, numLanes, tagWidth)))

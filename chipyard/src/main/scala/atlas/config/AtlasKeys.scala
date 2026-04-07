@@ -2,16 +2,13 @@
 package atlas.config
 
 import org.chipsalliance.cde.config.Field
-import atlas.common.InnerProductTreeParams
-import atlas.common.SystolicArrayParams
-import atlas.common.DMAParams
-import atlas.common.ScratchpadParams
+import atlas.common.{InnerProductTreeParams, SystolicArrayParams, DmaParams, VmemParams}
 
 // Per-subunit keys
 case object InnerProductTreeKey extends Field[Option[InnerProductTreeParams]](None)
 case object SystolicArrayKey extends Field[Option[SystolicArrayParams]](None)
-case object DMAKey extends Field[Option[DMAParams]](None)
-case object ScratchpadKey extends Field[Seq[ScratchpadParams]](Nil)
+case object DmaKey extends Field[Option[DmaParams]](None)
+case object VmemKey extends Field[Seq[VmemParams]](Nil)
 
 
 // Add more subunit keys here as Atlas grows:

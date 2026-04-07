@@ -1,3 +1,15 @@
+// ============================================================================
+// InnerProductTreesVectorTest.scala — BF16 output vector tests for IPT.
+//
+// Loads single-tile test vectors from mxu_vectors.txt, runs matmul
+// (optionally with FP8 bias or BF16 partial-sum preload), pops the
+// accumulator as BF16, and compares each lane against Python ground truth
+// using combined absolute + relative tolerance.
+//
+// RUN: (from sp26-atlas-acc) 
+//    mill atlas.test.testOnly atlas.ipt.InnerProductTreesVectorTest 
+// ============================================================================
+
 package atlas.ipt
 
 import chisel3._
@@ -10,141 +22,108 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
 import atlas.common._
+import atlas.mxu.MxuOp
 import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 import java.io.PrintWriter
 
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
+
 object PersistentVcsVectorSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
   private val runDir: Path = {
     val p = Paths.get("test_run_dir", "vector_vcs")
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
-  override val backend: VcsBackend = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String = "vector_vcs"
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = "vector_vcs"
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
     CommonCompilationSettings(
       availableParallelism =
-        CommonCompilationSettings.AvailableParallelism.UpTo(
-          Runtime.getRuntime.availableProcessors()
-        )
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
     )
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true,
-      cond = true,
-      branch = true,
-      fsm = true,
-      tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true
     )
     Backend.CompilationSettings(
-      coverageSettings = cov,
+      coverageSettings  = cov,
       coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
       simulationSettings = Backend.SimulationSettings(
-        coverageSettings = cov,
+        coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName = Some(Backend.CoverageName("vector_test_coverage"))
+        coverageName      = Some(Backend.CoverageName("vector_test_coverage"))
       )
     )
   }
 }
 
+// ============================================================================
+// BF16 vector test
+// ============================================================================
+
 class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
   override def withFixture(test: NoArgTest): Outcome = {
     val o = super.withFixture(test)
-    if (o.isFailed) println("InnerProductTreesVectorTest=FAILED")
+    if (o.isFailed)         println("InnerProductTreesVectorTest=FAILED")
     else if (o.isSucceeded) println("InnerProductTreesVectorTest=PASSED")
     o
   }
 
-  val vectorResource = "/ipt_test_vectors/mxu_vectors.txt"
+  // ── Resource & tolerance configuration ──
+
+  val vectorResource = "/mxu_test_vectors/mxu_vectors.txt"
+
   val absTolerance = 0x0040
   val relTolerance = 0.01
-  val relEps = 1e-8
+  val relEps       = 1e-8   // floor for relative-error denominator
 
-  val WGT = 0
-  val ACT = 2
-  val BIAS = 4
+  // ── MREG bank IDs ──
+
+  val WGT     = 0
+  val ACT     = 2
+  val BIAS    = 4
   val PSUM_LO = 8
   val PSUM_HI = 9
-  val OUT_LO = 10
-  val OUT_HI = 11
+  val OUT_LO  = 10
+  val OUT_HI  = 11
 
+  // ── Data types ──
+
+  /**
+   * One BF16-output test vector.
+   *
+   * @param sel 0 = plain matmul, 1 = FP8 bias preload, 2 = BF16 psum preload
+   * @param exp expected BF16 output per lane
+   */
   case class TV(
-    id: Int,
-    ct: String,
-    sel: Int,
-    act: Seq[Int],
-    wgt: Seq[Seq[Int]],
+    id:   Int,
+    ct:   String,
+    sel:  Int,
+    act:  Seq[Int],
+    wgt:  Seq[Seq[Int]],
     bias: Seq[Int],
     psum: Seq[Int],
-    exp: Seq[Int]
+    exp:  Seq[Int]
   )
+
+  case class Errs(absErr: Double, relErr: Double)
+
+  // ── Numeric helpers ──
 
   def h2i(h: String): Int = Integer.parseUnsignedInt(h, 16)
 
-  def loadVectors(rp: String): Seq[TV] = {
-    val s = Source.fromInputStream(getClass.getResourceAsStream(rp))
-    val vs = ArrayBuffer[TV]()
-
-    var id = 0
-    var ct = ""
-    var sel = 0
-    var act = Seq.empty[Int]
-    var wgt = ArrayBuffer[Seq[Int]]()
-    var bias = Seq.empty[Int]
-    var psum = Seq.empty[Int]
-    var exp = Seq.empty[Int]
-    var in = false
-
-    def f(): Unit = {
-      if (in) {
-        vs += TV(id, ct, sel, act, wgt.toSeq, bias, psum, exp)
-        wgt = ArrayBuffer[Seq[Int]]()
-        in = false
-      }
-    }
-
-    try {
-      for (raw <- s.getLines()) {
-        val l = raw.trim
-        if (l.isEmpty) {
-          f()
-        } else if (l.startsWith("#")) {
-          f()
-          val p = l.drop(1).trim.split("\\s+")
-          id = p(0).toInt
-          ct = if (p.length > 1) p(1) else "?"
-          in = true
-        } else {
-          val p = l.split("\\s+")
-          p(0) match {
-            case "sel"  => sel = p(1).toInt
-            case "act"  => act = p.drop(1).map(h2i).toSeq
-            case "wgt"  => wgt += p.drop(2).map(h2i).toSeq
-            case "bias" => bias = p.drop(1).map(h2i).toSeq
-            case "psum" => psum = p.drop(1).map(h2i).toSeq
-            case "exp"  => exp = p.drop(1).map(h2i).toSeq
-            case _      =>
-          }
-        }
-      }
-      f()
-    } finally s.close()
-
-    vs.toSeq
-  }
-
-  def bf16f(b: Int): Float =
-    java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
-
-  case class Errs(absErr: Double, relErr: Double)
+  def bf16f(b: Int): Float = java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
 
   def tolWithErr(a: Int, e: Int): (Boolean, Errs) = {
     val am = a & 0x7FFF
@@ -152,8 +131,8 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     if (am <= absTolerance && em <= absTolerance) {
       (true, Errs(0.0, 0.0))
     } else {
-      val af = bf16f(a).toDouble
-      val ef = bf16f(e).toDouble
+      val af     = bf16f(a).toDouble
+      val ef     = bf16f(e).toDouble
       val absErr = math.abs(af - ef)
       val relErr = absErr / math.max(math.abs(ef), relEps)
       (relErr <= relTolerance, Errs(absErr, relErr))
@@ -163,67 +142,120 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
   def tol(a: Int, e: Int): Boolean = tolWithErr(a, e)._1
 
   def pack(es: Seq[Int], w: Int): BigInt =
-    es.zipWithIndex.foldLeft(BigInt(0)) { case (a, (v, i)) =>
-      a | (BigInt(v & ((1 << w) - 1)) << (i * w))
+    es.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (v, i)) =>
+      acc | (BigInt(v & ((1 << w) - 1)) << (i * w))
     }
+
+  // ── Vector file parser ──
+
+  def loadVectors(rp: String): Seq[TV] = {
+    val s  = Source.fromInputStream(getClass.getResourceAsStream(rp))
+    val vs = ArrayBuffer[TV]()
+
+    var id   = 0
+    var ct   = ""
+    var sel  = 0
+    var act  = Seq.empty[Int]
+    var wgt  = ArrayBuffer[Seq[Int]]()
+    var bias = Seq.empty[Int]
+    var psum = Seq.empty[Int]
+    var exp  = Seq.empty[Int]
+    var in   = false
+
+    def flush(): Unit = {
+      if (!in) return
+      vs += TV(id, ct, sel, act, wgt.toSeq, bias, psum, exp)
+      wgt = ArrayBuffer[Seq[Int]]()
+      in  = false
+    }
+
+    try {
+      for (raw <- s.getLines()) {
+        val l = raw.trim
+        if (l.isEmpty) {
+          flush()
+        } else if (l.startsWith("#")) {
+          flush()
+          val p = l.drop(1).trim.split("\\s+")
+          id = p(0).toInt
+          ct = if (p.length > 1) p(1) else "?"
+          in = true
+        } else {
+          val p = l.split("\\s+")
+          p(0) match {
+            case "sel"  => sel  = p(1).toInt
+            case "act"  => act  = p.drop(1).map(h2i).toSeq
+            case "wgt"  => wgt += p.drop(2).map(h2i).toSeq
+            case "bias" => bias = p.drop(1).map(h2i).toSeq
+            case "psum" => psum = p.drop(1).map(h2i).toSeq
+            case "exp"  => exp  = p.drop(1).map(h2i).toSeq
+            case _      => // ignore unknown keys
+          }
+        }
+      }
+      flush()
+    } finally {
+      s.close()
+    }
+    vs.toSeq
+  }
+
+  // ── DUT helpers ──
 
   def idle(dut: InnerProductTreesUnitHarness): Unit = {
     dut.io.cmd.valid.poke(false.B)
-    dut.io.cmd.bits.op.poke(Mxu0Op.PushWeight)
-    dut.io.cmd.bits.trfBank.poke(0.U)
+    dut.io.cmd.bits.op.poke(MxuOp.PushWeight)
+    dut.io.cmd.bits.mregId.poke(0.U)
     dut.io.cmd.bits.accSel.poke(false.B)
     dut.io.cmd.bits.weightSlot.poke(false.B)
     dut.io.cmd.bits.scaleE8M0.poke(127.U)
 
-    dut.io.dmaWriteIn.valid.poke(false.B)
-    dut.io.dmaWriteIn.bits.whichBank.poke(0.U)
-    dut.io.dmaWriteIn.bits.wRow.poke(0.U)
-    dut.io.dmaWriteIn.bits.wData.poke(0.U)
+    dut.io.testWrite.valid.poke(false.B)
+    dut.io.testWrite.bits.mregId.poke(0.U)
+    dut.io.testWrite.bits.row.poke(0.U)
+    dut.io.testWrite.bits.data.poke(0.U)
 
-    dut.io.dmaReadIn.valid.poke(false.B)
-    dut.io.dmaReadIn.bits.whichBank.poke(0.U)
-    dut.io.dmaReadIn.bits.rRow.poke(0.U)
+    dut.io.testRead.valid.poke(false.B)
+    dut.io.testRead.bits.mregId.poke(0.U)
+    dut.io.testRead.bits.row.poke(0.U)
   }
 
   def w8(dut: InnerProductTreesUnitHarness, c: => Boolean, m: Int): Boolean = {
     var i = 0
-    while (i < m && !c) {
-      dut.clock.step()
-      i += 1
-    }
+    while (i < m && !c) { dut.clock.step(); i += 1 }
     c
   }
 
-  def wr(dut: InnerProductTreesUnitHarness, b: Int, r: Int, d: BigInt): Unit = {
-    dut.io.dmaWriteIn.valid.poke(true.B)
-    dut.io.dmaWriteIn.bits.whichBank.poke(b.U)
-    dut.io.dmaWriteIn.bits.wRow.poke(r.U)
-    dut.io.dmaWriteIn.bits.wData.poke(d.U)
+  def wr(dut: InnerProductTreesUnitHarness, bank: Int, row: Int, data: BigInt): Unit = {
+    dut.io.testWrite.valid.poke(true.B)
+    dut.io.testWrite.bits.mregId.poke(bank.U)
+    dut.io.testWrite.bits.row.poke(row.U)
+    dut.io.testWrite.bits.data.poke(data.U)
     dut.clock.step()
-    dut.io.dmaWriteIn.valid.poke(false.B)
+    dut.io.testWrite.valid.poke(false.B)
   }
 
-  def rd(dut: InnerProductTreesUnitHarness, b: Int, r: Int): BigInt = {
-    dut.io.dmaReadIn.valid.poke(true.B)
-    dut.io.dmaReadIn.bits.whichBank.poke(b.U)
-    dut.io.dmaReadIn.bits.rRow.poke(r.U)
+  def rd(dut: InnerProductTreesUnitHarness, bank: Int, row: Int): BigInt = {
+    dut.io.testRead.valid.poke(true.B)
+    dut.io.testRead.bits.mregId.poke(bank.U)
+    dut.io.testRead.bits.row.poke(row.U)
     dut.clock.step()
-    dut.io.dmaReadIn.valid.poke(false.B)
-    require(dut.io.dmaReadOut.valid.peek().litToBoolean)
-    dut.io.dmaReadOut.bits.peek().litValue
+    dut.io.testRead.valid.poke(false.B)
+    require(dut.io.testReadOut.valid.peek().litToBoolean)
+    dut.io.testReadOut.bits.peek().litValue
   }
 
   def cmd(
     dut: InnerProductTreesUnitHarness,
-    op: Mxu0Op.Type,
-    tb: Int = 0,
-    as: Boolean = false,
-    ws: Boolean = false,
-    sc: Int = 127
+    op:  MxuOp.Type,
+    tb:  Int     = 0,
+    as:  Boolean = false,
+    ws:  Boolean = false,
+    sc:  Int     = 127
   ): Unit = {
     dut.io.cmd.valid.poke(true.B)
     dut.io.cmd.bits.op.poke(op)
-    dut.io.cmd.bits.trfBank.poke(tb.U)
+    dut.io.cmd.bits.mregId.poke(tb.U)
     dut.io.cmd.bits.accSel.poke(as.B)
     dut.io.cmd.bits.weightSlot.poke(ws.B)
     dut.io.cmd.bits.scaleE8M0.poke(sc.U)
@@ -231,21 +263,29 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     dut.io.cmd.valid.poke(false.B)
   }
 
-  "InnerProductTrees sequencer+TRF (VCS vectors)" should "match Python ground truth" in {
-    val p = InnerProductTreeParams()
-    val rfP = RegFileParams()
+  // ── Main test ──
+
+  "InnerProductTrees sequencer+MREG (VCS vectors)" should "match Python ground truth" in {
+    val p       = InnerProductTreeParams()
+    val mregP   = MregParams()
     val vectors = loadVectors(vectorResource)
     require(vectors.nonEmpty)
 
     var passed = 0
     var failed = 0
 
-    val outFile = new PrintWriter("../../../../../src/test/resources/ipt_test_vectors/rtl_vector_outputs.txt")
-    outFile.println("# case_id case_type row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match")
+    val outFile = new PrintWriter(
+      "../../../../../src/test/resources/mxu_test_vectors/ipt_rtl_vector_outputs.txt"
+    )
+    outFile.println(
+      "# case_id case_type row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match"
+    )
 
     try {
-      PersistentVcsVectorSimulator.simulate(new InnerProductTreesUnitHarness(p, rfP)) { module =>
+      PersistentVcsVectorSimulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
         val dut = module.wrapped
+
+        // Reset sequence
         dut.reset.poke(true.B)
         dut.clock.step(5)
         dut.reset.poke(false.B)
@@ -258,25 +298,23 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
           require(tv.wgt.length == p.numLanes)
           idle(dut)
 
-          // Load weights
+          // ── Load weights ──
           for (lane <- 0 until p.numLanes)
             wr(dut, WGT, lane, pack(tv.wgt(lane), 8))
-
-          cmd(dut, Mxu0Op.PushWeight, tb = WGT)
+          cmd(dut, MxuOp.PushWeight, tb = WGT)
           require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
-          // Load activations (replicate across rows)
+          // ── Load activations (replicated across all rows) ──
           val ap = pack(tv.act, 8)
           for (r <- 0 until p.tileRows)
             wr(dut, ACT, r, ap)
 
-          // Preload bias/psum
+          // ── Optionally preload accumulator ──
           if (tv.sel == 1) {
             val bp = pack(tv.bias, 8)
             for (r <- 0 until p.tileRows)
               wr(dut, BIAS, r, bp)
-
-            cmd(dut, Mxu0Op.PushAccFP8, tb = BIAS)
+            cmd(dut, MxuOp.PushAccFP8, tb = BIAS)
             require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
           } else if (tv.sel == 2) {
             val pl = pack(tv.psum.take(16), 16)
@@ -285,45 +323,50 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
               wr(dut, PSUM_LO, r, pl)
               wr(dut, PSUM_HI, r, ph)
             }
-
-            cmd(dut, Mxu0Op.PushAccBF16, tb = PSUM_LO)
+            cmd(dut, MxuOp.PushAccBF16, tb = PSUM_LO)
             require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
           }
 
-          val mop = if (tv.sel == 0) Mxu0Op.Matmul else Mxu0Op.MatmulAcc
+          // ── Compute ──
+          val mop = if (tv.sel == 0) MxuOp.Matmul else MxuOp.MatmulAcc
           cmd(dut, mop, tb = ACT)
           require(w8(dut, !dut.io.computeBusy.peek().litToBoolean, p.tileRows + p.latency + 200))
 
-          cmd(dut, Mxu0Op.PopAccBF16, tb = OUT_LO)
+          // ── Pop as BF16 ──
+          cmd(dut, MxuOp.PopAccBF16, tb = OUT_LO)
           require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
+          // ── Compare outputs ──
           var ok = true
           for (r <- 0 until p.tileRows) {
             val ol = rd(dut, OUT_LO, r)
             val oh = rd(dut, OUT_HI, r)
+
             for (l <- 0 until p.numLanes) {
-              val a =
-                if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
-                else ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
+              val a = if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
+                      else        ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
               val e = tv.exp(l) & 0xFFFF
 
-              val af = bf16f(a).toDouble
-              val ef = bf16f(e).toDouble
+              val af          = bf16f(a).toDouble
+              val ef          = bf16f(e).toDouble
               val (matchOk, errs) = tolWithErr(a, e)
 
               outFile.println(
-                f"${tv.id}%8d ${tv.ct}%-16s $r%4d $l%4d 0x${a}%04x 0x${e}%04x ${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f ${if (matchOk) "PASS" else "FAIL"}"
+                f"${tv.id}%8d ${tv.ct}%-16s $r%4d $l%4d 0x${a}%04x 0x${e}%04x " +
+                f"${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f " +
+                f"${if (matchOk) "PASS" else "FAIL"}"
               )
-
               if (!matchOk) {
                 ok = false
-                println(f"FAIL case ${tv.id} [${tv.ct}] r$r l$l: 0x${a}%04x vs 0x${e}%04x")
+                println(
+                  f"FAIL case ${tv.id} [${tv.ct}] r$r l$l:  " +
+                  f"got 0x${a}%04x, expected 0x${e}%04x   [rel err = ${errs.relErr}%.5f]"
+                )
               }
             }
           }
 
           outFile.flush()
-
           if (ok) passed += 1 else failed += 1
           idle(dut)
           dut.clock.step(2)

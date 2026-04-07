@@ -44,7 +44,7 @@
 # sbt's target directories
 /target/
 /chipyard/target/
-/project/**/target/
+/project/
 /test/macro-annot/target/
 /test/files/target/
 /test/target/
@@ -65,6 +65,9 @@ project/**/metals.sbt
 .history
 
 /src/test/resources/assembly/generators/__pycache__
-/src/test/resources/ipt_test_vectors
+/src/test/resources/mxu_test_vectors
 /src/test/resources/vpu_test_vectors
 /scripts/.env
+/src/test/resources/assembly/generators/software_models/mxu0_sa/__pycache__
+/src/test/resources/assembly/generators/software_models/mxu1_ipt/__pycache__
+/src/test/resources/assembly/generators/software_models/mxu1_ipt/ipt_c/__pycache__

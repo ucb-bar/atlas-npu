@@ -1,7 +1,24 @@
+/*
+Instructions.scala
+Instruction-pattern library for the scalar decoder.
+
+Defines the BitPat encodings used by IDecode / ScalarDecoder for RV32I,
+tensor, DMA, and engine-control instructions.
+
+This file is intended to track the external ISA spec in:
+  npu_model/npu_spec/06_instruction_set/README.md
+See:
+  https://github.com/ucb-ee194-tapeout/npu_model/tree/specv0/npu_spec/06_instruction_set
+
+As specv0 changes are merged over time, the grouping and naming here should
+converge with that document.
+*/
+
 package atlas.scalar
 
 import chisel3.util.BitPat
 
+/** Canonical instruction encodings used by the scalar decode tables. */
 object Instructions {
   // ── RV32I R-type (opcode = 0110011) ─────────────────────
   def ADD  = BitPat("b0000000??????????000?????0110011")

@@ -1,8 +1,17 @@
+/*
+BranchUnit.scala
+Combinational branch-condition evaluator for the scalar pipeline.
+
+Consumes the decoded branch selector plus the two source operands and
+returns whether the branch should be taken.
+*/
+
 package atlas.scalar
 
 import chisel3._
 import chisel3.util._
 
+/** Combinational RV32I branch comparator. */
 class BranchUnit extends Module {
   val io = IO(new Bundle {
     val branch_type = Input(UInt(3.W))

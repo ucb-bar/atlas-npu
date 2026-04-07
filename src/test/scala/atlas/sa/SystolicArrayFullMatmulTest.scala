@@ -1,304 +1,370 @@
-/*
-SystolicArrayFullMatmulTest.scala: full matmul test (64 rows) for SystolicArray
-
-Reads src/test/resources/mxu_full_matmul_vectors.txt. Per case:
-  For each tile: load 32×16 weights, stream 64 activation rows back-to-back,
-  collect outputs as psum for next tile. Compare final [64×16] against Python expected.
-
-Architecture: [1×32] act × [32×16] wgt = [1×16] per cycle. Latency = rows + cols - 1.
-
-Run:  mill atlas.test.testOnly atlas.sa.SystolicArrayFullMatmulTest
-*/
+// ============================================================================
+// SystolicArrayFullMatmulTest.scala — Multi-tile matmul tests for the
+// systolic-array MXU under VCS with full code-coverage collection.
+//
+// RUN: (from sp26-atlas-acc) 
+//    mill atlas.test.testOnly atlas.sa.SystolicArrayFullMatmulTest 
+// ============================================================================
 
 package atlas.sa
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.util._
+import chisel3.simulator._
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
-import atlas.common.SystolicArrayParams
+import atlas.common._
+import atlas.mxu.MxuOp
+import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
+import java.io.PrintWriter
 
-class SystolicArrayFullMatmulTest extends AnyFlatSpec with Matchers {
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
 
-  override def withFixture(test: NoArgTest): Outcome = {
-    val outcome = super.withFixture(test)
-    if (outcome.isFailed) {
-      println("SystolicArrayFullMatmulTest=FAILED")
-    } else if (outcome.isSucceeded) {
-      println("SystolicArrayFullMatmulTest=PASSED")
-    }
-    outcome
+object PersistentVcsSAFullMatmulSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val runDir: Path = {
+    val p = Paths.get("test_run_dir", "sa_full_matmul_vcs")
+    Files.createDirectories(p)
+    p.toAbsolutePath
   }
 
-  val vectorResource = "/mxu_full_matmul_vectors.txt"
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = "sa_full_matmul_vcs"
+  override val workspacePath: String = runDir.toString
 
-  // Systolic array latency: rows + cols - 1
-  def latency(p: SystolicArrayParams): Int = p.rows + p.cols - 1
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
 
-  // Test vector data
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName("sa_full_matmul_test_coverage"))
+      )
+    )
+  }
+}
 
-  case class FullMatmulVector(
-    id:       Int,
-    numRows:  Int,
-    numTiles: Int,
-    weights:  Seq[Seq[Seq[Int]]], // [tile][col][row]
-    act:      Seq[Seq[Seq[Int]]], // [tile][row][col]
-    expected: Seq[Seq[Int]]       // [row][col] (final result after all tiles)
+// ============================================================================
+// Full-matmul test
+// ============================================================================
+
+class SystolicArrayFullMatmulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val o = super.withFixture(test)
+    if (o.isFailed)         println("SystolicArrayFullMatmulTest=FAILED")
+    else if (o.isSucceeded) println("SystolicArrayFullMatmulTest=PASSED")
+    o
+  }
+
+  // ── Resource & tolerance configuration ──
+
+  val vectorResource = "/mxu_test_vectors/mxu_full_matmul_vectors.txt"
+
+  val absTol = 0x0040
+  val relTol = 0.01
+
+  // ── MREG bank IDs ──
+
+  val WGT    = 0
+  val ACT    = 2
+  val OUT_LO = 8
+  val OUT_HI = 9
+
+  // ── Data types ──
+
+  case class FMV(
+    id:  Int,
+    nr:  Int,
+    nt:  Int,
+    wgt: Seq[Seq[Seq[Int]]],
+    act: Seq[Seq[Seq[Int]]],
+    exp: Seq[Seq[Int]]
   )
 
-  // Parser
+  case class Errs(absErr: Double, relErr: Double)
 
-  def hexToInt(h: String): Int = Integer.parseUnsignedInt(h, 16)
+  // ── Numeric helpers ──
 
-  def loadVectors(resourcePath: String): Seq[FullMatmulVector] = {
-    val stream = getClass.getResourceAsStream(resourcePath)
-    require(stream != null,
-      s"Resource '$resourcePath' not found. Run the Python generator first.")
-    val src = Source.fromInputStream(stream)
-    val vectors = ArrayBuffer[FullMatmulVector]()
+  def h2i(h: String): Int = Integer.parseUnsignedInt(h, 16)
 
-    var id       = 0
-    var numRows  = 64
-    var numTiles = 1
+  def bf16f(b: Int): Float = java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
 
-    var wgtMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-    var actMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-    var expMap = scala.collection.mutable.Map[Int, Seq[Int]]()
-    var inCase = false
+  private val relEps = java.lang.Float.MIN_NORMAL.toDouble
+
+  def tolWithErr(a: Int, e: Int): (Boolean, Errs) = {
+    val am = a & 0x7FFF
+    val em = e & 0x7FFF
+    if (am <= absTol && em <= absTol) {
+      (true, Errs(0.0, 0.0))
+    } else {
+      val af     = bf16f(a).toDouble
+      val ef     = bf16f(e).toDouble
+      val absErr = math.abs(af - ef)
+      val relErr = absErr / math.max(math.abs(ef), relEps)
+      (relErr < relTol, Errs(absErr, relErr))
+    }
+  }
+
+  def pack(es: Seq[Int], w: Int): BigInt =
+    es.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (v, i)) =>
+      acc | (BigInt(v & ((1 << w) - 1)) << (i * w))
+    }
+
+  // ── Vector file parser ──
+
+  def loadVectors(rp: String): Seq[FMV] = {
+    val s  = Source.fromInputStream(getClass.getResourceAsStream(rp))
+    val vs = ArrayBuffer[FMV]()
+
+    var id = 0
+    var nr = 32
+    var nt = 1
+    var wm = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+    var am = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+    var em = scala.collection.mutable.Map[Int, Seq[Int]]()
+    var in = false
 
     def flush(): Unit = {
-      if (inCase) {
-        val weights = (0 until numTiles).map { t =>
-          val tileMap = wgtMap.getOrElse(t, scala.collection.mutable.Map.empty)
-          (0 until tileMap.size).map(c => tileMap(c))
-        }
-        val act = (0 until numTiles).map { t =>
-          val tileMap = actMap.getOrElse(t, scala.collection.mutable.Map.empty)
-          (0 until tileMap.size).map(i => tileMap(i))
-        }
-        val expected = (0 until expMap.size).map(i => expMap(i))
-
-        vectors += FullMatmulVector(id, numRows, numTiles, weights, act, expected)
-
-        wgtMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-        actMap = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
-        expMap = scala.collection.mutable.Map[Int, Seq[Int]]()
-        inCase = false
+      if (!in) return
+      val w = (0 until nt).map { t =>
+        val m = wm.getOrElse(t, scala.collection.mutable.Map.empty)
+        (0 until m.size).map(r => m(r))
       }
+      val a = (0 until nt).map { t =>
+        val m = am.getOrElse(t, scala.collection.mutable.Map.empty)
+        (0 until m.size).map(i => m(i))
+      }
+      val e = (0 until em.size).map(i => em(i))
+      vs += FMV(id, nr, nt, w, a, e)
+
+      wm = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+      am = scala.collection.mutable.Map[Int, scala.collection.mutable.Map[Int, Seq[Int]]]()
+      em = scala.collection.mutable.Map[Int, Seq[Int]]()
+      in = false
     }
 
     try {
-      for (raw <- src.getLines()) {
-        val line = raw.trim
-        if (line.isEmpty) {
+      for (raw <- s.getLines()) {
+        val l = raw.trim
+        if (l.isEmpty) {
           flush()
-        } else if (line.startsWith("#")) {
+        } else if (l.startsWith("#")) {
           flush()
-          val parts = line.drop(1).trim.split("\\s+")
-          id = parts(0).toInt
-          inCase = true
+          val p = l.drop(1).trim.split("\\s+")
+          id = p(0).toInt
+          in = true
         } else {
-          val parts = line.split("\\s+")
-          parts(0) match {
-            case "num_rows"  => numRows  = parts(1).toInt
-            case "num_tiles" => numTiles = parts(1).toInt
+          val p = l.split("\\s+")
+          p(0) match {
+            case "num_rows"  => nr = p(1).toInt
+            case "num_tiles" => nt = p(1).toInt
             case "wgt" =>
-              val tile = parts(1).toInt
-              val lane = parts(2).toInt
-              val data = parts.drop(3).map(hexToInt).toSeq
-              wgtMap.getOrElseUpdate(tile, scala.collection.mutable.Map.empty)(lane) = data
+              wm.getOrElseUpdate(p(1).toInt, scala.collection.mutable.Map.empty)(p(2).toInt) =
+                p.drop(3).map(h2i).toSeq
             case "act" =>
-              val tile = parts(1).toInt
-              val row  = parts(2).toInt
-              val data = parts.drop(3).map(hexToInt).toSeq
-              actMap.getOrElseUpdate(tile, scala.collection.mutable.Map.empty)(row) = data
+              am.getOrElseUpdate(p(1).toInt, scala.collection.mutable.Map.empty)(p(2).toInt) =
+                p.drop(3).map(h2i).toSeq
             case "exp" =>
-              val row  = parts(1).toInt
-              val data = parts.drop(2).map(hexToInt).toSeq
-              expMap(row) = data
+              em(p(1).toInt) = p.drop(2).map(h2i).toSeq
             case _ =>
           }
         }
       }
       flush()
     } finally {
-      src.close()
+      s.close()
     }
-
-    vectors.toSeq
+    vs.toSeq
   }
 
-  def bf16BitsToFloat(bits16: Int): Float = Bf16Compare.bf16BitsToFloat(bits16)
+  // ── DUT helpers ──
 
-  // DUT helpers
+  def idle(dut: SystolicArrayUnitHarness): Unit = {
+    dut.io.cmd.valid.poke(false.B)
+    dut.io.cmd.bits.op.poke(MxuOp.PushWeight)
+    dut.io.cmd.bits.mregId.poke(0.U)
+    dut.io.cmd.bits.accSel.poke(false.B)
+    dut.io.cmd.bits.weightSlot.poke(false.B)
+    dut.io.cmd.bits.scaleE8M0.poke(127.U)
 
-  def idle(dut: SystolicArray, p: SystolicArrayParams): Unit = {
-    dut.io.computeReq.valid.poke(false.B)
-    dut.io.weightLoadReq.valid.poke(false.B)
-    for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(0.U)
-    for (j <- 0 until p.cols) {
-      dut.io.computeReq.bits.bias(j).poke(0.U)
-      dut.io.computeReq.bits.psum(j).poke(0.U)
-    }
-    dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-    dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-    dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(0.U)
-    dut.io.weightLoadReq.bits.colIdx.poke(0.U)
-    for (i <- 0 until p.rows) {
-      dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(0.U)
-    }
+    dut.io.testWrite.valid.poke(false.B)
+    dut.io.testWrite.bits.mregId.poke(0.U)
+    dut.io.testWrite.bits.row.poke(0.U)
+    dut.io.testWrite.bits.data.poke(0.U)
+
+    dut.io.testRead.valid.poke(false.B)
+    dut.io.testRead.bits.mregId.poke(0.U)
+    dut.io.testRead.bits.row.poke(0.U)
   }
 
-  def loadWeights(
-    dut: SystolicArray,
-    p: SystolicArrayParams,
-    weights: Seq[Seq[Int]]
+  def w8(dut: SystolicArrayUnitHarness, c: => Boolean, m: Int): Boolean = {
+    var i = 0
+    while (i < m && !c) { dut.clock.step(); i += 1 }
+    c
+  }
+
+  def wr(dut: SystolicArrayUnitHarness, bank: Int, row: Int, data: BigInt): Unit = {
+    dut.io.testWrite.valid.poke(true.B)
+    dut.io.testWrite.bits.mregId.poke(bank.U)
+    dut.io.testWrite.bits.row.poke(row.U)
+    dut.io.testWrite.bits.data.poke(data.U)
+    dut.clock.step()
+    dut.io.testWrite.valid.poke(false.B)
+  }
+
+  def rd(dut: SystolicArrayUnitHarness, bank: Int, row: Int): BigInt = {
+    dut.io.testRead.valid.poke(true.B)
+    dut.io.testRead.bits.mregId.poke(bank.U)
+    dut.io.testRead.bits.row.poke(row.U)
+    dut.clock.step()
+    dut.io.testRead.valid.poke(false.B)
+    require(dut.io.testReadOut.valid.peek().litToBoolean)
+    dut.io.testReadOut.bits.peek().litValue
+  }
+
+  def cmd(
+    dut: SystolicArrayUnitHarness,
+    op:  MxuOp.Type,
+    tb:  Int     = 0,
+    as:  Boolean = false,
+    ws:  Boolean = false,
+    sc:  Int     = 127
   ): Unit = {
-    dut.io.weightLoadReq.valid.poke(true.B)
-    dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(0.U)
-    for (j <- 0 until p.cols) {
-      dut.io.weightLoadReq.bits.colIdx.poke(j.U)
-      for (i <- 0 until p.rows) {
-        dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(weights(j)(i).U)
-        dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      }
-      dut.clock.step()
-    }
-    dut.io.weightLoadReq.valid.poke(false.B)
+    dut.io.cmd.valid.poke(true.B)
+    dut.io.cmd.bits.op.poke(op)
+    dut.io.cmd.bits.mregId.poke(tb.U)
+    dut.io.cmd.bits.accSel.poke(as.B)
+    dut.io.cmd.bits.weightSlot.poke(ws.B)
+    dut.io.cmd.bits.scaleE8M0.poke(sc.U)
+    dut.clock.step()
+    dut.io.cmd.valid.poke(false.B)
   }
 
-  def selToEnum(sel: Int): AddendSel.Type = sel match {
-    case 0 => AddendSel.UseZero
-    case 1 => AddendSel.UseBias
-    case 2 => AddendSel.UsePsum
-    case _ => AddendSel.UseZero
-  }
+  // ── Main test ──
 
-  // Test body
-
-  "SystolicArray" should "compute full tensor-register matmul correctly" in {
-    val p = SystolicArrayParams()
-    val lat = latency(p)
+  "SystolicArray sequencer+MREG (VCS full matmul)" should "compute full matmul correctly" in {
+    val p       = SystolicArrayParams()
+    val mregP   = MregParams()
+    val saLat   = p.rows + p.cols - 1   // systolic drain latency
     val vectors = loadVectors(vectorResource)
-    require(vectors.nonEmpty, s"No test vectors found at $vectorResource")
+    require(vectors.nonEmpty)
 
-    simulate(new SystolicArray(p)) { dut =>
-      var totalPassed = 0
-      var totalFailed = 0
+    var totalPassed = 0
+    var totalFailed = 0
 
-      val outFile =
-        new java.io.PrintWriter("../../../../../src/test/resources/rtl_sa_full_matmul_outputs.txt")
-      outFile.println(
-        "# case_id  tile  row  col  actual_hex  expected_hex  actual_float  expected_float  abs_err  rel_err  ulp  match"
-      )
+    val outFile = new PrintWriter(
+      "../../../../../src/test/resources/mxu_test_vectors/sa_rtl_full_matmul_outputs.txt"
+    )
+    outFile.println(
+      "# case_id row lane actual_hex expected_hex actual_float expected_float abs_err rel_err match"
+    )
 
-      for (tv <- vectors) {
-        println(f"═══ Case ${tv.id}: ${tv.numRows} rows × ${tv.numTiles} tile(s) ═══")
+    try {
+      PersistentVcsSAFullMatmulSimulator.simulate(new SystolicArrayUnitHarness(p, mregP)) { module =>
+        val dut = module.wrapped
 
-        val psumBuf = Array.fill(tv.numRows, p.cols)(0)
+        // Reset sequence
+        dut.reset.poke(true.B)
+        dut.clock.step(5)
+        dut.reset.poke(false.B)
+        dut.clock.step(1)
+        idle(dut)
+        dut.clock.step(1)
 
-        for (t <- 0 until tv.numTiles) {
-          val sel = if (t == 0) 0 else 2
+        for (tv <- vectors) {
+          require(tv.nr == p.accSize)
+          println(f"═══ Case ${tv.id}: ${tv.nr} rows × ${tv.nt} tile(s) ═══")
 
-          idle(dut, p)
-          loadWeights(dut, p, tv.weights(t))
+          // ── Feed each tile ──
+          for (t <- 0 until tv.nt) {
+            idle(dut)
 
-          val results = Array.fill(tv.numRows, p.cols)(0)
-          var resultsCollected = 0
-          val totalCycles = tv.numRows + lat
+            for (lane <- 0 until p.cols)
+              wr(dut, WGT, lane, pack(tv.wgt(t)(lane), 8))
+            cmd(dut, MxuOp.PushWeight, tb = WGT)
+            require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
 
-          for (cycle <- 0 until totalCycles) {
-            if (dut.io.outputRow.valid.peek().litToBoolean) {
-              require(
-                resultsCollected < tv.numRows,
-                s"Case ${tv.id} tile $t: got more outputs than expected"
+            for (r <- 0 until tv.nr)
+              wr(dut, ACT, r, pack(tv.act(t)(r), 8))
+
+            val op = if (t == 0) MxuOp.Matmul else MxuOp.MatmulAcc
+            cmd(dut, op, tb = ACT)
+            require(w8(dut, !dut.io.computeBusy.peek().litToBoolean, p.accSize + saLat + 200))
+          }
+
+          // ── Pop BF16 results and compare ──
+          cmd(dut, MxuOp.PopAccBF16, tb = OUT_LO)
+          require(w8(dut, !dut.io.dataBusy.peek().litToBoolean, 200))
+
+          var cp = 0
+          var cf = 0
+
+          for (r <- 0 until tv.nr) {
+            val ol = rd(dut, OUT_LO, r)
+            val oh = rd(dut, OUT_HI, r)
+
+            for (l <- 0 until p.cols) {
+              val a = if (l < 16) ((ol >> (l * 16)) & 0xFFFF).toInt
+                      else        ((oh >> ((l - 16) * 16)) & 0xFFFF).toInt
+              val e = tv.exp(r)(l) & 0xFFFF
+
+              val af         = bf16f(a).toDouble
+              val ef         = bf16f(e).toDouble
+              val (ok, errs) = tolWithErr(a, e)
+
+              outFile.println(
+                f"${tv.id}%8d $r%4d $l%4d 0x${a}%04x 0x${e}%04x " +
+                f"${af}%14.5f ${ef}%14.5f ${errs.absErr}%10.5f ${errs.relErr}%10.5f " +
+                f"${if (ok) "PASS" else "FAIL"}"
               )
-              for (j <- 0 until p.cols) {
-                results(resultsCollected)(j) = dut.io.outputRow.bits(j).peek().litValue.toInt
+              if (ok) {
+                cp += 1
+              } else {
+                cf += 1
+                println(
+                  f"  FAIL r$r l$l: 0x${a}%04x(${af}%.6g) vs 0x${e}%04x(${ef}%.6g), " +
+                  f"rel_err=${errs.relErr}%.6e"
+                )
               }
-              resultsCollected += 1
             }
-
-            if (cycle < tv.numRows) {
-              dut.io.computeReq.valid.poke(true.B)
-              for (i <- 0 until p.rows)
-                dut.io.computeReq.bits.activationRow(i).poke(tv.act(t)(cycle)(i).U)
-              for (j <- 0 until p.cols) {
-                dut.io.computeReq.bits.bias(j).poke(0.U)
-                dut.io.computeReq.bits.psum(j).poke(psumBuf(cycle)(j).U)
-              }
-              dut.io.computeReq.bits.addendSel.poke(selToEnum(sel))
-              dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-            } else {
-              dut.io.computeReq.valid.poke(false.B)
-            }
-
-            dut.clock.step()
           }
 
-          if (dut.io.outputRow.valid.peek().litToBoolean && resultsCollected < tv.numRows) {
-            for (j <- 0 until p.cols)
-              results(resultsCollected)(j) = dut.io.outputRow.bits(j).peek().litValue.toInt
-            resultsCollected += 1
-          }
-
-          require(
-            resultsCollected == tv.numRows,
-            s"Case ${tv.id} tile $t: expected ${tv.numRows} results, got $resultsCollected"
+          outFile.flush()
+          println(
+            f"  Result: $cp/${tv.nr * p.cols} passed" +
+            (if (cf > 0) f", $cf FAILED" else "")
           )
-
-          for (i <- 0 until tv.numRows; j <- 0 until p.cols)
-            psumBuf(i)(j) = results(i)(j)
+          totalPassed += cp
+          totalFailed += cf
+          idle(dut)
+          dut.clock.step(2)
         }
-
-        var casePassed = 0
-        var caseFailed = 0
-
-        for (i <- 0 until tv.numRows) {
-          for (j <- 0 until p.cols) {
-            val actual   = psumBuf(i)(j) & 0xFFFF
-            val expected = tv.expected(i)(j) & 0xFFFF
-            val aFloat = bf16BitsToFloat(actual)
-            val eFloat = bf16BitsToFloat(expected)
-
-            val (ok, errs) = Bf16Compare.compare(actual, expected)
-
-            outFile.println(
-              f"${tv.id}%8d ${tv.numTiles - 1}%4d $i%4d $j%4d   0x$actual%04x       0x$expected%04x" +
-                f" ${aFloat}%14.4g ${eFloat}%14.4g ${errs.absErr}%10.6g ${errs.relErr}%10.6g ${errs.ulpDiff}%4d ${if (ok) "PASS" else "FAIL"}"
-            )
-
-            if (ok) {
-              casePassed += 1
-            } else {
-              caseFailed += 1
-              println(
-                f"  FAIL row $i col $j: got 0x$actual%04x ($aFloat%.6g) " +
-                  f"exp 0x$expected%04x ($eFloat%.6g) " +
-                  f"[absErr=${errs.absErr}%.6g relErr=${errs.relErr}%.6g ulp=${errs.ulpDiff}]"
-              )
-            }
-          }
-        }
-
-        val totalColChecks = tv.numRows * p.cols
-        println(
-          f"  Result: $casePassed/$totalColChecks passed" +
-            (if (caseFailed > 0) f", $caseFailed FAILED" else "")
-        )
-        totalPassed += casePassed
-        totalFailed += caseFailed
       }
-
+    } finally {
       outFile.close()
-      println(s"\nTotal: $totalPassed passed, $totalFailed failed")
-      totalFailed shouldBe 0
     }
+
+    println(s"\nTotal: $totalPassed passed, $totalFailed failed")
+    totalFailed shouldBe 0
   }
 }

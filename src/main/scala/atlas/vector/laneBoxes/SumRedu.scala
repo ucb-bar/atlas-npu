@@ -1,3 +1,10 @@
+// ============================================================================
+// SumRedu.scala — Vector reduction-sum lane box.
+//
+// Reduces one BF16 vector to a summed result using a pipelined binary tree,
+// then broadcasts the final scalar result on the response vector.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -25,6 +32,12 @@ class SumReduResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector reduction-sum pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
     require(isPow2(numLanes), "numLanes must be a power of 2")
 

@@ -1,3 +1,10 @@
+// ============================================================================
+// FP8.scala — Vector BF16-to-FP8 conversion lane box.
+//
+// Converts a BF16 vector into packed FP8-style byte results with configurable
+// exponent shifting and optional left alignment.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -26,6 +33,12 @@ class FP8Resp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector BF16-to-FP8 conversion pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class FP8(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16)
     extends Module
     with HasPipelineParams {

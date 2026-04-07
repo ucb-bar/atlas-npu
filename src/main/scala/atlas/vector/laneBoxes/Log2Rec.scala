@@ -1,3 +1,10 @@
+// ============================================================================
+// Log2Rec.scala — Vector log2 lane box.
+//
+// Evaluates base-2 logarithms lane-wise using the shared log LUT and returns
+// the resulting vector with metadata propagated through the pipeline.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -24,6 +31,12 @@ class Log2Resp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
 }
 
 
+/** Vector log2 pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class Log2Rec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val w    = BF16T.wordWidth
     val expW = BF16T.expWidth

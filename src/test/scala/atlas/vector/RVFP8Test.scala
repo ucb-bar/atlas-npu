@@ -1,3 +1,11 @@
+// ============================================================================
+// RVFP8Test.scala — BF16/FP8 conversion tests for the RV-style vector
+// datapath.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.RVFP8Test
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._

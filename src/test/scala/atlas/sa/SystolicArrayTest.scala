@@ -1,363 +1,380 @@
-/*
-SystolicArrayTest.scala: basic unit tests for SystolicArray (parameterized MXU)
-
-Uses: Chisel 7 EphemeralSimulator.
-Run:  mill atlas.test.testOnly atlas.sa.SystolicArrayTest
-
-Covers: zero/ones/dot-product, bias/psum addends, double-buffer, sparse weights,
-ready signals, latency, back-to-back computes. Complements SystolicArrayComprehensiveTest.
-
-E4M3: 0.0=0x00  1.0=0x38  2.0=0x40  -1.0=0xB8
-BF16: 0.0=0x0000  1.0=0x3F80  32.0=0x4200  33.0=0x4204  -32.0=0xC200  4.0=0x4080  64.0=0x4280
-*/
+// ============================================================================
+// SystolicArrayTest.scala — Unit tests for the systolic-array MXU.
+//
+// Exercises the SystolicArray datapath + MREG through a shared harness,
+// covering zero/identity/negative/sparse inputs, weight & accumulator
+// double-buffering, bias addition, and all-row correctness.
+//
+// RUN: (from sp26-atlas-acc) 
+//    mill atlas.test.testOnly atlas.sa.SystolicArrayTest 
+// ============================================================================
 
 package atlas.sa
 
 import chisel3._
+import chisel3.util._
 import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
-import atlas.common.SystolicArrayParams
+import atlas.common._
+import atlas.mxu.{MxuOp, MxuCmd}
+import atlas.mreg.MregFile
+
+// ============================================================================
+// Test harness — SA + MREG with backdoor read/write
+// ============================================================================
+
+class SystolicArrayUnitHarness(
+    p:     SystolicArrayParams = SystolicArrayParams(),
+    mregP: MregParams          = MregParams()
+) extends Module {
+
+  val io = IO(new Bundle {
+    val cmd         = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    val dataBusy    = Output(Bool())
+    val computeBusy = Output(Bool())
+    val testWrite   = Flipped(Valid(new MregWriteReq(mregP)))
+    val testRead    = Flipped(Valid(new MregReadReq(mregP)))
+    val testReadOut = Valid(UInt(mregP.mregRowBits.W))
+  })
+
+  val sa   = Module(new SystolicArrayTop(p, mregP))
+  val mreg = Module(new MregFile(mregP))
+
+  // ── Command interface ──
+  sa.io.cmd      <> io.cmd
+  io.dataBusy    := sa.io.dataBusy
+  io.computeBusy := sa.io.computeBusy
+
+  // ── SA ↔ MREG (MXU-0 ports) ──
+  mreg.io.mxu0ReadReq0  <> sa.io.mregReadReq0
+  mreg.io.mxu0ReadReq1  <> sa.io.mregReadReq1
+  sa.io.mregReadResp0    := mreg.io.mxu0ReadResp0
+  sa.io.mregReadResp1    := mreg.io.mxu0ReadResp1
+  mreg.io.mxu0WriteReq0  <> sa.io.mregWriteReq0
+  mreg.io.mxu0WriteReq1  <> sa.io.mregWriteReq1
+
+  // ── Backdoor test ports (via LSU ports on MREG) ──
+  mreg.io.lsuWriteReq <> io.testWrite
+  mreg.io.lsuReadReq  <> io.testRead
+  io.testReadOut       := mreg.io.lsuReadResp
+
+  // ── Tie off unused MREG ports ──
+  mreg.io.mxu1ReadReq0.valid  := false.B
+  mreg.io.mxu1ReadReq0.bits   := 0.U.asTypeOf(new MregReadReq(mregP))
+  mreg.io.mxu1ReadReq1.valid  := false.B
+  mreg.io.mxu1ReadReq1.bits   := 0.U.asTypeOf(new MregReadReq(mregP))
+  mreg.io.mxu1WriteReq0.valid := false.B
+  mreg.io.mxu1WriteReq0.bits  := 0.U.asTypeOf(new MregWriteReq(mregP))
+  mreg.io.mxu1WriteReq1.valid := false.B
+  mreg.io.mxu1WriteReq1.bits  := 0.U.asTypeOf(new MregWriteReq(mregP))
+  mreg.io.vpuReadReq0.valid   := false.B
+  mreg.io.vpuReadReq0.bits    := 0.U.asTypeOf(new MregReadReq(mregP))
+  mreg.io.vpuReadReq1.valid   := false.B
+  mreg.io.vpuReadReq1.bits    := 0.U.asTypeOf(new MregReadReq(mregP))
+  mreg.io.vpuWriteReq0.valid  := false.B
+  mreg.io.vpuWriteReq0.bits   := 0.U.asTypeOf(new MregWriteReq(mregP))
+  mreg.io.vpuWriteReq1.valid  := false.B
+  mreg.io.vpuWriteReq1.bits   := 0.U.asTypeOf(new MregWriteReq(mregP))
+  mreg.io.xluReadReq.valid    := false.B
+  mreg.io.xluReadReq.bits     := 0.U.asTypeOf(new MregReadReq(mregP))
+  mreg.io.xluWriteReq.valid   := false.B
+  mreg.io.xluWriteReq.bits    := 0.U.asTypeOf(new MregWriteReq(mregP))
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 class SystolicArrayTest extends AnyFlatSpec with Matchers {
 
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
-    if (outcome.isFailed) {
-      println("SystolicArrayTest=FAILED")
-    } else if (outcome.isSucceeded) {
-      println("SystolicArrayTest=PASSED")
-    }
+    if (outcome.isFailed)         println("SystolicArrayTest=FAILED")
+    else if (outcome.isSucceeded) println("SystolicArrayTest=PASSED")
     outcome
   }
 
-  // encoding constants
-  val E4M3_0   = 0x00
-  val E4M3_1   = 0x38
-  val E4M3_2   = 0x40
-  val E4M3_N1  = 0xB8
+  // ── FP8 E4M3 constants ──
+  val E4M3_0  = 0x00  // 0.0
+  val E4M3_1  = 0x38  // 1.0
+  val E4M3_2  = 0x40  // 2.0
+  val E4M3_N1 = 0xB8  // -1.0
 
-  val BF16_0   = 0x0000
-  val BF16_1   = 0x3F80
-  val BF16_8   = 0x4100
-  val BF16_9   = 0x4110
-  val BF16_16  = 0x4180
-  val BF16_32  = 0x4200
-  val BF16_33  = 0x4204
-  val BF16_N8  = 0xC100
-  val BF16_N32 = 0xC200
-  val BF16_4   = 0x4080
-  val BF16_64  = 0x4280
+  // ── BF16 constants (expected outputs) ──
+  val BF16_0   = 0x0000  // 0.0
+  val BF16_1   = 0x3F80  // 1.0
+  val BF16_32  = 0x4200  // 32.0
+  val BF16_33  = 0x4204  // 33.0
+  val BF16_N32 = 0xC200  // -32.0
+  val BF16_4   = 0x4080  // 4.0
+  val BF16_64  = 0x4280  // 64.0
 
-  // BF16 encoding for value n (for dot product expected values)
-  def bf16For(n: Int): Int = n match {
-    case 0  => BF16_0
-    case 1  => BF16_1
-    case 4  => BF16_4
-    case 8  => BF16_8
-    case 9  => BF16_9
-    case 16 => BF16_16
-    case 32 => BF16_32
-    case 33 => BF16_33
-    case 64 => BF16_64
-    case _  => throw new IllegalArgumentException(s"No BF16 constant for $n")
+  // ── MREG bank assignments ──
+  val WGT_BANK    = 0
+  val ACT_BANK    = 2
+  val BIAS_BANK   = 4
+  val OUT_BANK_LO = 6
+
+  // ── Numeric helpers ──
+
+  def packElems(elems: Seq[Int], elemWidth: Int): BigInt =
+    elems.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (v, i)) =>
+      acc | (BigInt(v & ((1 << elemWidth) - 1)) << (i * elemWidth))
+    }
+
+  /** Total latency for data to drain through the systolic array. */
+  private def saLatency(p: SystolicArrayParams): Int = p.rows + p.cols - 1
+
+  // ── Harness helpers ──
+
+  def idle(dut: SystolicArrayUnitHarness): Unit = {
+    dut.io.cmd.valid.poke(false.B)
+    dut.io.cmd.bits.op.poke(MxuOp.PushWeight)
+    dut.io.cmd.bits.mregId.poke(0.U)
+    dut.io.cmd.bits.accSel.poke(false.B)
+    dut.io.cmd.bits.weightSlot.poke(false.B)
+    dut.io.cmd.bits.scaleE8M0.poke(127.U)
+
+    dut.io.testWrite.valid.poke(false.B)
+    dut.io.testWrite.bits.mregId.poke(0.U)
+    dut.io.testWrite.bits.row.poke(0.U)
+    dut.io.testWrite.bits.data.poke(0.U)
+
+    dut.io.testRead.valid.poke(false.B)
+    dut.io.testRead.bits.mregId.poke(0.U)
+    dut.io.testRead.bits.row.poke(0.U)
   }
 
-  // Systolic array latency: rows + cols - 1 (from activation skew + PE pipes + output deskew)
-  def latency(p: SystolicArrayParams): Int = p.rows + p.cols - 1
-
-  // helper functions
-
-  def idle(dut: SystolicArray, p: SystolicArrayParams): Unit = {
-    dut.io.computeReq.valid.poke(false.B)
-    dut.io.weightLoadReq.valid.poke(false.B)
-    for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(0.U)
-    for (j <- 0 until p.cols) {
-      dut.io.computeReq.bits.bias(j).poke(0.U)
-      dut.io.computeReq.bits.psum(j).poke(0.U)
-    }
-    dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-    dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-    dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(0.U)
-    dut.io.weightLoadReq.bits.colIdx.poke(0.U)
-    for (i <- 0 until p.rows) {
-      dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(0.U)
-    }
-  }
-
-  // Load uniform weights into all columns, one column at a time.
-  def loadWeights(
-    dut: SystolicArray,
-    p: SystolicArrayParams,
-    v: Int,
-    dma: Boolean = false,
-    bufSel: Int = 0,
-  ): Unit = {
-    dut.io.weightLoadReq.valid.poke(true.B)
-    if (dma) dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseDma)
-    else dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(bufSel.U)
-
-    for (i <- 0 until p.rows) {
-      if (dma) {
-        dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(v.U)
-        dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(0.U)
-      } else {
-        dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(v.U)
-        dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      }
-    }
-    for (j <- 0 until p.cols) {
-      dut.io.weightLoadReq.bits.colIdx.poke(j.U)
-      dut.clock.step()
-    }
-    dut.io.weightLoadReq.valid.poke(false.B)
-  }
-
-  // Load one column's weight vector (per-element values).
-  def loadWeightCol(
-    dut: SystolicArray,
-    p: SystolicArrayParams,
-    colIdx: Int,
-    vals: Seq[Int],
-    dma: Boolean = false,
-    bufSel: Int = 0,
-  ): Unit = {
-    dut.io.weightLoadReq.valid.poke(true.B)
-    if (dma) dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseDma)
-    else dut.io.weightLoadReq.bits.weightSel.poke(WeightSel.UseTensorReg)
-    dut.io.weightLoadReq.bits.weightBufWriteSel.poke(bufSel.U)
-    dut.io.weightLoadReq.bits.colIdx.poke(colIdx.U)
-
-    for (i <- 0 until p.rows) {
-      if (dma) {
-        dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(vals(i).U)
-        dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(0.U)
-      } else {
-        dut.io.weightLoadReq.bits.weightsTensorReg(i).poke(vals(i).U)
-        dut.io.weightLoadReq.bits.weightsDirectMem(i).poke(0.U)
-      }
-    }
+  def trfWriteRow(dut: SystolicArrayUnitHarness, bank: Int, row: Int, data: BigInt): Unit = {
+    dut.io.testWrite.valid.poke(true.B)
+    dut.io.testWrite.bits.mregId.poke(bank.U)
+    dut.io.testWrite.bits.row.poke(row.U)
+    dut.io.testWrite.bits.data.poke(data.U)
     dut.clock.step()
-    dut.io.weightLoadReq.valid.poke(false.B)
+    dut.io.testWrite.valid.poke(false.B)
   }
 
-  // fire compute, step 1 cycle, deassert. does NOT wait for result
-  def compute(
-    dut: SystolicArray,
-    p: SystolicArrayParams,
-    act: Int,
-    bias: Int = E4M3_0,
-    psum: Int = BF16_0,
-    sel: AddendSel.Type = AddendSel.UseZero,
-    readBuf: Boolean = false,
-  ): Unit = {
-    dut.io.computeReq.valid.poke(true.B)
-    for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(act.U)
-    for (j <- 0 until p.cols) {
-      dut.io.computeReq.bits.bias(j).poke(bias.U)
-      dut.io.computeReq.bits.psum(j).poke(psum.U)
-    }
-    dut.io.computeReq.bits.addendSel.poke(sel)
-    dut.io.computeReq.bits.weightBufReadSel.poke(readBuf.B)
+  def trfReadRow(dut: SystolicArrayUnitHarness, bank: Int, row: Int): BigInt = {
+    dut.io.testRead.valid.poke(true.B)
+    dut.io.testRead.bits.mregId.poke(bank.U)
+    dut.io.testRead.bits.row.poke(row.U)
     dut.clock.step()
-    dut.io.computeReq.valid.poke(false.B)
+    dut.io.testRead.valid.poke(false.B)
+    dut.io.testReadOut.valid.expect(true.B)
+    dut.io.testReadOut.bits.peek().litValue
   }
 
-  // wait for the pipeline to deliver the result after compute()
-  def waitForResult(dut: SystolicArray, p: SystolicArrayParams): Unit = {
-    val lat = latency(p)
-    if (lat > 1) dut.clock.step(lat - 1)
+  def sendCmd(
+    dut:        SystolicArrayUnitHarness,
+    op:         MxuOp.Type,
+    mregId:     Int     = 0,
+    accSel:     Boolean = false,
+    weightSlot: Boolean = false,
+    scaleE8M0:  Int     = 127
+  ): Unit = {
+    dut.io.cmd.valid.poke(true.B)
+    dut.io.cmd.bits.op.poke(op)
+    dut.io.cmd.bits.mregId.poke(mregId.U)
+    dut.io.cmd.bits.accSel.poke(accSel.B)
+    dut.io.cmd.bits.weightSlot.poke(weightSlot.B)
+    dut.io.cmd.bits.scaleE8M0.poke(scaleE8M0.U)
+    dut.clock.step()
+    dut.io.cmd.valid.poke(false.B)
   }
 
-  // all checks for one config in a single simulate() call
+  def waitDataIdle(dut: SystolicArrayUnitHarness, max: Int = 500): Unit = {
+    var i = 0
+    while (i < max && dut.io.dataBusy.peek().litToBoolean) { dut.clock.step(); i += 1 }
+    require(i < max, "Data FSM timed out")
+  }
+
+  def waitComputeIdle(dut: SystolicArrayUnitHarness, max: Int = 500): Unit = {
+    var i = 0
+    while (i < max && dut.io.computeBusy.peek().litToBoolean) { dut.clock.step(); i += 1 }
+    require(i < max, "Compute FSM timed out")
+  }
+
+  /** Fill an entire MREG bank with a uniform FP8 value. */
+  def loadUniformTile(dut: SystolicArrayUnitHarness, p: SystolicArrayParams, bank: Int, value: Int): Unit = {
+    val rowData = packElems(Seq.fill(p.rows)(value), 8)
+    for (row <- 0 until p.accSize)
+      trfWriteRow(dut, bank, row, rowData)
+  }
+
+  /** Read one row of BF16 results (lo + hi banks → 32 lanes). */
+  def readBF16Results(dut: SystolicArrayUnitHarness, p: SystolicArrayParams, bankLo: Int, row: Int): Seq[Int] = {
+    val lo = trfReadRow(dut, bankLo, row)
+    val hi = trfReadRow(dut, bankLo + 1, row)
+    (0 until 16).map(i => ((lo >> (i * 16)) & 0xFFFF).toInt) ++
+    (0 until 16).map(i => ((hi >> (i * 16)) & 0xFFFF).toInt)
+  }
+
+  // ── Test suite ──
 
   def runAllChecks(p: SystolicArrayParams): Unit = {
-    simulate(new SystolicArray(p)) { dut =>
+    val mregP       = MregParams()
+    val compTimeout = p.accSize + saLatency(p) + 200
 
-      val lat = latency(p)
-
-      // functional checks
-
-      val dotProd = p.rows  // inner product dimension
-      val dotPlus1 = bf16For(dotProd + 1)
-      val dotNeg = if (dotProd == 32) BF16_N32 else BF16_N8
-      val dotVal = bf16For(dotProd)
-      val dotVal2 = bf16For(dotProd * 2)
-
-      // 1. zero x zero = zero
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_0)
-      compute(dut, p, E4M3_0)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(bf16For(0).U(16.W))
-
-      // 2. all-ones weights x all-ones activations = dotProd
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1)
-      compute(dut, p, E4M3_1)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal.U(16.W))
-
-      // 3. dot product + bias: dotProd*1 + 1 = dotProd+1
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1)
-      compute(dut, p, E4M3_1, bias = E4M3_1, sel = AddendSel.UseBias)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotPlus1.U(16.W))
-
-      // 4. dot product + psum: dotProd*1 + 1 = dotProd+1
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1)
-      compute(dut, p, E4M3_1, psum = BF16_1, sel = AddendSel.UsePsum)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotPlus1.U(16.W))
-
-      // 5. negative weights: dotProd*(-1) = -dotProd
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_N1)
-      compute(dut, p, E4M3_1)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotNeg.U(16.W))
-
-      // 6. double-buffer: TR load to buf 0, output = dotVal. then DMA load to buf 1, output = dotVal2
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1, dma = false, bufSel = 0)
-      compute(dut, p, E4M3_1, readBuf = false)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal.U(16.W))
-
-      loadWeights(dut, p, E4M3_2, dma = true, bufSel = 1)
-      compute(dut, p, E4M3_1, readBuf = true)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal2.U(16.W))
-
-      // 7. sparse: w[col0][row0] = 2, a[row0] = 2. expected output = 4 for col 0, 0 for others
-      idle(dut, p)
-      val sparseCol = Seq(E4M3_2) ++ Seq.fill(p.rows - 1)(E4M3_0)
-      val zeroCol = Seq.fill(p.rows)(E4M3_0)
-      loadWeightCol(dut, p, 0, sparseCol)
-      for (j <- 1 until p.cols) {
-        loadWeightCol(dut, p, j, zeroCol)
-      }
-
-      dut.io.computeReq.valid.poke(true.B)
-      for (i <- 0 until p.rows)
-        dut.io.computeReq.bits.activationRow(i).poke((if (i == 0) E4M3_2 else E4M3_0).U)
-      for (j <- 0 until p.cols) {
-        dut.io.computeReq.bits.bias(j).poke(0.U)
-        dut.io.computeReq.bits.psum(j).poke(0.U)
-      }
-      dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-      dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-      dut.clock.step()
-      dut.io.computeReq.valid.poke(false.B)
-      waitForResult(dut, p)
-
-      dut.io.outputRow.valid.expect(true.B)
-      dut.io.outputRow.bits(0).expect(BF16_4.U(16.W))
-      for (j <- 1 until p.cols) dut.io.outputRow.bits(j).expect(bf16For(0).U(16.W))
-
-      // 8. ready signals always high
-      idle(dut, p)
-      dut.io.computeReq.ready.expect(true.B)
-      dut.io.weightLoadReq.ready.expect(true.B)
+    simulate(new SystolicArrayUnitHarness(p, mregP)) { dut =>
+      idle(dut)
+      dut.reset.poke(true.B)
       dut.clock.step(5)
-      dut.io.computeReq.ready.expect(true.B)
-      dut.io.weightLoadReq.ready.expect(true.B)
+      dut.reset.poke(false.B)
+      dut.clock.step(1)
+      idle(dut)
 
-      // 9. outputRow.valid pulse: idle, then expect valid = false. compute, then expect valid = true. next then expect valid = false
-      idle(dut, p)
-      dut.clock.step()
-      dut.io.outputRow.valid.expect(false.B)
+      // ── Test 1: zero × zero = zero ──
+      println("  Test 1: zero × zero = zero")
+      loadUniformTile(dut, p, WGT_BANK, E4M3_0)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_0)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe BF16_0)
 
-      loadWeights(dut, p, E4M3_0)
-      compute(dut, p, E4M3_0)
-      waitForResult(dut, p)
-      dut.io.outputRow.valid.expect(true.B)
+      // ── Test 2: all-ones dot product = 32 ──
+      println("  Test 2: 1×1 dot = 32")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe BF16_32)
 
-      dut.clock.step()
-      dut.io.outputRow.valid.expect(false.B)
+      // ── Test 3: matmul + FP8 bias = 33 ──
+      println("  Test 3: matmul + bias = 33")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+      loadUniformTile(dut, p, BIAS_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushAccFP8, mregId = BIAS_BANK)
+      waitDataIdle(dut)
+      sendCmd(dut, MxuOp.MatmulAcc, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe BF16_33)
 
-      // pipeline-specific checks (latency = rows + cols - 1)
+      // ── Test 4: negative weights → -32 ──
+      println("  Test 4: negative weights = -32")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_N1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe BF16_N32)
 
-      // 10. exact latency: valid LOW for (latency−1) cycles, HIGH for 1, LOW again
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1)
+      // ── Test 5: weight double-buffer ──
+      println("  Test 5: weight double-buffer")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK, weightSlot = false)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_2)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK, weightSlot = true)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
 
-      dut.io.computeReq.valid.poke(true.B)
-      for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(E4M3_1.U)
-      for (j <- 0 until p.cols) {
-        dut.io.computeReq.bits.bias(j).poke(0.U)
-        dut.io.computeReq.bits.psum(j).poke(0.U)
+      // Slot 0 → 32
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, weightSlot = false)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).head shouldBe BF16_32
+
+      // Slot 1 → 64
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, weightSlot = true)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).head shouldBe BF16_64
+
+      // ── Test 6: sparse → 2*2 = 4 ──
+      println("  Test 6: sparse = 4")
+      idle(dut)
+      val sparseRow = packElems(Seq(E4M3_2) ++ Seq.fill(p.rows - 1)(E4M3_0), 8)
+      for (row <- 0 until p.accSize) {
+        trfWriteRow(dut, WGT_BANK, row, sparseRow)
+        trfWriteRow(dut, ACT_BANK, row, sparseRow)
       }
-      dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-      dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-      dut.clock.step()
-      dut.io.computeReq.valid.poke(false.B)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe BF16_4)
 
-      for (_ <- 0 until lat - 1) {
-        dut.io.outputRow.valid.expect(false.B)
-        dut.clock.step()
+      // ── Test 7: accumulator double-buffer ──
+      println("  Test 7: acc double-buffer")
+      idle(dut)
+
+      // Acc 0: 1×1 dot = 32
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, accSel = false)
+      waitComputeIdle(dut, compTimeout)
+
+      // Acc 1: 2×1 dot = 64
+      loadUniformTile(dut, p, WGT_BANK, E4M3_2)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, accSel = true)
+      waitComputeIdle(dut, compTimeout)
+
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO, accSel = false)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).head shouldBe BF16_32
+
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO, accSel = true)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).head shouldBe BF16_64
+
+      // ── Test 8: all rows correct ──
+      println("  Test 8: all rows correct")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut, compTimeout)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      for (row <- 0 until p.accSize) {
+        readBF16Results(dut, p, OUT_BANK_LO, row).foreach { v =>
+          assert(v == BF16_32, s"Row $row: expected 0x4200, got 0x${v.toHexString}")
+        }
       }
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal.U(16.W))
 
+      // ── Test 9: readiness ──
+      println("  Test 9: readiness")
+      idle(dut)
       dut.clock.step()
-      dut.io.outputRow.valid.expect(false.B)
-
-      // 11. back-to-back: two consecutive fires, then expect two consecutive valid results
-      idle(dut, p)
-      loadWeights(dut, p, E4M3_1)
-
-      // fire 1: act=1, expect dotVal
-      dut.io.computeReq.valid.poke(true.B)
-      for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(E4M3_1.U)
-      for (j <- 0 until p.cols) {
-        dut.io.computeReq.bits.bias(j).poke(0.U)
-        dut.io.computeReq.bits.psum(j).poke(0.U)
-      }
-      dut.io.computeReq.bits.addendSel.poke(AddendSel.UseZero)
-      dut.io.computeReq.bits.weightBufReadSel.poke(false.B)
-      dut.clock.step()
-
-      // fire 2: act=2, expect dotVal2 (valid still asserted)
-      for (i <- 0 until p.rows) dut.io.computeReq.bits.activationRow(i).poke(E4M3_2.U)
-      dut.clock.step()
-      dut.io.computeReq.valid.poke(false.B)
-
-      // drain pipeline to first result
-      if (lat > 2) dut.clock.step(lat - 2)
-
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal.U(16.W))
-
-      dut.clock.step()
-      dut.io.outputRow.valid.expect(true.B)
-      for (j <- 0 until p.cols) dut.io.outputRow.bits(j).expect(dotVal2.U(16.W))
-
-      dut.clock.step()
-      dut.io.outputRow.valid.expect(false.B)
+      dut.io.cmd.ready.expect(true.B)
+      dut.io.dataBusy.expect(false.B)
+      dut.io.computeBusy.expect(false.B)
     }
   }
 
-  // test cases: one Verilator compilation each
-
-  "SystolicArray (32x16)" should "pass all checks" in {
+  "SystolicArray (HardFloatFMA)" should "pass all checks" in {
     runAllChecks(SystolicArrayParams())
-  }
-
-  "SystolicArray (8x4)" should "pass all checks" in {
-    runAllChecks(SystolicArrayParams(rows = 8, cols = 4))
   }
 }

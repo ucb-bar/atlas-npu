@@ -1,3 +1,10 @@
+// ============================================================================
+// MulRec.scala — Vector BF16 multiply lane box.
+//
+// Accepts two BF16 vectors plus per-lane enables, performs vector
+// multiplication, and forwards the result with request metadata.
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
@@ -27,6 +34,12 @@ class MulResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val result = Vec(numLanes, UInt(wordWidth.W))
 }
 
+/** Vector BF16 multiply pipeline.
+  *
+  * @param BF16T     BF16 format descriptor.
+  * @param numLanes  Number of parallel vector lanes.
+  * @param tagWidth  Width of the forwarded metadata tag.
+  */
 class MulRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
         val req = Flipped(Decoupled(new MulReq(BF16T.wordWidth, numLanes, tagWidth)))

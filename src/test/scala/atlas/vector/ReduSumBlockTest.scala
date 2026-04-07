@@ -1,3 +1,10 @@
+// ============================================================================
+// ReduSumBlockTest.scala — Sum-reduction block tests for the vector datapath.
+//
+// RUN: (from sp26-atlas-acc)
+//    mill atlas.test.testOnly atlas.vector.ReduSumBlockTest
+// ============================================================================
+
 package atlas.vector
 
 import chisel3._
