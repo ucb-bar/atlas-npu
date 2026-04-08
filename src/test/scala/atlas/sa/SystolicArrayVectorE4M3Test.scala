@@ -77,7 +77,7 @@ class SystolicArrayVectorE4M3Test extends AnyFlatSpec with Matchers with PeekPok
 
   // ── Resource & MREG bank IDs ──
 
-  val vectorResource = "/mxu_test_vectors/mxu_vectors_e4m3.txt"
+  val vectorResource = "/mxu_test_vectors/sa_mxu_vectors_e4m3.txt"
 
   val WGT     = 0
   val ACT     = 2

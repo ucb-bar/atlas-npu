@@ -10,8 +10,19 @@
 //   Slot B — mreg read port 1: Push only (concurrent with Slot A compute).
 //   Slot C — mreg write ports: Pop only (concurrent with Slots A and B).
 //
-// Conflict detection prevents hazards on shared resources (weight buffer,
-// accum buffer, mreg banks) across concurrently active slots.
+// Software-scheduled model:
+//   The scalar core / compiler guarantees that commands are only issued
+//   when the target slot is idle and no resource conflicts exist.
+//   No hardware conflict detection or backpressure is performed.
+//   Assertions fire on violations to aid debugging.
+//
+// Compute pipeline overlap:
+//   When the SA datapath is pipelined, the sequencer allows a new compute
+//   to be issued while the previous compute's tail results are still
+//   draining out of the pipeline.  A drain counter tracks in-flight
+//   writebacks from the old command, and a tagged accSel pipeline ensures
+//   each writeback targets the correct accumulation buffer even after
+//   slotACmd has been overwritten by the new command.
 //
 // Mreg port usage:
 //   read port 0 : weight push, accum push FP8, accum push BF16 (lo half),
@@ -46,8 +57,8 @@ class SystolicArraySequencer(
 ) extends Module {
 
   val io = IO(new Bundle {
-    // ── Command input ──
-    val cmd = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    // ── Command input (fire-and-forget, no backpressure) ──
+    val cmd = Flipped(Valid(new MxuCmd(mregP.mregIdBits)))
 
     // ── Tensor register file (mreg) ports ──
     val mregReadReq0  = Valid(new MregReadReq(mregP))
@@ -188,7 +199,11 @@ class SystolicArraySequencer(
   // Busy signals
   // ==========================================================================
 
-  io.compBusy    := !slotAIdle && slotAIsComp
+  val drainPending = RegInit(0.U(rowCountW.W))
+  val drainAccSel  = Reg(Bool())
+  val isDraining   = drainPending > 0.U
+
+  io.compBusy    := (!slotAIdle && slotAIsComp) || isDraining
   io.pushBusy    := (!slotAIdle && slotAIsPush) || !slotBIdle
   io.popBusy     := !slotCIdle
   io.dataBusy    := io.pushBusy || io.popBusy
@@ -198,12 +213,10 @@ class SystolicArraySequencer(
   // Active mreg bank reports
   // ==========================================================================
 
-  // Slot A reads mreg during push and compute issue (not during drain).
   val slotAReadingMreg = (slotAState === aPushSetup || slotAState === aPushSteady ||
                           slotAState === aBF16Setup || slotAState === aBF16Steady ||
                           slotAState === aCompSetup || slotAState === aCompActive)
 
-  // BF16 push reads two adjacent banks; during BF16, slot B is guaranteed idle.
   val slotABF16Push = (slotAState === aBF16Setup || slotAState === aBF16Steady)
 
   io.activeReads(0).valid := slotAReadingMreg
@@ -217,15 +230,41 @@ class SystolicArraySequencer(
   io.activeWrites(1).bits  := slotCCmd.mregId + 1.U
 
   // ==========================================================================
-  // Conflict detection
+  // Structural hazard assertions (debug only — do not gate execution)
   // ==========================================================================
 
-  // Weight-buffer conflict: push targets same slot as active compute.
+  // ── Slot availability ──
+  assert(!(io.cmd.valid && opIsCompute &&
+           !(slotAIdle || slotAState === aCompDrain)),
+    "SA: Compute issued while Slot A is not idle/draining")
+
+  assert(!(io.cmd.valid && opIsPush && !slotAIdle && !slotBIdle),
+    "SA: Push issued while both Slot A and Slot B are busy")
+
+  assert(!(io.cmd.valid && opIsPushBF16 && (!slotAIdle || !slotBIdle)),
+    "SA: PushAccBF16 issued while Slot A or Slot B is busy")
+
+  assert(!(io.cmd.valid && opIsPop && !slotCIdle),
+    "SA: Pop issued while Slot C is busy")
+
+  // ── Weight-buffer conflicts ──
   val wbufConflict = slotAIsComp &&
     io.cmd.valid && (cmdOp === MxuOp.PushWeight) &&
     (io.cmd.bits.weightSlot === slotACmd.weightSlot)
 
-  // Accum-buffer conflict: push/pop targets same buffer as active compute.
+  val wbufConflictComputeVsPush = io.cmd.valid && opIsCompute && (
+    (!slotBIdle && slotBCmd.op === MxuOp.PushWeight &&
+      io.cmd.bits.weightSlot === slotBCmd.weightSlot) ||
+    (slotAIsPush && slotACmd.op === MxuOp.PushWeight &&
+      io.cmd.bits.weightSlot === slotACmd.weightSlot)
+  )
+
+  assert(!wbufConflict,
+    "SA: PushWeight targets same weight slot as active compute")
+  assert(!wbufConflictComputeVsPush,
+    "SA: Compute targets same weight slot as active push")
+
+  // ── Accum-buffer conflicts ──
   val compAccSel = slotACmd.accSel
   val accConflictWithComp = slotAIsComp && io.cmd.valid && (
     ((cmdOp === MxuOp.PushAccFP8 || cmdOp === MxuOp.PushAccBF16) &&
@@ -234,18 +273,23 @@ class SystolicArraySequencer(
       io.cmd.bits.accSel === compAccSel)
   )
 
-  // Accum-buffer conflict: Slot A push vs incoming pop on same buffer.
   val slotAPushAcc = slotAIsPush &&
     (slotACmd.op === MxuOp.PushAccFP8 || slotACmd.op === MxuOp.PushAccBF16)
   val accConflictPushPop = slotAPushAcc && hasPop &&
     (io.cmd.bits.accSel === slotACmd.accSel)
 
-  // Accum-buffer conflict: Slot B push vs incoming pop on same buffer.
   val slotBPushAcc = !slotBIdle && (slotBCmd.op === MxuOp.PushAccFP8)
   val accConflictBPop = slotBPushAcc && hasPop &&
     (io.cmd.bits.accSel === slotBCmd.accSel)
 
-  // Mreg bank conflict: pop writes to a bank currently being read.
+  assert(!accConflictWithComp,
+    "SA: Push/Pop targets same accum buffer as active compute")
+  assert(!accConflictPushPop,
+    "SA: Pop targets same accum buffer as active Slot A push")
+  assert(!accConflictBPop,
+    "SA: Pop targets same accum buffer as active Slot B push")
+
+  // ── Mreg bank conflicts ──
   val popMregId  = io.cmd.bits.mregId
   val popMregId2 = io.cmd.bits.mregId + 1.U
 
@@ -258,32 +302,55 @@ class SystolicArraySequencer(
     ))
   )
 
-  // Mreg bank conflict: push reads from a bank currently being written by pop.
   val mregBankConflictPush = (hasPush || hasPushBF16) && !slotCIdle && (
     (io.cmd.bits.mregId === slotCCmd.mregId) ||
     (slotCCmd.op === MxuOp.PopAccBF16 &&
       io.cmd.bits.mregId === (slotCCmd.mregId + 1.U))
   )
 
-  val anyConflict = wbufConflict || accConflictWithComp || accConflictPushPop ||
-                    accConflictBPop || mregBankConflictPop || mregBankConflictPush
+  assert(!mregBankConflictPop,
+    "SA: Pop writes to mreg bank currently being read")
+  assert(!mregBankConflictPush,
+    "SA: Push reads from mreg bank currently being written by pop")
+
+  // ── Drain conflict ──
+  val drainAccConflict = isDraining && io.cmd.valid && (
+    (opIsCompute && io.cmd.bits.accSel === drainAccSel) ||
+    ((cmdOp === MxuOp.PushAccFP8 || cmdOp === MxuOp.PushAccBF16) &&
+      io.cmd.bits.accSel === drainAccSel) ||
+    ((cmdOp === MxuOp.PopAccFP8 || cmdOp === MxuOp.PopAccBF16) &&
+      io.cmd.bits.accSel === drainAccSel)
+  )
+
+  assert(!drainAccConflict,
+    "SA: Command targets accum buffer still receiving drain writebacks")
 
   // ==========================================================================
-  // Command acceptance & routing
+  // Command routing (software guarantees no conflicts)
   // ==========================================================================
 
-  val canAcceptCompute = opIsCompute && slotAIdle && !anyConflict
-  val pushToB          = opIsPush && slotBIdle && !anyConflict
-  val pushToA          = opIsPush && !slotBIdle && slotAIdle && !anyConflict
-  val canAcceptPush    = pushToB || pushToA
-  val canAcceptBF16    = opIsPushBF16 && slotAIdle && slotBIdle && !anyConflict
-  val canAcceptPop     = opIsPop && slotCIdle && !anyConflict
-
-  io.cmd.ready := canAcceptCompute || canAcceptPush || canAcceptBF16 || canAcceptPop
+  val acceptCompute = io.cmd.valid && opIsCompute
+  val pushToB       = io.cmd.valid && opIsPush && slotBIdle
+  val pushToA       = io.cmd.valid && opIsPush && !slotBIdle
+  val acceptBF16    = io.cmd.valid && opIsPushBF16
+  val acceptPop     = io.cmd.valid && opIsPop
 
   // ==========================================================================
   // Compute pipeline (Slot A)
   // ==========================================================================
+
+  // Row-index and accSel tag pipelines — depth matches the valid pipeline
+  // in SystolicArray.
+  private val tagDepth = p.rows + p.cols - 1
+  val rowTagData = Reg(Vec(tagDepth, UInt(rowBits.W)))
+  for (i <- (tagDepth - 1) to 1 by -1) { rowTagData(i) := rowTagData(i - 1) }
+  rowTagData(0) := 0.U
+
+  // AccSel tag pipeline — tracks which accum buffer each in-flight result
+  // targets, so writebacks remain correct after slotACmd is overwritten.
+  val rowTagAccSel = Reg(Vec(tagDepth, Bool()))
+  for (i <- (tagDepth - 1) to 1 by -1) { rowTagAccSel(i) := rowTagAccSel(i - 1) }
+  rowTagAccSel(0) := false.B
 
   val compNextRow     = Reg(UInt(rowCountW.W))
   val compRowsIssued  = Reg(UInt(rowCountW.W))
@@ -300,13 +367,14 @@ class SystolicArraySequencer(
     io.compute.bits.psum         := io.accComputeReadData
     io.compute.bits.accumulate   := isAccumulate
     io.compute.bits.weightBufSel := slotACmd.weightSlot
+    rowTagData(0)   := rowIdx
+    rowTagAccSel(0) := slotACmd.accSel
   }
 
   // ==========================================================================
   // Push helpers (shared by Slot A and Slot B)
   // ==========================================================================
 
-  /** Row limit for a push operation: p.cols for weights, tileRows for accum. */
   private def pushRowLimit(op: MxuOp.Type): UInt =
     Mux(op === MxuOp.PushWeight, p.cols.U, tileRows.U)
 
@@ -356,43 +424,47 @@ class SystolicArraySequencer(
     port.bits.row    := row
   }
 
+  // Helper: capture state for a new compute command (shared by aIdle and
+  // aCompDrain acceptance paths).
+  private def startNewCompute(cmd: MxuCmd): Unit = {
+    slotACmd := cmd
+    io.mregReadReq0.valid       := true.B
+    io.mregReadReq0.bits.mregId := cmd.mregId
+    io.mregReadReq0.bits.row    := 0.U
+    compNextRow      := 1.U
+    compRowsIssued   := 1.U
+    compRowsSent     := 0.U
+    compRowsWritten  := 0.U
+    slotAState       := aCompSetup
+  }
+
   // ==========================================================================
   // Slot A FSM
   // ==========================================================================
 
   switch(slotAState) {
     is(aIdle) {
-      when(io.cmd.fire) {
-        when(canAcceptCompute) {
-          slotACmd := io.cmd.bits
-          io.mregReadReq0.valid       := true.B
-          io.mregReadReq0.bits.mregId := io.cmd.bits.mregId
-          io.mregReadReq0.bits.row    := 0.U
-          compNextRow      := 1.U
-          compRowsIssued   := 1.U
-          compRowsSent     := 0.U
-          compRowsWritten  := 0.U
-          slotAState       := aCompSetup
+      when(acceptCompute) {
+        startNewCompute(io.cmd.bits)
 
-        }.elsewhen(pushToA) {
-          slotACmd     := io.cmd.bits
-          slotARow     := 0.U
-          slotANextRow := 1.U
-          issueMregRead(io.mregReadReq0, io.cmd.bits, 0.U)
-          slotAState := aPushSetup
+      }.elsewhen(pushToA) {
+        slotACmd     := io.cmd.bits
+        slotARow     := 0.U
+        slotANextRow := 1.U
+        issueMregRead(io.mregReadReq0, io.cmd.bits, 0.U)
+        slotAState := aPushSetup
 
-        }.elsewhen(canAcceptBF16) {
-          slotACmd     := io.cmd.bits
-          slotARow     := 0.U
-          slotANextRow := 1.U
-          io.mregReadReq0.valid       := true.B
-          io.mregReadReq0.bits.mregId := io.cmd.bits.mregId
-          io.mregReadReq0.bits.row    := 0.U
-          io.mregReadReq1.valid       := true.B
-          io.mregReadReq1.bits.mregId := io.cmd.bits.mregId + 1.U
-          io.mregReadReq1.bits.row    := 0.U
-          slotAState := aBF16Setup
-        }
+      }.elsewhen(acceptBF16) {
+        slotACmd     := io.cmd.bits
+        slotARow     := 0.U
+        slotANextRow := 1.U
+        io.mregReadReq0.valid       := true.B
+        io.mregReadReq0.bits.mregId := io.cmd.bits.mregId
+        io.mregReadReq0.bits.row    := 0.U
+        io.mregReadReq1.valid       := true.B
+        io.mregReadReq1.bits.mregId := io.cmd.bits.mregId + 1.U
+        io.mregReadReq1.bits.row    := 0.U
+        slotAState := aBF16Setup
       }
     }
 
@@ -464,7 +536,8 @@ class SystolicArraySequencer(
         compRowsIssued := compRowsIssued + 1.U
         slotAState     := aCompActive
       }.otherwise {
-        slotAState := aCompDrain
+        drainAccSel := slotACmd.accSel
+        slotAState  := aCompDrain
       }
     }
     is(aCompActive) {
@@ -477,23 +550,45 @@ class SystolicArraySequencer(
         compNextRow    := compNextRow + 1.U
         compRowsIssued := compRowsIssued + 1.U
       }.otherwise {
-        slotAState := aCompDrain
+        drainAccSel := slotACmd.accSel
+        slotAState  := aCompDrain
       }
     }
     is(aCompDrain) {
-      when(compRowsWritten >= tileRows.U) {
+      when(compRowsWritten >= tileRows.U && !isDraining) {
+        // All writebacks (current + any prior drain) complete.
         slotAState := aIdle
+      }.elsewhen(acceptCompute && !isDraining) {
+        // Overlap: promote remaining current-compute writebacks into the
+        // drain counter.  The !isDraining guard ensures drainPending == 0
+        // here, so no multi-level drain tracking is needed.
+        drainPending := tileRows.U - compRowsWritten
+        drainAccSel  := slotACmd.accSel
+        startNewCompute(io.cmd.bits)
       }
     }
   }
 
-  // Compute pipeline writeback — SA outputs arrive in-order.
+  // Compute pipeline writeback (runs whenever core produces output).
+  // Uses the tagged accSel from the pipeline, not slotACmd, so writebacks
+  // remain correct after a new compute has overwritten slotACmd.
   when(io.coreOut.valid) {
+    val writeRow    = rowTagData(tagDepth - 1)
+    val writeAccSel = rowTagAccSel(tagDepth - 1)
+
     io.accComputeWrite.valid       := true.B
-    io.accComputeWrite.bits.accSel := slotACmd.accSel
-    io.accComputeWrite.bits.rowIdx := compRowsWritten(rowBits - 1, 0)
+    io.accComputeWrite.bits.accSel := writeAccSel
+    io.accComputeWrite.bits.rowIdx := writeRow
     io.accComputeWrite.bits.data   := io.coreOut.bits
-    compRowsWritten := compRowsWritten + 1.U
+
+    // The pipeline is strictly ordered: old-compute results exit before
+    // new-compute results.  Attribute the first drainPending writebacks
+    // to the old command, then count toward the current command.
+    when(drainPending > 0.U) {
+      drainPending := drainPending - 1.U
+    }.otherwise {
+      compRowsWritten := compRowsWritten + 1.U
+    }
   }
 
   // ==========================================================================
@@ -502,7 +597,7 @@ class SystolicArraySequencer(
 
   switch(slotBState) {
     is(bIdle) {
-      when(io.cmd.fire && pushToB) {
+      when(pushToB) {
         slotBCmd     := io.cmd.bits
         slotBRow     := 0.U
         slotBNextRow := 1.U
@@ -541,7 +636,7 @@ class SystolicArraySequencer(
 
   switch(slotCState) {
     is(cIdle) {
-      when(io.cmd.fire && canAcceptPop) {
+      when(acceptPop) {
         slotCCmd   := io.cmd.bits
         slotCRow   := 0.U
         slotCState := cRunning

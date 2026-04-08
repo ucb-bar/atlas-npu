@@ -82,7 +82,7 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
 
   // ── Resource & tolerance configuration ──
 
-  val vectorResource = "/mxu_test_vectors/mxu_vectors.txt"
+  val vectorResource = "/mxu_test_vectors/ipt_mxu_vectors.txt"
 
   val absTolerance = 0x0040
   val relTolerance = 0.01

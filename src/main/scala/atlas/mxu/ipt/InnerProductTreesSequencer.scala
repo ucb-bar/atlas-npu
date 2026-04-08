@@ -10,8 +10,11 @@
 //   Slot B — mreg read port 1: Push only (concurrent with Slot A compute).
 //   Slot C — mreg write ports: Pop only (concurrent with Slots A and B).
 //
-// Conflict detection prevents hazards on shared resources (weight buffer,
-// accum buffer, mreg banks) across concurrently active slots.
+// Software-scheduled model:
+//   The scalar core / compiler guarantees that commands are only issued
+//   when the target slot is idle and no resource conflicts exist.
+//   No hardware conflict detection or backpressure is performed.
+//   Assertions fire on violations to aid debugging.
 //
 // Compute pipeline overlap:
 //   When the compute datapath is pipelined (numPipeCuts > 0), the sequencer
@@ -50,8 +53,8 @@ class InnerProductTreesSequencer(
   require(p.tileRows <= mregP.mregRows)
 
   val io = IO(new Bundle {
-    // ── Command input ──
-    val cmd = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    // ── Command input (fire-and-forget, no backpressure) ──
+    val cmd = Flipped(Valid(new MxuCmd(mregP.mregIdBits)))
 
     // ── Tensor register file (mreg) ports ──
     val mregReadReq0  = Valid(new MregReadReq(mregP))
@@ -204,12 +207,10 @@ class InnerProductTreesSequencer(
   // Active mreg bank reports
   // ==========================================================================
 
-  // Slot A reads mreg during push and compute issue (not during drain).
   val slotAReadingMreg = (slotAState === aPushSetup || slotAState === aPushSteady ||
                           slotAState === aBF16Setup || slotAState === aBF16Steady ||
                           slotAState === aCompSetup || slotAState === aCompActive)
 
-  // BF16 push reads two adjacent banks; during BF16, slot B is guaranteed idle.
   val slotABF16Push = (slotAState === aBF16Setup || slotAState === aBF16Steady)
 
   io.activeReads(0).valid := slotAReadingMreg
@@ -223,15 +224,28 @@ class InnerProductTreesSequencer(
   io.activeWrites(1).bits  := slotCCmd.mregId + 1.U
 
   // ==========================================================================
-  // Conflict detection
+  // Structural hazard assertions (debug only — do not gate execution)
   // ==========================================================================
 
-  // Weight-buffer conflict: push targets same slot as active compute.
+  // ── Slot availability ──
+  assert(!(io.cmd.valid && opIsCompute &&
+           !(slotAIdle || slotAState === aCompDrain)),
+    "IPT: Compute issued while Slot A is not idle/draining")
+
+  assert(!(io.cmd.valid && opIsPush && !slotAIdle && !slotBIdle),
+    "IPT: Push issued while both Slot A and Slot B are busy")
+
+  assert(!(io.cmd.valid && opIsPushBF16 && (!slotAIdle || !slotBIdle)),
+    "IPT: PushAccBF16 issued while Slot A or Slot B is busy")
+
+  assert(!(io.cmd.valid && opIsPop && !slotCIdle),
+    "IPT: Pop issued while Slot C is busy")
+
+  // ── Weight-buffer conflicts ──
   val wbufConflict = slotAIsComp &&
     io.cmd.valid && (cmdOp === MxuOp.PushWeight) &&
     (io.cmd.bits.weightSlot === slotACmd.weightSlot)
 
-  // Weight-buffer conflict (reverse): compute targets same slot as active push.
   val wbufConflictComputeVsPush = io.cmd.valid && opIsCompute && (
     (!slotBIdle && slotBCmd.op === MxuOp.PushWeight &&
       io.cmd.bits.weightSlot === slotBCmd.weightSlot) ||
@@ -239,7 +253,12 @@ class InnerProductTreesSequencer(
       io.cmd.bits.weightSlot === slotACmd.weightSlot)
   )
 
-  // Accum-buffer conflict: push/pop targets same buffer as active compute.
+  assert(!wbufConflict,
+    "IPT: PushWeight targets same weight slot as active compute")
+  assert(!wbufConflictComputeVsPush,
+    "IPT: Compute targets same weight slot as active push")
+
+  // ── Accum-buffer conflicts ──
   val compAccSel = slotACmd.accSel
   val accConflictWithComp = slotAIsComp && io.cmd.valid && (
     ((cmdOp === MxuOp.PushAccFP8 || cmdOp === MxuOp.PushAccBF16) &&
@@ -248,18 +267,23 @@ class InnerProductTreesSequencer(
       io.cmd.bits.accSel === compAccSel)
   )
 
-  // Accum-buffer conflict: Slot A push vs incoming pop on same buffer.
   val slotAPushAcc = slotAIsPush &&
     (slotACmd.op === MxuOp.PushAccFP8 || slotACmd.op === MxuOp.PushAccBF16)
   val accConflictPushPop = slotAPushAcc && hasPop &&
     (io.cmd.bits.accSel === slotACmd.accSel)
 
-  // Accum-buffer conflict: Slot B push vs incoming pop on same buffer.
   val slotBPushAcc = !slotBIdle && (slotBCmd.op === MxuOp.PushAccFP8)
   val accConflictBPop = slotBPushAcc && hasPop &&
     (io.cmd.bits.accSel === slotBCmd.accSel)
 
-  // Mreg bank conflict: pop writes to a bank currently being read.
+  assert(!accConflictWithComp,
+    "IPT: Push/Pop targets same accum buffer as active compute")
+  assert(!accConflictPushPop,
+    "IPT: Pop targets same accum buffer as active Slot A push")
+  assert(!accConflictBPop,
+    "IPT: Pop targets same accum buffer as active Slot B push")
+
+  // ── Mreg bank conflicts ──
   val popMregId  = io.cmd.bits.mregId
   val popMregId2 = io.cmd.bits.mregId + 1.U
 
@@ -272,18 +296,18 @@ class InnerProductTreesSequencer(
     ))
   )
 
-  // Mreg bank conflict: push reads from a bank currently being written by pop.
   val mregBankConflictPush = (hasPush || hasPushBF16) && !slotCIdle && (
     (io.cmd.bits.mregId === slotCCmd.mregId) ||
     (slotCCmd.op === MxuOp.PopAccBF16 &&
       io.cmd.bits.mregId === (slotCCmd.mregId + 1.U))
   )
 
-  // Drain conflict: push/pop/compute blocked if targeting the buffer still
-  // receiving drain writebacks.  Different-acc computes are safe because the
-  // tagged rowTagAccSel pipeline routes writebacks correctly, and
-  // numPipeCuts < tileRows guarantees the old drain completes during the
-  // new compute's feed phase (no multi-level drain cascade).
+  assert(!mregBankConflictPop,
+    "IPT: Pop writes to mreg bank currently being read")
+  assert(!mregBankConflictPush,
+    "IPT: Push reads from mreg bank currently being written by pop")
+
+  // ── Drain conflict ──
   val drainAccConflict = isDraining && io.cmd.valid && (
     (opIsCompute && io.cmd.bits.accSel === drainAccSel) ||
     ((cmdOp === MxuOp.PushAccFP8 || cmdOp === MxuOp.PushAccBF16) &&
@@ -292,39 +316,28 @@ class InnerProductTreesSequencer(
       io.cmd.bits.accSel === drainAccSel)
   )
 
-  val anyConflict = wbufConflict || wbufConflictComputeVsPush ||
-                    accConflictWithComp || accConflictPushPop ||
-                    accConflictBPop || mregBankConflictPop || mregBankConflictPush ||
-                    drainAccConflict
+  assert(!drainAccConflict,
+    "IPT: Command targets accum buffer still receiving drain writebacks")
 
   // ==========================================================================
-  // Command acceptance & routing
+  // Command routing (software guarantees no conflicts)
   // ==========================================================================
 
-  val canAcceptCompute = opIsCompute &&
-    (slotAIdle || slotAState === aCompDrain) && !anyConflict
-  val pushToB          = opIsPush && slotBIdle && !anyConflict
-  val pushToA          = opIsPush && !slotBIdle && slotAIdle && !anyConflict
-  val canAcceptPush    = pushToB || pushToA
-  val canAcceptBF16    = opIsPushBF16 && slotAIdle && slotBIdle && !anyConflict
-  val canAcceptPop     = opIsPop && slotCIdle && !anyConflict
-
-  io.cmd.ready := canAcceptCompute || canAcceptPush || canAcceptBF16 || canAcceptPop
+  val acceptCompute = io.cmd.valid && opIsCompute
+  val pushToB       = io.cmd.valid && opIsPush && slotBIdle
+  val pushToA       = io.cmd.valid && opIsPush && !slotBIdle
+  val acceptBF16    = io.cmd.valid && opIsPushBF16
+  val acceptPop     = io.cmd.valid && opIsPop
 
   // ==========================================================================
   // Compute pipeline (Slot A)
   // ==========================================================================
 
-  // Row-index and accSel tag pipelines — depth matches the valid pipeline
-  // in InnerProductTrees (numPipeCuts + 1 registers: the cut stages plus
-  // the final outValid / outReg stage).
   private val tagDepth = p.numPipeCuts + 1
   val rowTagData = Reg(Vec(tagDepth, UInt(rowBits.W)))
   for (i <- (tagDepth - 1) to 1 by -1) { rowTagData(i) := rowTagData(i - 1) }
   rowTagData(0) := 0.U
 
-  // AccSel tag pipeline — tracks which accum buffer each in-flight result
-  // targets, so writebacks remain correct after slotACmd is overwritten.
   val rowTagAccSel = Reg(Vec(tagDepth, Bool()))
   for (i <- (tagDepth - 1) to 1 by -1) { rowTagAccSel(i) := rowTagAccSel(i - 1) }
   rowTagAccSel(0) := false.B
@@ -352,7 +365,6 @@ class InnerProductTreesSequencer(
   // Push helpers (shared by Slot A and Slot B)
   // ==========================================================================
 
-  /** Row limit for a push operation: p.numLanes for weights, tileRows for accum. */
   private def pushRowLimit(op: MxuOp.Type): UInt =
     Mux(op === MxuOp.PushWeight, p.numLanes.U, tileRows.U)
 
@@ -402,8 +414,6 @@ class InnerProductTreesSequencer(
     port.bits.row    := row
   }
 
-  // Helper: capture state for a new compute command (shared by aIdle and
-  // aCompDrain acceptance paths).
   private def startNewCompute(cmd: MxuCmd): Unit = {
     slotACmd := cmd
     io.mregReadReq0.valid       := true.B
@@ -422,33 +432,30 @@ class InnerProductTreesSequencer(
 
   switch(slotAState) {
     is(aIdle) {
-      when(io.cmd.fire) {
-        when(canAcceptCompute) {
-          startNewCompute(io.cmd.bits)
+      when(acceptCompute) {
+        startNewCompute(io.cmd.bits)
 
-        }.elsewhen(pushToA) {
-          slotACmd     := io.cmd.bits
-          slotARow     := 0.U
-          slotANextRow := 1.U
-          issueMregRead(io.mregReadReq0, io.cmd.bits, 0.U)
-          slotAState := aPushSetup
+      }.elsewhen(pushToA) {
+        slotACmd     := io.cmd.bits
+        slotARow     := 0.U
+        slotANextRow := 1.U
+        issueMregRead(io.mregReadReq0, io.cmd.bits, 0.U)
+        slotAState := aPushSetup
 
-        }.elsewhen(canAcceptBF16) {
-          slotACmd     := io.cmd.bits
-          slotARow     := 0.U
-          slotANextRow := 1.U
-          io.mregReadReq0.valid     := true.B
-          io.mregReadReq0.bits.mregId := io.cmd.bits.mregId
-          io.mregReadReq0.bits.row  := 0.U
-          io.mregReadReq1.valid     := true.B
-          io.mregReadReq1.bits.mregId := io.cmd.bits.mregId + 1.U
-          io.mregReadReq1.bits.row  := 0.U
-          slotAState := aBF16Setup
-        }
+      }.elsewhen(acceptBF16) {
+        slotACmd     := io.cmd.bits
+        slotARow     := 0.U
+        slotANextRow := 1.U
+        io.mregReadReq0.valid     := true.B
+        io.mregReadReq0.bits.mregId := io.cmd.bits.mregId
+        io.mregReadReq0.bits.row  := 0.U
+        io.mregReadReq1.valid     := true.B
+        io.mregReadReq1.bits.mregId := io.cmd.bits.mregId + 1.U
+        io.mregReadReq1.bits.row  := 0.U
+        slotAState := aBF16Setup
       }
     }
 
-    // ── Push (single-port) via Slot A ──
     is(aPushSetup) {
       processPushRow(slotACmd, slotARow, io.mregReadResp0.bits)
       when(slotANextRow >= pushRowLimit(slotACmd.op)) {
@@ -471,7 +478,6 @@ class InnerProductTreesSequencer(
       }
     }
 
-    // ── Push BF16 (dual-port) via Slot A ──
     is(aBF16Setup) {
       drivePushAccBF16(slotACmd, slotARow)
       when(slotANextRow >= tileRows.U) {
@@ -504,7 +510,6 @@ class InnerProductTreesSequencer(
       }
     }
 
-    // ── Compute via Slot A ──
     is(aCompSetup) {
       driveCoreBeat(0.U(rowBits.W))
       compRowsSent := 1.U
@@ -536,12 +541,8 @@ class InnerProductTreesSequencer(
     }
     is(aCompDrain) {
       when(compRowsWritten >= tileRows.U && !isDraining) {
-        // All writebacks (current + any prior drain) complete.
         slotAState := aIdle
-      }.elsewhen(io.cmd.fire && canAcceptCompute && !isDraining) {
-        // Overlap: promote remaining current-compute writebacks into the
-        // drain counter.  The !isDraining guard ensures drainPending == 0
-        // here, so no multi-level drain tracking is needed.
+      }.elsewhen(acceptCompute && !isDraining) {
         drainPending := tileRows.U - compRowsWritten
         drainAccSel  := slotACmd.accSel
         startNewCompute(io.cmd.bits)
@@ -549,9 +550,6 @@ class InnerProductTreesSequencer(
     }
   }
 
-  // Compute pipeline writeback (runs whenever core produces output).
-  // Uses the tagged accSel from the pipeline, not slotACmd, so writebacks
-  // remain correct after a new compute has overwritten slotACmd.
   when(io.coreOut.valid) {
     val writeRow    = rowTagData(tagDepth - 1)
     val writeAccSel = rowTagAccSel(tagDepth - 1)
@@ -561,9 +559,6 @@ class InnerProductTreesSequencer(
     io.accComputeWrite.bits.rowIdx := writeRow
     io.accComputeWrite.bits.data   := io.coreOut.bits
 
-    // The pipeline is strictly ordered: old-compute results exit before
-    // new-compute results.  Attribute the first drainPending writebacks
-    // to the old command, then count toward the current command.
     when(drainPending > 0.U) {
       drainPending := drainPending - 1.U
     }.otherwise {
@@ -577,7 +572,7 @@ class InnerProductTreesSequencer(
 
   switch(slotBState) {
     is(bIdle) {
-      when(io.cmd.fire && pushToB) {
+      when(pushToB) {
         slotBCmd     := io.cmd.bits
         slotBRow     := 0.U
         slotBNextRow := 1.U
@@ -616,7 +611,7 @@ class InnerProductTreesSequencer(
 
   switch(slotCState) {
     is(cIdle) {
-      when(io.cmd.fire && canAcceptPop) {
+      when(acceptPop) {
         slotCCmd   := io.cmd.bits
         slotCRow   := 0.U
         slotCState := cRunning
@@ -624,12 +619,10 @@ class InnerProductTreesSequencer(
     }
 
     is(cRunning) {
-      // Drive store address to accumulation buffer (read raw BF16).
       io.accStoreAddr.accSel := slotCCmd.accSel
       io.accStoreAddr.rowIdx := slotCRow(rowBits - 1, 0)
 
       when(slotCCmd.op === MxuOp.PopAccFP8) {
-        // Quantize BF16 → FP8 via FPUtils bank.
         val fp8Row = quantBank(io.accStoreData, slotCCmd.scaleE8M0)
         io.mregWriteReq0.valid      := true.B
         io.mregWriteReq0.bits.mregId := slotCCmd.mregId

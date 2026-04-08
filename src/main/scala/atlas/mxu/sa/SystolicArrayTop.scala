@@ -36,8 +36,8 @@ class SystolicArrayTop(
     s"cols(${p.cols}) must not exceed mregRows(${mregP.mregRows}) for PushWeight")
 
   val io = IO(new Bundle {
-    // ── Command input ──
-    val cmd = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    // ── Command input (fire-and-forget, no backpressure) ──
+    val cmd = Flipped(Valid(new MxuCmd(mregP.mregIdBits)))
 
     // ── Tensor register file (mreg) ports ──
     val mregReadReq0  = Valid(new MregReadReq(mregP))
@@ -72,7 +72,7 @@ class SystolicArrayTop(
   // Command interface
   // ==========================================================================
 
-  seq.io.cmd <> io.cmd
+  seq.io.cmd := io.cmd
 
   // ==========================================================================
   // Tensor register file ports (directly forwarded)

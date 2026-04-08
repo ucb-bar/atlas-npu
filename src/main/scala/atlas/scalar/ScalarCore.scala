@@ -1,5 +1,5 @@
 /*
-ScalarCore.scala — 2-stage pipeline scalar controller.
+ScalarCore.scala — 2-stage pipeline scalar controller (software-scheduled).
 
 All VMEM access goes through the LSU:
   - Scalar loads/stores: via scalarMemCmd/scalarMemResp
@@ -10,31 +10,18 @@ Pipeline overview
   Stage 0: Fetch from IMEM
   Stage 1: Decode / Execute / Writeback
 
-Hazard model:
-  MXU0/MXU1/XLU — backpressure via cmd_ready; no engine-level stall.
-  VPU/LSU — fire-and-forget; stall while engine busy.
-  MREG banks — direction-aware:
-    Read  bank X → stall only if writeBusy(X)             (RAW)
-    Write bank X → stall if readBusy(X) || writeBusy(X)   (WAR / WAW)
+Software-scheduled hazard model:
+  The frontend never stalls for resource hazards.  The compiler / programmer
+  is responsible for scheduling instructions so that no bank conflicts,
+  engine-busy violations, or command-backpressure violations occur.
+  Hardware assertions fire on any such violation to aid debugging.
 
-Scalar store buffer:
-  A 1-entry posted-store buffer decouples scalar stores from the pipeline.
-  Stores capture into the buffer and retire immediately.  The buffer drains
-  to LSU asynchronously when the LSU is idle.
+  The only conditions that stall the pipeline are:
+    DELAY    — stalls for `imm` cycles.
+    DMA.WAIT — stalls until the targeted DMA channel is no longer busy.
 
-Posted DMA wait:
-  DMA.WAIT fires immediately, recording the channel in a pending-wait mask.
-  The pending bit clears when dma_busy(channel) goes false.  All VMEM-
-  accessing instructions stall while any pending wait is active: VLOAD and
-  VSTORE via engineHazard, scalar loads via issueScalarLoad, scalar store
-  buffer drain via drainStoreBuf, and DMA launches via engineHazard.
-  Non-VMEM instructions (ALU, branches, CSR, MXU/XLU commands, DMA.CONFIG)
-  execute freely during the wait.
-
-Halt drain:
-  ECALL and EBREAK stall the pipeline until all async work completes
-  (pending DMA waits + store buffer), guaranteeing that all side effects
-  are visible before the core halts.  Illegal instructions halt immediately.
+Scalar stores go directly to the LSU (no store buffer).  Software must
+ensure the LSU is idle before issuing a scalar load or store.
 */
 
 package atlas.scalar
@@ -59,18 +46,13 @@ object AtlasMemMap {
 object StallType {
   val WIDTH     = 3
   val NONE      = 0.U(WIDTH.W)
-  val DMA_WAIT  = 1.U(WIDTH.W)  // reserved (posted model — no longer stalls)
+  val DMA_WAIT  = 1.U(WIDTH.W)
   val ENGINE    = 2.U(WIDTH.W)
   val MREG_BANK = 3.U(WIDTH.W)
   val MEM_LOAD  = 4.U(WIDTH.W)
   val MEM_STORE = 5.U(WIDTH.W)
   val DELAY     = 6.U(WIDTH.W)
   val CMD_READY = 7.U(WIDTH.W)
-}
-
-object EngineId {
-  val VPU  = 2.U(3.W)
-  val LSU  = 4.U(3.W)
 }
 
 /** Scalar controller coordinating fetch, decode, execute, and engine launch.
@@ -100,35 +82,13 @@ class ScalarCore(spP: VmemParams) extends Module {
 
   val inStall     = RegInit(false.B)
   val stallTypeR  = RegInit(StallType.NONE)
-  val stallParamR = Reg(UInt(6.W))
 
   val delayCounter = RegInit(0.U(12.W))
-
-  // Posted-store buffer: captures scalar stores for asynchronous LSU drain.
-  val storeBufValid = RegInit(false.B)
-  val storeBufCmd   = Reg(new LsuScalarCmd(spP))
-
-  // Posted DMA wait mask: per-channel pending bits set by DMA.WAIT, cleared
-  // when the corresponding dma_busy flag goes low.
-  val dmaWaitPending = RegInit(VecInit(Seq.fill(8)(false.B)))
-  val anyDmaWaitPending = dmaWaitPending.reduce(_ || _)
-
-  // ==============================================================
-  // DMA wait tracking: clear pending bits when channels complete
-  // ==============================================================
-
-  for (ch <- 0 until 8) {
-    when(!io.dma_busy(ch)) {
-      dmaWaitPending(ch) := false.B
-    }
-  }
 
   // ==============================================================
   // Helper functions
   // ==============================================================
 
-  /** True when the decoded instruction reads a MREG bank that has a
-    * pending asynchronous write (RAW hazard). */
   private def instrMregReadHazard(dec: DecodedInstr): Bool = {
     val wb = io.mregWriteBusy
     val h  = WireDefault(false.B)
@@ -148,14 +108,6 @@ class ScalarCore(spP: VmemParams) extends Module {
     h
   }
 
-  /** True when the decoded instruction writes a MREG bank that is either
-    * being read or written by another engine (WAR / WAW hazard).
-    *
-    * Exception: VLOAD only checks writeBusy (WAW), not readBusy (WAR).
-    * The LSU writes rows sequentially and always has a head start over
-    * any MXU that reads the same bank, so the row-level overlap is
-    * structurally safe.  The WAR check is kept for non-LSU writers
-    * (POP, XLU) where no such structural guarantee exists. */
   private def instrMregWriteHazard(dec: DecodedInstr): Bool = {
     val rb = io.mregReadBusy
     val wb = io.mregWriteBusy
@@ -174,52 +126,6 @@ class ScalarCore(spP: VmemParams) extends Module {
       h := rb(dec.vd) || wb(dec.vd)
     }
     h
-  }
-
-  private def engineHazard(dec: DecodedInstr): Bool = {
-    (dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy) ||
-    (dec.is_lsu && (io.lsu_busy || storeBufValid || anyDmaWaitPending)) ||
-    ((dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST) && anyDmaWaitPending)
-  }
-
-  private def engineHazardId(dec: DecodedInstr): UInt = {
-    MuxCase(EngineId.VPU, Seq(
-      (dec.vpu_cmd =/= VPU_NONE) -> EngineId.VPU,
-      (dec.is_lsu)               -> EngineId.LSU,
-      (dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST) -> EngineId.LSU
-    ))
-  }
-
-  private def fastStallStillActive(stallType: UInt, stallParam: UInt): Bool = {
-    val active = WireDefault(false.B)
-    switch(stallType) {
-      is(StallType.ENGINE) {
-        active := MuxLookup(stallParam(2, 0), false.B)(Seq(
-          EngineId.VPU  -> io.vpu_status.busy,
-          EngineId.LSU  -> (io.lsu_busy || storeBufValid || anyDmaWaitPending)
-        ))
-      }
-      is(StallType.MREG_BANK) {
-        active := instrMregReadHazard(dec) || instrMregWriteHazard(dec)
-      }
-      is(StallType.MEM_LOAD) {
-        active := !memLoadPending
-      }
-      is(StallType.MEM_STORE) {
-        active := storeBufValid
-      }
-      is(StallType.DELAY) {
-        active := delayCounter =/= 0.U
-      }
-      is(StallType.CMD_READY) {
-        active := MuxLookup(stallParam(1, 0), false.B)(Seq(
-          0.U -> !io.mxu0_cmd_ready,
-          1.U -> !io.mxu1_cmd_ready,
-          2.U -> !io.xlu_cmd_ready
-        ))
-      }
-    }
-    active
   }
 
   private def buildMxuCmd(d: DecodedInstr): MxuCmd = {
@@ -285,30 +191,15 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.csrPort.addr := dec.csr_addr
 
   // ==============================================================
-  // Hazard + stall detection
+  // Stall conditions (only DELAY and DMA.WAIT)
   // ==============================================================
-
-  val mreg_read_haz  = s1_valid && instrMregReadHazard(dec)
-  val mreg_write_haz = s1_valid && instrMregWriteHazard(dec)
-  val mreg_hazard    = mreg_read_haz || mreg_write_haz
-
-  val engine_hazard = s1_valid && engineHazard(dec)
-
-  val cmd_ready_stall = s1_valid && (
-    (dec.mxu_cmd =/= MXU_NONE && dec.mxu_sel === MXUSEL_0 && !io.mxu0_cmd_ready) ||
-    (dec.mxu_cmd =/= MXU_NONE && dec.mxu_sel === MXUSEL_1 && !io.mxu1_cmd_ready) ||
-    (dec.xlu_cmd =/= XLU_NONE && !io.xlu_cmd_ready)
-  )
-
-  val mem_load_stall  = s1_valid && dec.is_mem_load && !memLoadPending
-  val mem_store_stall = s1_valid && dec.is_mem_store && storeBufValid
 
   val delay_stall = delayCounter =/= 0.U
 
-  val fastStallActive = fastStallStillActive(stallTypeR, stallParamR)
+  val dma_wait_stall = s1_valid && (dec.dma_cmd === DMA_WAIT) && io.dma_busy(dec.funct3)
 
   // ==============================================================
-  // Halt logic: ECALL/EBREAK drain all async work before halting
+  // Halt logic
   // ==============================================================
 
   val is_illegal = s1_valid && dec.illegal
@@ -318,50 +209,28 @@ class ScalarCore(spP: VmemParams) extends Module {
   val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
   val ecall_ebreak     = s1_valid && (dec.is_ecall || dec.is_ebreak)
 
-  // Async work that must drain before ECALL/EBREAK can halt the core.
-  val asyncBusy = anyDmaWaitPending || storeBufValid
-
-  // ECALL/EBREAK stalls the pipeline while async work is in progress.
-  // Illegal instructions halt immediately (they indicate a bug).
-  val pending_halt = ecall_ebreak && asyncBusy
-
-  val halt_now = halted || illegal_detected || (ecall_ebreak && !asyncBusy)
-  when((illegal_detected || (ecall_ebreak && !asyncBusy)) && !halted) { halted := true.B }
+  val halt_now = halted || illegal_detected || ecall_ebreak
+  when((illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
 
   // ==============================================================
   // Full stall computation
   // ==============================================================
 
-  val fullStall =
-    cmd_ready_stall || engine_hazard || mreg_hazard ||
-    mem_load_stall || mem_store_stall || delay_stall ||
-    pending_halt
+  val fullStall = delay_stall || dma_wait_stall
 
-  val stall = Mux(inStall && fastStallActive, true.B, fullStall)
+  val stall = fullStall
 
   when(reset.asBool || halted) {
     inStall    := false.B
     stallTypeR := StallType.NONE
   }.elsewhen(!inStall && fullStall) {
     inStall := true.B
-    when(cmd_ready_stall) {
-      stallTypeR  := StallType.CMD_READY
-      stallParamR := Mux(dec.xlu_cmd =/= XLU_NONE, 2.U, dec.mxu_sel)
-    }.elsewhen(mreg_hazard) {
-      stallTypeR := StallType.MREG_BANK
-    }.elsewhen(engine_hazard) {
-      stallTypeR  := StallType.ENGINE
-      stallParamR := engineHazardId(dec)
-    }.elsewhen(mem_load_stall) {
-      stallTypeR := StallType.MEM_LOAD
-    }.elsewhen(mem_store_stall) {
-      stallTypeR := StallType.MEM_STORE
-    }.elsewhen(delay_stall) {
+    when(delay_stall) {
       stallTypeR := StallType.DELAY
-    }.elsewhen(pending_halt) {
+    }.otherwise {
       stallTypeR := StallType.DMA_WAIT
     }
-  }.elsewhen(inStall && !fastStallActive) {
+  }.elsewhen(inStall && !fullStall) {
     inStall    := false.B
     stallTypeR := StallType.NONE
   }
@@ -369,6 +238,8 @@ class ScalarCore(spP: VmemParams) extends Module {
   // ==============================================================
   // Execute units: ALU + branch
   // ==============================================================
+
+  val s1_fire = s1_valid && !stall && !halt_now
 
   val alu_a = MuxLookup(dec.op1_sel, rs1_data)(Seq(
     OP1_RS1 -> rs1_data,
@@ -404,18 +275,50 @@ class ScalarCore(spP: VmemParams) extends Module {
     Mux(is_jalr, jalr_target, Mux(is_jal, jal_target, branch_target))
   val link_value = s1_pc + 1.U
 
-  val s1_fire = s1_valid && !stall && !halt_now
-
   // ==============================================================
-  // Posted DMA wait: DMA.WAIT fires and sets the channel pending bit
+  // Software-scheduling assertions (printf + assert for visibility)
+  //
+  // Engine cmd_ready assertions are now in the sequencers/engines
+  // themselves, where the structural hazards are directly observable.
   // ==============================================================
 
-  when(s1_fire && dec.dma_cmd === DMA_WAIT) {
-    dmaWaitPending(dec.funct3) := true.B
+  when(s1_fire && instrMregReadHazard(dec)) {
+    printf("ASSERT FAIL [pc=0x%x]: MREG RAW hazard: instruction reads bank with pending write\n", s1_pc)
   }
+  assert(!(s1_fire && instrMregReadHazard(dec)))
+
+  when(s1_fire && instrMregWriteHazard(dec)) {
+    printf("ASSERT FAIL [pc=0x%x]: MREG WAR/WAW hazard: instruction writes bank with pending read/write\n", s1_pc)
+  }
+  assert(!(s1_fire && instrMregWriteHazard(dec)))
+
+  when(s1_fire && dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy) {
+    printf("ASSERT FAIL [pc=0x%x]: VPU command issued while VPU is busy\n", s1_pc)
+  }
+  assert(!(s1_fire && dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy))
+
+  when(s1_fire && dec.is_lsu && io.lsu_busy) {
+    printf("ASSERT FAIL [pc=0x%x]: LSU command issued while LSU is busy\n", s1_pc)
+  }
+  assert(!(s1_fire && dec.is_lsu && io.lsu_busy))
+
+  when(s1_fire && dec.is_mem_load && memLoadPending) {
+    printf("ASSERT FAIL [pc=0x%x]: scalar load issued while prior load response pending\n", s1_pc)
+  }
+  assert(!(s1_fire && dec.is_mem_load && memLoadPending))
+
+  when(s1_fire && dec.is_mem_load && io.lsu_busy) {
+    printf("ASSERT FAIL [pc=0x%x]: scalar load issued while LSU is busy\n", s1_pc)
+  }
+  assert(!(s1_fire && dec.is_mem_load && io.lsu_busy))
+
+  when(s1_fire && dec.is_mem_store && io.lsu_busy) {
+    printf("ASSERT FAIL [pc=0x%x]: scalar store issued while LSU is busy\n", s1_pc)
+  }
+  assert(!(s1_fire && dec.is_mem_store && io.lsu_busy))
 
   // ==============================================================
-  // Delay counter: hold pipeline for imm cycles after DELAY fires
+  // Delay counter
   // ==============================================================
 
   when(reset.asBool || halt_now) {
@@ -441,22 +344,13 @@ class ScalarCore(spP: VmemParams) extends Module {
   }
 
   // ==============================================================
-  // Scalar memory path via LSU (with posted-store buffer)
+  // Scalar memory path via LSU (no store buffer — direct issue)
   // ==============================================================
 
-  val canIssueLsuScalar = !io.lsu_busy
-
-  // Scalar loads go through LSU → VMEM, the same VMEM that DMA writes to.
-  // Must wait for pending DMA waits to avoid reading partially-written data.
   val issueScalarLoad =
-    s1_valid && dec.is_mem_load && !memLoadPending &&
-    canIssueLsuScalar && !storeBufValid && !anyDmaWaitPending && !halt_now
+    s1_fire && dec.is_mem_load && !memLoadPending
 
   val issueScalarStore = s1_fire && dec.is_mem_store
-
-  // Scalar stores go through LSU → VMEM.  Must wait for pending DMA waits
-  // to avoid writing VMEM while DMA.STORE is reading from it.
-  val drainStoreBuf = storeBufValid && !io.lsu_busy && !anyDmaWaitPending
 
   val storeByteOff = alu_result(1, 0)
   val storeData = Wire(UInt(32.W))
@@ -480,24 +374,21 @@ class ScalarCore(spP: VmemParams) extends Module {
   }
 
   when(issueScalarStore) {
-    storeBufValid        := true.B
-    storeBufCmd.isStore  := true.B
-    storeBufCmd.byteAddr := alu_result(spP.byteAddrBits - 1, 0)
-    storeBufCmd.wdata    := storeData
-    storeBufCmd.wmask    := storeMask
-  }
-
-  when(drainStoreBuf) {
-    storeBufValid := false.B
-  }
-
-  when(drainStoreBuf) {
-    io.scalarMemCmd.valid := true.B
-    io.scalarMemCmd.bits  := storeBufCmd
-  }.otherwise {
-    io.scalarMemCmd.valid         := issueScalarLoad
+    io.scalarMemCmd.valid         := true.B
+    io.scalarMemCmd.bits.isStore  := true.B
+    io.scalarMemCmd.bits.byteAddr := alu_result(spP.byteAddrBits - 1, 0)
+    io.scalarMemCmd.bits.wdata    := storeData
+    io.scalarMemCmd.bits.wmask    := storeMask
+  }.elsewhen(issueScalarLoad) {
+    io.scalarMemCmd.valid         := true.B
     io.scalarMemCmd.bits.isStore  := false.B
     io.scalarMemCmd.bits.byteAddr := alu_result(spP.byteAddrBits - 1, 0)
+    io.scalarMemCmd.bits.wdata    := 0.U
+    io.scalarMemCmd.bits.wmask    := 0.U
+  }.otherwise {
+    io.scalarMemCmd.valid         := false.B
+    io.scalarMemCmd.bits.isStore  := false.B
+    io.scalarMemCmd.bits.byteAddr := 0.U
     io.scalarMemCmd.bits.wdata    := 0.U
     io.scalarMemCmd.bits.wmask    := 0.U
   }
@@ -550,8 +441,8 @@ class ScalarCore(spP: VmemParams) extends Module {
   )
   io.csrPort.halted      := halt_now
   io.csrPort.set_illegal := illegal_detected && !halted
-  io.csrPort.set_ecall   := s1_valid && dec.is_ecall && !asyncBusy && !halted
-  io.csrPort.set_ebreak  := s1_valid && dec.is_ebreak && !asyncBusy && !halted
+  io.csrPort.set_ecall   := s1_valid && dec.is_ecall && !halted
+  io.csrPort.set_ebreak  := s1_valid && dec.is_ebreak && !halted
   io.csrPort.illegal_pc  := s1_pc
   io.csrPort.inst_retire := s1_fire
 

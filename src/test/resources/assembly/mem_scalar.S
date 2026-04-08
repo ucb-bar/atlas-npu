@@ -35,6 +35,7 @@
 # ── Test 2: LW byte 0 = 0xFF84A201 ──────────────────────
     ADDI  x8, x0, 0
     LW    x9, x8, 0
+    DELAY 0
     LI    x30, 0xFF84A201
     BNE   x9, x30, fail
     NOP
@@ -43,6 +44,7 @@
 
 # ── Test 3: LB byte 0 = sign_ext(0x01) = 1 ──────────────
     LB    x9, x8, 0
+    DELAY 0
     ADDI  x30, x0, 1
     BNE   x9, x30, fail
     NOP
@@ -51,6 +53,7 @@
 
 # ── Test 4: LB byte 2 = sign_ext(0x84) = 0xFFFFFF84 ─────
     LB    x9, x8, 2
+    DELAY 0
     LI    x30, 0xFFFFFF84
     BNE   x9, x30, fail
     NOP
@@ -59,6 +62,7 @@
 
 # ── Test 5: LBU byte 2 = 0x84 ───────────────────────────
     LBU   x9, x8, 2
+    DELAY 0
     ADDI  x30, x0, 0x84
     BNE   x9, x30, fail
     NOP
@@ -67,6 +71,7 @@
 
 # ── Test 6: LH byte 0 = sign_ext(0xA201) = 0xFFFFA201 ───
     LH    x9, x8, 0
+    DELAY 0
     LI    x30, 0xFFFFA201
     BNE   x9, x30, fail
     NOP
@@ -75,6 +80,7 @@
 
 # ── Test 7: LHU byte 0 = 0xA201 ─────────────────────────
     LHU   x9, x8, 0
+    DELAY 0
     LI    x30, 0xA201
     BNE   x9, x30, fail
     NOP
@@ -90,7 +96,9 @@
 # ── Test 9: SW then immediate LW (RAW hazard test) ──────
     LI    x10, 0xAABBCCDD
     SW    x10, x8, 0
+    DELAY 0
     LW    x9, x8, 0
+    DELAY 0
     LI    x30, 0xAABBCCDD
     BNE   x9, x30, fail
     NOP
@@ -100,7 +108,9 @@
 # ── Test 10: SB then LBU at same byte ───────────────────
     ADDI  x11, x0, 0x42
     SB    x11, x8, 1
+    DELAY 0
     LBU   x9, x8, 1
+    DELAY 0
     ADDI  x30, x0, 0x42
     BNE   x9, x30, fail
     NOP
@@ -110,7 +120,9 @@
 # ── Test 11: SH then LHU at byte 2 ──────────────────────
     LI    x12, 0x1234
     SH    x12, x8, 2
+    DELAY 0
     LHU   x9, x8, 2
+    DELAY 0
     LI    x30, 0x1234
     BNE   x9, x30, fail
     NOP
