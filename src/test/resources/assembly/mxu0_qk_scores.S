@@ -87,13 +87,19 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
+    # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 5, 4
+    # Wait for XLU transpose to finish writing m5 before MXU reads it.
+    DELAY 80
 
     # ── OVERLAP [a]: weight push + acc push ──
     # Slot B: push weights → wbuf 0 from TRF 5
     # Slot A: push zero bias → acc 0 from TRF 12
     # Different push types → different submodule interfaces → safe.
     VMATPUSH.W.MXU0       0, 5
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.ACC.FP8.MXU0 0, 12
 
     # Pre-load WQ_B → TRF 6 → transpose → TRF 7
@@ -103,7 +109,11 @@
     DMA.WAIT  1
     LI    x7, 256
     VLOAD 6, x7, 0
+    # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 7, 6
+    # Wait for XLU transpose to finish writing m7 before MXU reads it.
+    DELAY 80
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
@@ -112,11 +122,15 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [b]: compute + weight push (slab 1) ──
     # Slot A: MATMUL.ACC acc 0 (accumulates onto zero bias = same as MATMUL)
     # Slot B: push wbuf 1 ← TRF 7
     VMATMUL.ACC.MXU0  0, 0, 0
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.W.MXU0   1, 7
 
     # Load X[:,32:64] → TRF 0
@@ -126,9 +140,12 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # Phase 1, slab 2: compute only (no extra overlap this phase)
     VMATMUL.ACC.MXU0  0, 0, 1
+    DELAY 120
     # → acc 0 now holds Q[:,0:32]
 
 ######################################################################
@@ -141,6 +158,8 @@
     # Slot C:      pop acc 0 → TRF 8, FP8 scale reg 0
     # Different acc buffers (push → acc 1, pop → acc 0). Safe.
     VMATPUSH.ACC.FP8.MXU0 1, 12
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPOP.FP8.MXU0      8, 0, 0
 
 ######################################################################
@@ -157,7 +176,11 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
+    # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 5, 4
+    # Wait for XLU transpose to finish writing m5 before MXU reads it.
+    DELAY 80
     VMATPUSH.W.MXU0  0, 5
 
     # Pre-load WQ_D → TRF 6 → transpose → TRF 7
@@ -167,7 +190,11 @@
     DMA.WAIT  1
     LI    x7, 256
     VLOAD 6, x7, 0
+    # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 7, 6
+    # Wait for XLU transpose to finish writing m7 before MXU reads it.
+    DELAY 80
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
@@ -176,9 +203,13 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [b]: compute + weight push (slab 1) ──
     VMATMUL.ACC.MXU0  1, 0, 0
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.W.MXU0   1, 7
 
     # Load X[:,32:64] → TRF 0
@@ -188,12 +219,16 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [c]: compute + acc push (slab 2) ──
     # Slot A: MATMUL.ACC on acc 1 (compute)
     # Slot B: push zero bias → acc 0 (preload for phase 3)
     # acc 1 ≠ acc 0 → no buffer conflict. Safe.
     VMATMUL.ACC.MXU0      1, 0, 1
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.ACC.FP8.MXU0 0, 12
     # → acc 1 now holds Q[:,32:64]
     # → acc 0 now holds zero bias (ready for phase 3)
@@ -201,6 +236,8 @@
     # Store Q[:,0:32] from TRF 8 (pop completed long ago during DMA loads)
     LI    x8, 512
     VSTORE 8, x8, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
     LI    x8, 512
     LI    x10, 0x2800
     DMA.STORE x10, x8, x12, 2
@@ -220,7 +257,11 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
+    # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 5, 4
+    # Wait for XLU transpose to finish writing m5 before MXU reads it.
+    DELAY 80
     VMATPUSH.W.MXU0  0, 5
 
     LI    x7, 256
@@ -229,7 +270,11 @@
     DMA.WAIT  1
     LI    x7, 256
     VLOAD 6, x7, 0
+    # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 7, 6
+    # Wait for XLU transpose to finish writing m7 before MXU reads it.
+    DELAY 80
 
     ADDI  x6, x0, 0
     ADDI  x10, x0, 0
@@ -237,6 +282,8 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [e]: compute + weight push + pop (TRIPLE) ──
     # Slot A: MATMUL.ACC → acc 0
@@ -244,7 +291,11 @@
     # Slot C: POP.FP8 acc 1 → TRF 9, scale reg 1
     # All three slots active. acc 0 ≠ acc 1, wbuf 1 ≠ wbuf 0. Safe.
     VMATMUL.ACC.MXU0  0, 0, 0
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.W.MXU0   1, 7
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPOP.FP8.MXU0  9, 1, 1
 
     ADDI  x6, x0, 0
@@ -253,14 +304,19 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # Phase 3, slab 2: compute only
     VMATMUL.ACC.MXU0  0, 0, 1
+    DELAY 120
     # → acc 0 now holds K[:,0:32]
 
     # Store Q[:,32:64] from TRF 9
     LI    x8, 512
     VSTORE 9, x8, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
     LI    x8, 512
     LI    x10, 0x2C00
     DMA.STORE x10, x8, x12, 2
@@ -273,6 +329,8 @@
 
     # ── OVERLAP [d]: acc push + pop ──
     VMATPUSH.ACC.FP8.MXU0 1, 12
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPOP.FP8.MXU0      10, 0, 0
 
 ######################################################################
@@ -288,7 +346,11 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
+    # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 5, 4
+    # Wait for XLU transpose to finish writing m5 before MXU reads it.
+    DELAY 80
     VMATPUSH.W.MXU0  0, 5
 
     LI    x7, 256
@@ -297,7 +359,11 @@
     DMA.WAIT  1
     LI    x7, 256
     VLOAD 6, x7, 0
+    # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
+    DELAY 40
     VTRPOSE.XLU 7, 6
+    # Wait for XLU transpose to finish writing m7 before MXU reads it.
+    DELAY 80
 
     ADDI  x6, x0, 0
     ADDI  x10, x0, 0
@@ -305,9 +371,13 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [b]: compute + weight push ──
     VMATMUL.ACC.MXU0  1, 0, 0
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.W.MXU0   1, 7
 
     ADDI  x6, x0, 0
@@ -316,10 +386,15 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [c]: compute + acc push ──
     # Preload bias→acc 0 for phase 5 scores
     VMATMUL.ACC.MXU0      1, 0, 1
+    DELAY 120
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.ACC.FP8.MXU0 0, 12
     # → acc 1 holds K[:,32:64]
     # → acc 0 holds zero bias (ready for phase 5)
@@ -327,6 +402,8 @@
     # Store K[:,0:32] from TRF 10
     LI    x8, 512
     VSTORE 10, x8, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
     LI    x8, 512
     LI    x10, 0x3000
     DMA.STORE x10, x8, x12, 2
@@ -355,11 +432,15 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
+    # Wait for VLOAD to finish writing m4 before MXU reads weights from it.
+    DELAY 40
     VMATPUSH.W.MXU0  0, 4
 
     # Store K[:,32:64] from TRF 11 → DRAM (pop finished during load above)
     LI    x8, 512
     VSTORE 11, x8, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
     LI    x8, 512
     LI    x10, 0x3400
     DMA.STORE x10, x8, x12, 2
@@ -372,6 +453,8 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
+    # Wait for VLOAD to finish writing m6 before MXU reads weights from it.
+    DELAY 40
 
     # Load Q[:,0:32] activations → TRF 0
     LI    x7, 256
@@ -380,9 +463,13 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # ── OVERLAP [b]: compute + weight push ──
     VMATMUL.ACC.MXU0  0, 0, 0
+    # MXU0 command interface is 1-deep; separate back-to-back commands.
+    DELAY 40
     VMATPUSH.W.MXU0   1, 6
 
     # Load Q[:,32:64] activations → TRF 0
@@ -392,6 +479,8 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
+    # Wait for VLOAD to finish writing m0 before MXU reads activations.
+    DELAY 40
 
     # Phase 5, slab 2: accumulate
     VMATMUL.ACC.MXU0  0, 0, 1
@@ -399,12 +488,20 @@
 ######################################################################
 # Final pop: scores from acc 0 (BF16)
 ######################################################################
+    # Wait for the final matmul to finish before popping BF16 scores.
+    DELAY 120
     VMATPOP.BF16.MXU0  2, 0
+    # Wait for pop to finish writing m2/m3 before LSU reads them (VSTORE).
+    DELAY 40
 
     LI    x8, 512
     VSTORE 2, x8, 0
+    # LSU is busy during VSTORE; delay before issuing the next VSTORE.
+    DELAY 40
     LI    x9, 768
     VSTORE 3, x9, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
 
     LI    x8, 512
     LI    x10, 0x4000

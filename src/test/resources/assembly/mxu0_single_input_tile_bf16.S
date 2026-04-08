@@ -23,15 +23,27 @@
     VLOAD 0, x7, 0
 
     VTRPOSE.XLU 5, 4
+    # Wait for XLU transpose to finish writing m5 before MXU reads it.
+    DELAY 80
     VMATPUSH.W.MXU0  0, 5
+    # Wait for weight push to fully populate slot 0 before launching compute.
+    DELAY 40
     VMATMUL.MXU0  0, 0, 0
+    # Wait for systolic-array pipeline + acc-buffer writeback to complete.
+    DELAY 120
     VMATPOP.BF16.MXU0  2, 0
+    # Wait for pop to finish writing m2/m3 before LSU reads them (VSTORE).
+    DELAY 40
 
     # VSTORE m2 → VMEM[512], m3 → VMEM[768]
     LI    x8, 512
     VSTORE 2, x8, 0
+    # LSU is busy during VSTORE; delay before issuing the next VSTORE.
+    DELAY 40
     LI    x9, 768
     VSTORE 3, x9, 0
+    # Wait for VSTORE to finish before DMA reads VMEM for store-back.
+    DELAY 40
 
     # DMA store VMEM[512] → DRAM[2048]
     LI    x8, 512

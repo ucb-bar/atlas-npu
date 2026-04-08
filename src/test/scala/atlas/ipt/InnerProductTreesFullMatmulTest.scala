@@ -80,7 +80,7 @@ class InnerProductTreesFullMatmulTest extends AnyFlatSpec with Matchers with Pee
 
   // ── Resource & tolerance configuration ──
 
-  val vectorResource = "/mxu_test_vectors/mxu_full_matmul_vectors.txt"
+  val vectorResource = "/mxu_test_vectors/ipt_mxu_full_matmul_vectors.txt"
 
   /** Absolute tolerance: BF16 magnitudes at or below this are treated as zero. */
   val absTol = 0x0040

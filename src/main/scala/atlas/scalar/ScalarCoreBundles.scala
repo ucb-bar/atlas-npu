@@ -100,11 +100,6 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val vpu_status    = Input(new EngineStatus)
   val lsu_busy      = Input(Bool())
 
-  // Engine command backpressure: true when the engine can accept a new command
-  val mxu0_cmd_ready = Input(Bool())
-  val mxu1_cmd_ready = Input(Bool())
-  val xlu_cmd_ready  = Input(Bool())
-
   // Direction-aware MREG bank busy bitvectors from the bank tracker
   val mregReadBusy   = Input(UInt(64.W))
   val mregWriteBusy  = Input(UInt(64.W))

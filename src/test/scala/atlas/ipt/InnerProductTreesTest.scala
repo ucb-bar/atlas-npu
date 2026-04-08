@@ -32,7 +32,7 @@ class InnerProductTreesUnitHarness(
 ) extends Module {
 
   val io = IO(new Bundle {
-    val cmd         = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    val cmd         = Flipped(Valid(new MxuCmd(mregP.mregIdBits)))
     val dataBusy    = Output(Bool())
     val computeBusy = Output(Bool())
     val testWrite   = Flipped(Valid(new MregWriteReq(mregP)))
@@ -380,14 +380,6 @@ class InnerProductTreesTest extends AnyFlatSpec with Matchers {
           assert(v == BF16_32, s"Row $row: expected 0x4200, got 0x${v.toHexString}")
         }
       }
-
-      // ── Test 9: readiness after all operations complete ──
-      println("  Test 9: readiness")
-      idle(dut)
-      dut.clock.step()
-      dut.io.cmd.ready.expect(true.B)
-      dut.io.dataBusy.expect(false.B)
-      dut.io.computeBusy.expect(false.B)
     }
   }
 

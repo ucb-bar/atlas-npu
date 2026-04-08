@@ -23,14 +23,19 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
+    DELAY 40
 
     VMATPUSH.W.MXU1  0, 4
+    DELAY 40
     VMATMUL.MXU1  0, 0, 0
+    DELAY 120
     VMATPOP.BF16.MXU1  2, 0
+    DELAY 40
 
     # VSTORE m2 → VMEM[512]
     LI    x8, 512
     VSTORE 2, x8, 0
+    DELAY 40
 
     # DMA store VMEM[512] → DRAM[2048]
     LI    x8, 512

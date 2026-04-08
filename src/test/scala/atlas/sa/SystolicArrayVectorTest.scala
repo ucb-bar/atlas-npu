@@ -78,7 +78,7 @@ class SystolicArrayVectorTest extends AnyFlatSpec with Matchers with PeekPokeAPI
 
   // ── Resource & tolerance configuration ──
 
-  val vectorResource = "/mxu_test_vectors/mxu_vectors.txt"
+  val vectorResource = "/mxu_test_vectors/sa_mxu_vectors.txt"
 
   val absTolerance = 0x0040
   val relTolerance = 0.01

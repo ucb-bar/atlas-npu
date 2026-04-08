@@ -3,7 +3,7 @@
 //
 // Instantiates and wires:
 //   • InnerProductTreesSequencer — 3-slot concurrent command FSMs,
-//                                  conflict detection, FP8↔BF16 (de)quant.
+//                                  FP8↔BF16 (de)quant.
 //   • InnerProductTrees          — MXU datapath (reduction-tree lanes).
 //   • WeightBuffers              — dual weight-tile storage (from atlas.mxu).
 //   • AccumulationBuffers        — dual BF16 accum storage (from atlas.mxu).
@@ -34,8 +34,8 @@ class InnerProductTreesTop(
     s"numLanes(${p.numLanes}) must not exceed mregRows(${mregP.mregRows}) for PushWeight")
 
   val io = IO(new Bundle {
-    // ── Command input ──
-    val cmd = Flipped(Decoupled(new MxuCmd(mregP.mregIdBits)))
+    // ── Command input (fire-and-forget, no backpressure) ──
+    val cmd = Flipped(Valid(new MxuCmd(mregP.mregIdBits)))
 
     // ── Tensor register file (mreg) ports ──
     val mregReadReq0  = Valid(new MregReadReq(mregP))
@@ -70,7 +70,7 @@ class InnerProductTreesTop(
   // Command interface
   // ==========================================================================
 
-  seq.io.cmd <> io.cmd
+  seq.io.cmd := io.cmd
 
   // ==========================================================================
   // Tensor register file ports (directly forwarded)

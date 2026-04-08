@@ -23,15 +23,21 @@
     VLOAD 0, x7, 0
 
     VTRPOSE.XLU 5, 4
+    DELAY 80
     VMATPUSH.W.MXU1  0, 5
+    DELAY 40
     VMATMUL.MXU1  0, 0, 0
+    DELAY 120
     VMATPOP.BF16.MXU1  2, 0
+    DELAY 40
 
     # VSTORE m2 → VMEM[512], m3 → VMEM[768]
     LI    x8, 512
     VSTORE 2, x8, 0
+    DELAY 40
     LI    x9, 768
     VSTORE 3, x9, 0
+    DELAY 40
 
     # DMA store VMEM[512] → DRAM[2048]
     LI    x8, 512

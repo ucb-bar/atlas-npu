@@ -78,7 +78,7 @@ class SystolicArrayFullMatmulTest extends AnyFlatSpec with Matchers with PeekPok
 
   // ── Resource & tolerance configuration ──
 
-  val vectorResource = "/mxu_test_vectors/mxu_full_matmul_vectors.txt"
+  val vectorResource = "/mxu_test_vectors/sa_mxu_full_matmul_vectors.txt"
 
   val absTol = 0x0040
   val relTol = 0.01
