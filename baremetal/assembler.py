@@ -78,6 +78,13 @@ def vls_type(imm12, rs1, f2, vd, op):
         (_mask(f2, 2) << 13) | (_mask(vd, 6) << 7) | _mask(op, 7)
     )
 
+# VI format: imm16[31:16] | f3[15:13] | vd[12:7] | opcode[6:0]
+def vi_type(imm16, f3, vd, op):
+    return (
+        (_mask(imm16, 16) << 16) | (_mask(f3, 3) << 13) |
+        (_mask(vd, 6) << 7) | _mask(op, 7)
+    )
+
 
 # ─── RV32I instructions ─────────────────────────────────────────────────────
 
@@ -202,6 +209,12 @@ def VRELU(vd, vs):              return vr_type(0x44, 0, vs, vd, 0x57)
 def VTRPOSE_XLU(vd, vs1):  return vr_type(0x00, 0, vs1, vd, 0x6B)
 def VREDMAX_XLU(vd, vs1):  return vr_type(0x01, 0, vs1, vd, 0x6B)
 def VREDSUM_XLU(vd, vs1):  return vr_type(0x02, 0, vs1, vd, 0x6B)
+
+# ─── VLI immediate tensor fill (opcode 0x5F) ──────────────────────────────────
+def VLI_ALL(vd, imm16): return vi_type(imm16, 0, vd, 0x5F)
+def VLI_ROW(vd, imm16): return vi_type(imm16, 1, vd, 0x5F)
+def VLI_COL(vd, imm16): return vi_type(imm16, 2, vd, 0x5F)
+def VLI_ONE(vd, imm16): return vi_type(imm16, 3, vd, 0x5F)
 
 
 # ─── Parsing helpers ────────────────────────────────────────────────────────
@@ -369,6 +382,10 @@ def assemble(source):
 
         # Scale
         elif mnem == "SELI":  code.append(SELI(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VLI.ALL": code.append(VLI_ALL(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VLI.ROW": code.append(VLI_ROW(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VLI.COL": code.append(VLI_COL(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VLI.ONE": code.append(VLI_ONE(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
 
         # DMA
         # DMA.LOAD  rd(vmem), rs1(dram_off), rs2(size), channel

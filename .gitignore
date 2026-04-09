@@ -71,3 +71,9 @@ project/**/metals.sbt
 /src/test/resources/assembly/generators/software_models/mxu0_sa/__pycache__
 /src/test/resources/assembly/generators/software_models/mxu1_ipt/__pycache__
 /src/test/resources/assembly/generators/software_models/mxu1_ipt/ipt_c/__pycache__
+
+# Atlas baremetal generated artifacts
+/baremetal/assembly/generated/
+/baremetal/tests/atlas_*.c
+/baremetal/tests/build/
+/baremetal/results/
