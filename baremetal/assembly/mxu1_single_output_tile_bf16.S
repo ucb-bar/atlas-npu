@@ -32,7 +32,7 @@
     LI    x23, 132096
     LI    x24, 1024
     LI    x30, 1
-    LI    x5,  0x60000000
+    LI    x5,  0x90000000
     DMA.CONFIG  x5, 0
 
     # Bias -> TRF 8
@@ -207,4 +207,3 @@ do_pop:
     ADDI  x30, x0, 1
     CSRRW x0, 0xC10, x30
     ECALL
-    
