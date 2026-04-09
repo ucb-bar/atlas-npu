@@ -22,7 +22,7 @@ import numpy as np
 from numpy.random import default_rng
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "test", "resources", "assembly", "generators"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baremetal", "generators"))
 from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
@@ -205,6 +205,9 @@ def main():
     stripped = args.out.removesuffix(".txt")
     outdir = os.path.dirname(stripped)
     base = os.path.basename(stripped)
+
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
 
     def outpath(name):
         return os.path.join(outdir, name) if outdir else name

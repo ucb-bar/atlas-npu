@@ -64,16 +64,14 @@ project/**/metals.sbt
 .bsp
 .history
 
-/src/test/resources/assembly/generators/__pycache__
 /src/test/resources/mxu_test_vectors
 /src/test/resources/vpu_test_vectors
-/scripts/.env
-/src/test/resources/assembly/generators/software_models/mxu0_sa/__pycache__
-/src/test/resources/assembly/generators/software_models/mxu1_ipt/__pycache__
-/src/test/resources/assembly/generators/software_models/mxu1_ipt/ipt_c/__pycache__
 
 # Atlas baremetal generated artifacts
 /baremetal/assembly/generated/
 /baremetal/tests/atlas_*.c
 /baremetal/tests/build/
 /baremetal/results/
+/baremetal/generators/software_models/mxu0_sa/__pycache__
+/baremetal/generators/software_models/mxu1_ipt/__pycache__
+/baremetal/generators/software_models/mxu1_ipt/ipt_c/__pycache__
