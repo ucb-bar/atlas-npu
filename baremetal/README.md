@@ -1,15 +1,51 @@
-# Atlas baremetal tests
+# Atlas Baremetal Tests
 
-## With DRAM golden checks
+This directory is the source of truth for Atlas baremetal tests.
 
-**1. Generate golden JSON** (from `baremetal/`):
+## Quick Commands (Combo Suite)
+
+From `generators/sp26-atlas-acc/baremetal`:
 
 ```bash
-cd generators/sp26-atlas-acc/baremetal
+# Generate combo suite (assembly + C + manifest + coverage)
+make gen
+
+# List short test names
+make list-tests
+
+# Build all combo binaries
+make build-all
+
+# Run smoke tier
+make run-smoke CONFIG=EE290SimConfig
+
+# Run all tiers
+make run-all CONFIG=EE290SimConfig
+
+# Run one test by short name
+make run-test TEST=smk_salu_dma_05 CONFIG=EE290SimConfig
+```
+
+Generated combo-suite artifacts:
+
+- Assembly: `assembly/generated/<tier>/*.S`
+- C tests: `tests/atlas_<short_name>.c`
+- Results:
+  - `results/atlas_combo_suite_manifest.json`
+  - `results/atlas_combo_coverage_report.json`
+  - `results/atlas_combo_run_results.json`
+  - `results/atlas_combo_run_summary.md`
+  - `results/logs/*.log`
+
+## Manual Single-Test Flow (Handwritten Assembly)
+
+1) Optional DRAM golden JSON (from `baremetal/`):
+
+```bash
 python3 generators/gen_<test_name>.py > generators/<test_name>.json
 ```
 
-**2. Assemble and emit C**:
+2) Assemble to C:
 
 ```bash
 python3 assembler.py assembly/<test_name>.S \
@@ -17,49 +53,19 @@ python3 assembler.py assembly/<test_name>.S \
   --golden-json generators/<test_name>.json
 ```
 
-**3. Build** (from `baremetal/tests/`):
+3) Build:
 
 ```bash
-cd tests
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target atlas_<test_name>
+cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Debug
+cmake --build tests/build --target atlas_<test_name>
 ```
 
-**4. Run in simulation**
+4) Run:
 
 ```bash
 cd $CHIPYARD/sims/vcs
 make run-binary \
   BINARY=../../generators/sp26-atlas-acc/baremetal/tests/build/atlas_<test_name>.riscv \
-  CONFIG=AtlasShuttleVectorConfig
-```
-
----
-
-## Without DRAM golden checks
-
-**1.** `cd generators/sp26-atlas-acc/baremetal`
-
-**2. Assemble only:**
-
-```bash
-python3 assembler.py assembly/<test_name>.S --out-c tests/atlas_<test_name>.c
-```
-
-**3. Build** (from `baremetal/tests/`):
-
-```bash
-cd tests
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target atlas_<test_name>
-```
-
-**4. Simulation** (same as above):
-
-```bash
-cd $CHIPYARD/sims/vcs
-make run-binary \
-  BINARY=../../generators/sp26-atlas-acc/baremetal/tests/build/atlas_<test_name>.riscv \
-  CONFIG=AtlasShuttleVectorConfig
+  CONFIG=EE290SimConfig LOADMEM=1
 ```
 
