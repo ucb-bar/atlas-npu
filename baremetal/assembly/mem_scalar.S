@@ -1,6 +1,6 @@
 # mem_scalar.S — Scalar load/store and SELD functional test
 # @TIMEOUT 10000
-# @DRAM_BASE 0x60000000
+# @DRAM_BASE 0x90000000
 #
 # All scalar VMEM access goes through the LSU, which serializes
 # reads and writes via a state machine, eliminating SyncReadMem RAW hazards.

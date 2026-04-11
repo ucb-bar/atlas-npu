@@ -127,6 +127,22 @@ class AtlasCore(
   })
 
   // ==========================================================================
+  // Scalar ISA → MxuOp translation (explicit table, ordering-independent)
+  // ==========================================================================
+
+  private def translateMxuOp(scalarOp: UInt): MxuOp.Type = {
+    MuxLookup(scalarOp, MxuOp.PushWeight)(Seq(
+      MXU_PUSH_WEIGHT   -> MxuOp.PushWeight,
+      MXU_PUSH_ACC_FP8  -> MxuOp.PushAccFP8,
+      MXU_PUSH_ACC_BF16 -> MxuOp.PushAccBF16,
+      MXU_POP_FP8       -> MxuOp.PopAccFP8,
+      MXU_POP_BF16      -> MxuOp.PopAccBF16,
+      MXU_MATMUL        -> MxuOp.Matmul,
+      MXU_MATMUL_ACC    -> MxuOp.MatmulAcc,
+    ))
+  }
+
+  // ==========================================================================
   // Sub-module instantiation
   // ==========================================================================
 
@@ -247,7 +263,7 @@ class AtlasCore(
 
   val mxu0CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
   val sc0 = scalar.io.mxu0Cmd.bits
-  mxu0CmdWire.op         := MxuOp.safe((sc0.op - 1.U)(2, 0))._1
+  mxu0CmdWire.op         := translateMxuOp(sc0.op)
   mxu0CmdWire.mregId     := sc0.mregBank
   mxu0CmdWire.accSel     := sc0.accSel
   mxu0CmdWire.weightSlot := sc0.weightSlot
@@ -262,7 +278,7 @@ class AtlasCore(
 
   val mxu1CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
   val sc1 = scalar.io.mxu1Cmd.bits
-  mxu1CmdWire.op         := MxuOp.safe((sc1.op - 1.U)(2, 0))._1
+  mxu1CmdWire.op         := translateMxuOp(sc1.op)
   mxu1CmdWire.mregId     := sc1.mregBank
   mxu1CmdWire.accSel     := sc1.accSel
   mxu1CmdWire.weightSlot := sc1.weightSlot

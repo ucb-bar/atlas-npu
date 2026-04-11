@@ -456,52 +456,54 @@ def _hex_to_words(hex_str):
 
 
 def _parse_golden_json(path, dram_base, beat_bytes):
-    """Parse golden JSON → (preload_base, preload_words[], check_base, check_words[])."""
+    """Parse golden JSON → (preload_addrs[], preload_words[], check_addrs[], check_words[])."""
     import json
     with open(path) as f:
         data = json.load(f)
 
     words_per_beat = beat_bytes // 4
 
-    def _flatten(entries, key):
-        """Convert beat-level entries to sorted (byte_addr, [u32 words]) pairs."""
+    def _expand(entries, key):
+        """Convert beat-level entries to sorted per-word (byte_addr, u32) pairs."""
         pairs = []
         for e in entries:
             beat_off = e["word_offset"]
-            byte_addr = dram_base + beat_off * beat_bytes
+            beat_addr = dram_base + beat_off * beat_bytes
             raw = _hex_to_words(e[key])
             while len(raw) < words_per_beat:
                 raw.append(0)
-            pairs.append((byte_addr, raw[:words_per_beat]))
+            for i, word in enumerate(raw[:words_per_beat]):
+                pairs.append((beat_addr + i * 4, word))
         pairs.sort(key=lambda p: p[0])
         return pairs
 
-    preload_pairs = _flatten(data.get("dram_preloads", []), "data")
-    check_pairs   = _flatten(data.get("dram_checks", []),   "expected")
+    preload_pairs = _expand(data.get("dram_preloads", []), "data")
+    check_pairs   = _expand(data.get("dram_checks", []),   "expected")
 
-    def _to_flat(pairs):
+    def _split(pairs):
         if not pairs:
-            return (0, [])
-        base = pairs[0][0]
-        flat = []
-        for _, ws in pairs:
-            flat.extend(ws)
-        return (base, flat)
+            return ([], [])
+        addrs = []
+        words = []
+        for addr, word in pairs:
+            addrs.append(addr)
+            words.append(word)
+        return (addrs, words)
 
-    p_base, p_words = _to_flat(preload_pairs)
-    c_base, c_words = _to_flat(check_pairs)
-    return p_base, p_words, c_base, c_words
+    p_addrs, p_words = _split(preload_pairs)
+    c_addrs, c_words = _split(check_pairs)
+    return p_addrs, p_words, c_addrs, c_words
 
 
-def _fmt_array(words, name, indent="    "):
-    """Format a uint32_t array initializer."""
+def _fmt_array(words, name, ctype="uint32_t", indent="    "):
+    """Format a C array initializer."""
     lines = []
     for i in range(0, len(words), 8):
         chunk = words[i:i+8]
         vals = ", ".join(f"0x{w & 0xFFFFFFFF:08X}" for w in chunk)
         lines.append(f"{indent}{vals},")
     body = "\n".join(lines)
-    return f"static const uint32_t {name}[] = {{\n{body}\n}};\n"
+    return f"static const {ctype} {name}[] = {{\n{body}\n}};\n"
 
 
 def emit_c_file(code, test_name="test", golden=None):
@@ -510,7 +512,7 @@ def emit_c_file(code, test_name="test", golden=None):
     Args:
         code: list of 32-bit instruction words
         test_name: used in printf messages
-        golden: None, or (preload_base, preload_words, check_base, check_words)
+        golden: None, or (preload_addrs, preload_words, check_addrs, check_words)
     """
     n = len(code)
     array_body = ""
@@ -549,14 +551,14 @@ static const uint32_t atlas_program[ATLAS_PROGRAM_LEN] = {{
 
     # golden model data
     if has_golden:
-        p_base, p_words, c_base, c_words = golden
+        p_addrs, p_words, c_addrs, c_words = golden
         if p_words:
-            out += f"\n#define PRELOAD_BASE  0x{p_base:08X}UL\n"
             out += f"#define PRELOAD_WORDS {len(p_words)}\n"
+            out += _fmt_array(p_addrs, "preload_addrs", ctype="uintptr_t")
             out += _fmt_array(p_words, "preload_data")
         if c_words:
-            out += f"\n#define CHECK_BASE    0x{c_base:08X}UL\n"
             out += f"#define CHECK_WORDS   {len(c_words)}\n"
+            out += _fmt_array(c_addrs, "check_addrs", ctype="uintptr_t")
             out += _fmt_array(c_words, "check_expected")
 
     # main()
@@ -571,7 +573,7 @@ int main(void)
         out += """
     printf("Writing preload data to DRAM (%u words) ...\\n", PRELOAD_WORDS);
     for (i = 0; i < PRELOAD_WORDS; i++) {
-        mmio_write32(PRELOAD_BASE + i * 4, preload_data[i]);
+        mmio_write32(preload_addrs[i], preload_data[i]);
     }
     asm volatile ("fence" ::: "memory");
 """
@@ -629,10 +631,10 @@ int main(void)
         out += f"""
     printf("Verifying DRAM results (%u words) ...\\n", CHECK_WORDS);
     for (i = 0; i < CHECK_WORDS; i++) {{
-        uint32_t got = mmio_read32(CHECK_BASE + i * 4);
+        uint32_t got = mmio_read32(check_addrs[i]);
         if (got != check_expected[i]) {{
-            printf("  DRAM MISMATCH word[%u]: expected 0x%08x, got 0x%08x\\n",
-                   i, check_expected[i], got);
+            printf("  DRAM MISMATCH word[%u] @ 0x%08x: expected 0x%08x, got 0x%08x\\n",
+                   i, (uint32_t)check_addrs[i], check_expected[i], got);
             fail++;
         }}
     }}

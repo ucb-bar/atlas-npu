@@ -75,3 +75,5 @@ project/**/metals.sbt
 /baremetal/generators/software_models/mxu0_sa/__pycache__
 /baremetal/generators/software_models/mxu1_ipt/__pycache__
 /baremetal/generators/software_models/mxu1_ipt/ipt_c/__pycache__
+/baremetal/generators/__pycache__
+/baremetal/generators/*.json

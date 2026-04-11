@@ -1,6 +1,6 @@
 # mxu1_push_pop_check.S — MXU1 pipeline with functional checks
 # @TIMEOUT 20000
-# @DRAM_BASE 0x60000000
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu_push_pop.py
 
     ADDI  x28, x0, 1
