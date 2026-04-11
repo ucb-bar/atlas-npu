@@ -69,3 +69,19 @@ make run-binary \
   CONFIG=EE290SimConfig LOADMEM=1
 ```
 
+## Single-Command Handwritten Assembly Flow
+From the `sp26-atlas-acc/baremetal` directory, to run select baremetal tests (e.g., `test1`, `test2`, and `test3`):
+```
+./run_asm_tests.sh test1 test2 test3
+```
+
+To run all handwritten baremetal tests (i.e., those in `sp26-atlas-acc/baremetal/assembly`):
+```
+./run_asm_tests.sh --all
+```
+
+## Randomized Instructions for Scalar, DMA, LSU, MXU0, and MXU1
+```
+cd baremetal/random_permutations
+./run_permute_tests.sh --num 20 --count 5       # detailed usage instructions are at the top of run_permute_tests.sh
+```
