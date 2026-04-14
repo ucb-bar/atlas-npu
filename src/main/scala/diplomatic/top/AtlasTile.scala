@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.subsystem.{BaseSubsystem, TLBusWrapperLocation, SBUS}
+import freechips.rocketchip.subsystem.{BaseSubsystem, TLBusWrapperLocation, SBUS, PBUS}
 import atlas.common.AtlasParams
 import testchipip.soc.{SubsystemInjectorKey, SubsystemInjector}
 
@@ -165,6 +165,7 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
 
   p(AtlasTileKey).zipWithIndex.foreach { case (params, si) =>
     val bus = baseSubsystem.locateTLBusWrapper(params.busWhere)
+    val pbus = baseSubsystem.locateTLBusWrapper(PBUS)
     val dmaRange = AddressSet(params.base, params.size - 1)
 
     val vmemP = params.atlasParams.vmem
@@ -178,18 +179,18 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
         _ := TLBuffer() := atlasTile.dmaNode
       }
 
-      bus.coupleTo(s"${params.name}-$si-imem") {
+      pbus.coupleTo(s"${params.name}-$si-imem") {
         atlasTile.imemNode :=
-          TLFragmenter(4, bus.beatBytes) :=
-          TLBuffer() :=
-          TLWidthWidget(bus.beatBytes) := _
+          TLFragmenter(4, pbus.blockBytes) :=
+          TLWidthWidget(pbus.beatBytes) :=
+          TLBuffer() := _
       }
 
-      bus.coupleTo(s"${params.name}-$si-csr") {
+      pbus.coupleTo(s"${params.name}-$si-csr") {
         atlasTile.csrNode :=
-          TLFragmenter(4, bus.beatBytes) :=
-          TLBuffer() :=
-          TLWidthWidget(bus.beatBytes) := _
+          TLFragmenter(4, pbus.blockBytes) :=
+          TLWidthWidget(pbus.beatBytes) :=
+          TLBuffer() := _
       }
 
       bus.coupleTo(s"${params.name}-$si-vmem") {
