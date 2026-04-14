@@ -61,10 +61,10 @@
 
     DELAY 40
 
-# ── Push weights into MXU1 weight FIFO ──
+# ── Push weights into MXU1 weight buffer ──
     VMATPUSH.W.MXU1  0, 4
     DELAY 40
-
+    
 # ── Push BF16 bias as accumulator seed (reads m6 + m7) ──
     VMATPUSH.ACC.BF16.MXU1  0, 6
     DELAY 40

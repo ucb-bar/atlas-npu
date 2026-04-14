@@ -13,9 +13,13 @@ set -o pipefail
 #   - After generating the C source, it re-runs CMake so newly created tests
 #     are visible to the build system.
 #   - It builds the whole build directory instead of one target.
+#   - A test is marked failed if:
+#       * any build step exits nonzero, or
+#       * the simulator log contains explicit failure signatures even if
+#         make/sim exits with code 0.
 #
 # Assumes this script lives at:
-#   chipyard/generators/sp26-atlas-acc/baremetal/run_all_tests.sh
+#   chipyard/generators/sp26-atlas-acc/baremetal/run_asm_tests.sh
 
 RUN_ALL=0
 
@@ -83,6 +87,8 @@ run_one_test() {
   local gen_py="$GENERATORS_DIR/gen_${test_name}.py"
   local golden_json="$GENERATORS_DIR/${test_name}.json"
   local binary="$BUILD_DIR/atlas_${test_name}.riscv"
+  local sim_log
+  local sim_rc
 
   echo "============================================================"
   echo "Running test: $test_name"
@@ -116,10 +122,18 @@ run_one_test() {
     ) || return 1
   fi
 
-  echo "[3/5] Reconfiguring CMake"
+  if [[ -f "$gen_py" ]]; then
+    echo "[3/5] Reconfiguring CMake"
+  else
+    echo "[2/4] Reconfiguring CMake"
+  fi
   cmake -S "$TESTS_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Debug || return 1
 
-  echo "[4/5] Building tests"
+  if [[ -f "$gen_py" ]]; then
+    echo "[4/5] Building tests"
+  else
+    echo "[3/4] Building tests"
+  fi
   cmake --build "$BUILD_DIR" || return 1
 
   if [[ ! -f "$binary" ]]; then
@@ -127,14 +141,37 @@ run_one_test() {
     return 1
   fi
 
-  echo "[5/5] Running simulation"
+  if [[ -f "$gen_py" ]]; then
+    echo "[5/5] Running simulation"
+  else
+    echo "[4/4] Running simulation"
+  fi
+
+  sim_log="$(mktemp)"
   (
     cd "$VCS_DIR" &&
     make run-binary GEN_COVERAGE=1 \
       BINARY="$binary" \
-      CONFIG="$CONFIG"
-  ) || return 1
+      CONFIG="$CONFIG" \
+      LOADMEM=1
+  ) 2>&1 | tee "$sim_log"
+  sim_rc=${PIPESTATUS[0]}
 
+  if [[ $sim_rc -ne 0 ]]; then
+    echo "Simulation command failed with exit code $sim_rc"
+    rm -f "$sim_log"
+    return 1
+  fi
+
+  if grep -Eq \
+    'DRAM MISMATCH|FAIL:|Assertion failed: \*\*\* FAILED \*\*\*|Fatal:|FAILED \(\*+\)|\*\*\* FAILED \*\*\*' \
+    "$sim_log"; then
+    echo "Simulation reported a test failure"
+    rm -f "$sim_log"
+    return 1
+  fi
+
+  rm -f "$sim_log"
   return 0
 }
 

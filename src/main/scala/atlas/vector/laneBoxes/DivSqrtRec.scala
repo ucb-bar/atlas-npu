@@ -11,6 +11,8 @@ import chisel3._
 import chisel3.util._
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
+import sp26FPUnits.hardfloat.consts._
+
 
 // Input bundles
 class DivSqrtReq(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
@@ -44,14 +46,14 @@ class DivSqrtResp(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
   */
 class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) extends Module with HasPipelineParams {
     val io = IO(new Bundle {
-        val req = Flipped(Decoupled(new DivSqrtReq(BF16T.wordWidth, numLanes, tagWidth)))
-        val resp = Decoupled(new DivSqrtResp(BF16T.wordWidth, numLanes, tagWidth))
+        val req = Flipped(Valid(new DivSqrtReq(BF16T.wordWidth, numLanes, tagWidth)))
+        val resp = Valid(new DivSqrtResp(BF16T.wordWidth, numLanes, tagWidth))
     })
 
     // Initializing the modules
-    val divSqrtModules = Seq.fill(numLanes)(Module(new DivSqrtRecFN_small(BF16T.expWidth, BF16T.sigWidth, 0))) 
+    val divSqrtModules = Seq.fill(numLanes)(Module(new DivSqrtRecFN_small(BF16T.expWidth, BF16T.sigWidth, divSqrtOpt_twoBitsPerCycle))) 
     val ones = VecInit.fill(numLanes)("h3F80".U(BF16T.wordWidth.W))
-    val laneEnable = VecInit((io.req.bits.laneMask & VecInit.fill(numLanes)(io.req.fire).asUInt).asBools)
+    val laneEnable = VecInit((io.req.bits.laneMask & VecInit.fill(numLanes)(io.req.valid).asUInt).asBools)
 
     // Stage 0: FN -> RecFN
     val onesRec = VecInit(ones.map(i => recFNFromFN(BF16T.expWidth, BF16T.sigWidth, i)))
@@ -60,7 +62,7 @@ class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
 
     // Stage 1: Computing
     for (i <- 0 until numLanes) {
-        divSqrtModules(i).io.inValid := io.req.fire
+        divSqrtModules(i).io.inValid := io.req.valid
         divSqrtModules(i).io.sqrtOp := io.req.bits.isSqrt
         divSqrtModules(i).io.a := Mux(io.req.bits.isSqrt, aRecVec(i), onesRec(i))
         divSqrtModules(i).io.b := Mux(io.req.bits.isSqrt, bRecVec(i), aRecVec(i))
@@ -84,9 +86,13 @@ class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
     }
     val outRecoded = VecInit(out.map(v => fNFromRecFN(BF16T.expWidth, BF16T.sigWidth, v)))
 
+    val respValid = allDivValid || allSqrtValid
+
+    assert(!(io.req.valid && !allReady),
+      "DivSqrtRec: request issued while HardFloat div/sqrt lanes are not ready")
+
     // Output
-    io.req.ready := allReady
-    io.resp.valid := allReady           // This should work, when all ready then all computation should have been done
+    io.resp.valid := respValid
     io.resp.bits.tag := 0.U             // Need to find a way to store the value since the module is variable in length
     io.resp.bits.whichBank := 0.U       // Need to fix later
     io.resp.bits.wRow := 0.U            // Need to fix later
@@ -95,4 +101,5 @@ class DivSqrtRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
     io.resp.bits.outValid_div := outValid_div       // This is wrong, need to work on
     io.resp.bits.outValid_sqrt := outValid_sqrt     // This is worng, need to work on
     io.resp.bits.exceptionFlags := exceptionsFlags
+
 }

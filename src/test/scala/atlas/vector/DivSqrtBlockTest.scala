@@ -9,16 +9,61 @@
 package atlas.vector
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType._
-import org.scalatest.Outcome 
+import org.scalatest.Outcome
 
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
+import atlas.common._
+import java.nio.file.{Files, Path, Paths}
 
-class DivSqrtBlockTest extends AnyFlatSpec with Matchers {
+// ============================================================================
+// VCS simulator factory — fresh persistent workspace per test_name (each
+// `it should` block gets its own workdir so multi-test files don't trip on
+// stale NFS file handles during cleanup between simulate() calls).
+// ============================================================================
+
+class DivSqrtBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+  private def makeSim(testName: String): Simulator[VcsBackend] with PeekPokeAPI =
+    new Simulator[VcsBackend] with PeekPokeAPI {
+      private val runDir: Path = {
+        val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+        val baseDir = Paths.get(rootDirStr)
+        val p = baseDir.resolve("tmp").resolve(testName)
+        Files.createDirectories(p)
+        p.toAbsolutePath
+      }
+      override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+      override val tag: String           = testName
+      override val workspacePath: String = runDir.toString
+      override val commonCompilationSettings: CommonCompilationSettings =
+        CommonCompilationSettings(
+          availableParallelism =
+            CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+        )
+      override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+        val cov = Backend.CoverageSettings(
+          line = true, cond = true, branch = true, fsm = true, tgl = true
+        )
+        Backend.CompilationSettings(
+          coverageSettings  = cov,
+          coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+          simulationSettings = Backend.SimulationSettings(
+            coverageSettings  = cov,
+            coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+            coverageName      = Some(Backend.CoverageName(s"${testName}_coverage"))
+          )
+        )
+      }
+    }
+
 
   //----------- CI/CD INCLUDE --------------
   override def withFixture(test: NoArgTest): Outcome = {
@@ -50,44 +95,43 @@ class DivSqrtBlockTest extends AnyFlatSpec with Matchers {
 
   behavior of "DivSqrtRec"
 
-  it should "compute vectorized division across multiple lanes" in {
-    simulate(new DivSqrtRec(fptype, numLanes, tagWidth)) { dut =>
-      
-      // Define test vectors for lanes
+  it should "compute vectorized reciprocal across multiple lanes" in {
+    makeSim("DivSqrtBlockTest_recip").simulate(new DivSqrtRec(fptype, numLanes, tagWidth)) { module =>
+      val dut = module.wrapped
+
+      // DivSqrtRec is a reciprocal/sqrt unit: when isSqrt=false it ignores
+      // bVec and computes 1 / aVec per lane (see DivSqrtRec.scala:67-68).
       val aValues = Seq(10.0, 1.0, 144.0, 3.14)
-      val bValues = Seq(2.0,  0.5, 12.0,  1.57)
-      
-      println(s"\n>>> STARTING VECTORIZED DIVISION")
 
-      // 1. Wait for module to be ready
-      while (!dut.io.req.ready.peek().litToBoolean) {
-        dut.clock.step(1)
-      }
+      println(s"\n>>> STARTING VECTORIZED RECIPROCAL")
 
-      // 2. Poke Request
+      // Let the HardFloat div/sqrt lanes settle before issuing a request.
+      // DivSqrtRec is Valid-only (software-scheduled); its internal `allReady`
+      // is a debug signal, not a handshake, so we drain a few cycles instead
+      // of polling.
+      dut.reset.poke(true.B)
+      dut.clock.step(5)
+      dut.reset.poke(false.B)
+      dut.clock.step(5)
+
       dut.io.req.valid.poke(true.B)
-      dut.io.req.bits.isSqrt.poke(false.B) // Division
+      dut.io.req.bits.isSqrt.poke(false.B) // Reciprocal
       dut.io.req.bits.laneMask.poke("b1111".U)
       dut.io.req.bits.tag.poke(0xAB.U)
 
       for (i <- 0 until numLanes) {
         dut.io.req.bits.aVec(i).poke(doubleToBF16Int(aValues(i)).U)
-        dut.io.req.bits.bVec(i).poke(doubleToBF16Int(bValues(i)).U)
       }
 
       dut.clock.step(1)
       dut.io.req.valid.poke(false.B)
 
-      // 3. Wait for Response
-      // Note: You mentioned io.resp.valid logic needs work. 
-      // In a real test, we wait for the hardware to signal completion.
       var cycles = 0
       while (!dut.io.resp.valid.peek().litToBoolean && cycles < 100) {
         dut.clock.step(1)
         cycles += 1
       }
 
-      // 4. Peek and Verify
       val resp = dut.io.resp.bits
       println(f"Response received in $cycles cycles")
 
@@ -95,21 +139,24 @@ class DivSqrtBlockTest extends AnyFlatSpec with Matchers {
         val rawRes = resp.result(i).peek().litValue.toInt
         val actual = bf16IntToDouble(rawRes)
         val expected = 1 / aValues(i)
-        
-        println(f"Lane $i: 1 / ${bValues(i)} = $actual%.4f (Expected: $expected%.4f)")
-        
-        // BF16 has ~2-3 decimal digits of precision (7-bit mantissa)
-        // So we use a fairly loose tolerance
+
+        println(f"Lane $i: 1 / ${aValues(i)} = $actual%.4f (Expected: $expected%.4f)")
+
+        // BF16 ~2-3 decimal digits of precision; loose tolerance.
         math.abs(actual - expected) should be < 0.05
       }
     }
   }
 
   it should "compute vectorized square root" in {
-    simulate(new DivSqrtRec(fptype, numLanes, tagWidth)) { dut =>
+    makeSim("DivSqrtBlockTest_sqrt").simulate(new DivSqrtRec(fptype, numLanes, tagWidth)) { module =>
+      val dut = module.wrapped
       val aValues = Seq(4.0, 9.0, 2.0, 0.25)
-      
-      while (!dut.io.req.ready.peek().litToBoolean) dut.clock.step(1)
+
+      dut.reset.poke(true.B)
+      dut.clock.step(5)
+      dut.reset.poke(false.B)
+      dut.clock.step(5)
 
       dut.io.req.valid.poke(true.B)
       dut.io.req.bits.isSqrt.poke(true.B)

@@ -42,27 +42,21 @@ class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
     require(isPow2(numLanes), "numLanes must be a power of 2")
 
     val io = IO(new Bundle {
-        val req = Flipped(Decoupled(new SumReduReq(BF16T.wordWidth, numLanes, tagWidth)))
-        val resp = Decoupled(new SumReduResp(BF16T.wordWidth, numLanes, tagWidth))
+        val req = Flipped(Valid(new SumReduReq(BF16T.wordWidth, numLanes, tagWidth)))
+        val resp = Valid(new SumReduResp(BF16T.wordWidth, numLanes, tagWidth))
     })
 
     val treeDepth = log2Ceil(numLanes)
     val numStages = treeDepth + 1 
 
-    // --- TEXTBOOK DECOUPLED PIPELINE METADATA ---
+    // --- Valid-only pipeline metadata ---
     val valids    = RegInit(VecInit(Seq.fill(numStages)(false.B)))
-    val readys    = Wire(Vec(numStages, Bool()))
+    val readys    = WireInit(VecInit(Seq.fill(numStages)(true.B)))
     val tagRegs   = Seq.fill(numStages)(RegInit(0.U(tagWidth.W)))
     val rmRegs    = Seq.fill(numStages)(RegInit(0.U(3.W)))
     val maskRegs  = Seq.fill(numStages)(RegInit(0.U(numLanes.W)))
     val bankRegs  = Seq.fill(numStages)(RegInit(0.U(4.W)))
     val rowRegs   = Seq.fill(numStages)(RegInit(0.U(8.W)))
-
-    // Skid Buffer logic
-    readys(numStages - 1) := !valids(numStages - 1) || io.resp.ready
-    for (i <- 0 until numStages - 1) {
-        readys(i) := !valids(i) || readys(i+1)
-    }
 
     // Stage 0: Entry
     when(readys(0)) {
@@ -139,7 +133,6 @@ class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
 
     val lastIdx = numStages - 1
     
-    io.req.ready := readys(0)
     io.resp.valid := valids(lastIdx)
     io.resp.bits.tag := tagRegs(lastIdx)
     io.resp.bits.laneMask := maskRegs(lastIdx)
@@ -166,5 +159,5 @@ class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
     // Formatting: Sum in Lane 0, Zeros in Lanes 1-15
     val finalSum = fNFromRecFN(BF16T.expWidth, BF16T.sigWidth, finalRounder.io.out)
     val zeroVal  = 0.U(BF16T.wordWidth.W)
-    io.resp.bits.result := VecInit(Seq(finalSum) ++ Seq.fill(numLanes - 1)(zeroVal)) 
+    io.resp.bits.result := VecInit(Seq.fill(numLanes)(finalSum)) 
 }

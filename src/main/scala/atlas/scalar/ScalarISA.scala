@@ -107,30 +107,44 @@ object ScalarISA {
   val MXUSEL_1 = 1.U(1.W)
   val MXUSEL_X = 0.U(1.W)
 
-  // ── VPU command (5-bit) ────────────────────────────────────────────
-  val VPU_NONE    =  0.U(5.W)
-  val VPU_ADD     =  1.U(5.W)
-  val VPU_RSUM    =  2.U(5.W)
-  val VPU_SUB     =  3.U(5.W)
-  val VPU_MIN     =  4.U(5.W)
-  val VPU_MAX     =  5.U(5.W)
-  val VPU_MUL     =  6.U(5.W)
-  val VPU_MOV     =  7.U(5.W)
-  val VPU_RCP     =  8.U(5.W)
-  val VPU_EXP     =  9.U(5.W)
-  val VPU_RELU    = 10.U(5.W)
-  val VPU_LI_ALL  = 11.U(5.W)
-  val VPU_LI_ROW  = 12.U(5.W)
-  val VPU_LI_COL  = 13.U(5.W)
-  val VPU_LI_ONE  = 14.U(5.W)
-  val VPU_X       =  0.U(5.W)
+// ── VPU command (5-bit) ────────────────────────────────────────────
+  val VPU_NONE       =  0.U(5.W)  
+  val VPU_ADD        =  1.U(5.W)  // VPUOp.add        =  1
+  val VPU_SUB        =  2.U(5.W)  // VPUOp.sub        =  2
+  val VPU_MUL        =  3.U(5.W)  // VPUOp.mul        =  3
+  val VPU_RCP        =  4.U(5.W)  // VPUOp.rcp        =  4
+  val VPU_SQRT       =  5.U(5.W)  // VPUOp.sqrt       =  5
+  val VPU_SIN        =  6.U(5.W)  // VPUOp.sin        =  6
+  val VPU_COS        =  7.U(5.W)  // VPUOp.cos        =  7
+  val VPU_TANH       =  8.U(5.W)  // VPUOp.tanh       =  8
+  val VPU_LOG        =  9.U(5.W)  // VPUOp.log        =  9
+  val VPU_EXP        = 10.U(5.W)  // VPUOp.exp        = 10
+  val VPU_EXP2       = 11.U(5.W)  // VPUOp.exp2       = 11
+  val VPU_SQUARE     = 12.U(5.W)  // VPUOp.square     = 12
+  val VPU_CUBE       = 13.U(5.W)  // VPUOp.cube       = 13
+  val VPU_RSUM       = 14.U(5.W)  // VPUOp.rsum       = 14
+  val VPU_CSUM       = 15.U(5.W)  // VPUOp.csum       = 15
+  val VPU_FP8        = 16.U(5.W)  // VPUOp.fp8        = 16
+  val VPU_FP8PACK    = 17.U(5.W)  // VPUOp.fp8pack    = 17
+  val VPU_FP8UNPACK  = 18.U(5.W)  // VPUOp.fp8unpack  = 18
+  val VPU_RELU       = 19.U(5.W)  // VPUOp.relu       = 19
+  val VPU_RMAX       = 20.U(5.W)  // VPUOp.rmax       = 20
+  val VPU_RMIN       = 21.U(5.W)  // VPUOp.rmin       = 21
+  val VPU_CMAX       = 22.U(5.W)  // VPUOp.cmax       = 22
+  val VPU_CMIN       = 23.U(5.W)  // VPUOp.cmin       = 23
+  val VPU_PAIRMAX    = 24.U(5.W)  // VPUOp.pairmax    = 24
+  val VPU_PAIRMIN    = 25.U(5.W)  // VPUOp.pairmin    = 25
+  val VPU_MOV        = 26.U(5.W)  // VPUOp.mov        = 26
+  val VPU_LI_ONE     = 27.U(5.W)  // VPUOp.vliOne     = 27
+  val VPU_LI_COL     = 28.U(5.W)  // VPUOp.vliCol     = 28
+  val VPU_LI_ROW     = 29.U(5.W)  // VPUOp.vliRow     = 29
+  val VPU_LI_ALL     = 30.U(5.W)  // VPUOp.vliAll     = 30
+  val VPU_X          =  0.U(5.W)  // don't-care
 
   // ── XLU command (2-bit) ────────────────────────────────────────────
-  val XLU_NONE    = 0.U(2.W)
-  val XLU_TRPOSE  = 1.U(2.W)
-  val XLU_RMAX    = 2.U(2.W)
-  val XLU_RSUM    = 3.U(2.W)
-  val XLU_X       = 0.U(2.W)
+  val XLU_NONE    = 0.U(1.W)
+  val XLU_TRPOSE  = 1.U(1.W)
+  val XLU_X       = 0.U(1.W)
 
   // ── CSR address map ────────────────────────────────────────────────
   val CSR_CYCLE_COUNTER = 0xC00.U(12.W)

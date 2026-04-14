@@ -98,8 +98,7 @@
     # Slot A: push zero bias → acc 0 from TRF 12
     # Different push types → different submodule interfaces → safe.
     VMATPUSH.W.MXU0       0, 5
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.ACC.FP8.MXU0 0, 12
 
     # Pre-load WQ_B → TRF 6 → transpose → TRF 7
@@ -129,8 +128,7 @@
     # Slot A: MATMUL.ACC acc 0 (accumulates onto zero bias = same as MATMUL)
     # Slot B: push wbuf 1 ← TRF 7
     VMATMUL.ACC.MXU0  0, 0, 0
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.W.MXU0   1, 7
 
     # Load X[:,32:64] → TRF 0
@@ -158,8 +156,7 @@
     # Slot C:      pop acc 0 → TRF 8, FP8 scale reg 0
     # Different acc buffers (push → acc 1, pop → acc 0). Safe.
     VMATPUSH.ACC.FP8.MXU0 1, 12
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPOP.FP8.MXU0      8, 0, 0
 
 ######################################################################
@@ -208,8 +205,7 @@
 
     # ── OVERLAP [b]: compute + weight push (slab 1) ──
     VMATMUL.ACC.MXU0  1, 0, 0
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.W.MXU0   1, 7
 
     # Load X[:,32:64] → TRF 0
@@ -227,8 +223,7 @@
     # Slot B: push zero bias → acc 0 (preload for phase 3)
     # acc 1 ≠ acc 0 → no buffer conflict. Safe.
     VMATMUL.ACC.MXU0      1, 0, 1
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.ACC.FP8.MXU0 0, 12
     # → acc 1 now holds Q[:,32:64]
     # → acc 0 now holds zero bias (ready for phase 3)
@@ -291,11 +286,9 @@
     # Slot C: POP.FP8 acc 1 → TRF 9, scale reg 1
     # All three slots active. acc 0 ≠ acc 1, wbuf 1 ≠ wbuf 0. Safe.
     VMATMUL.ACC.MXU0  0, 0, 0
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.W.MXU0   1, 7
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPOP.FP8.MXU0  9, 1, 1
 
     ADDI  x6, x0, 0
@@ -329,8 +322,7 @@
 
     # ── OVERLAP [d]: acc push + pop ──
     VMATPUSH.ACC.FP8.MXU0 1, 12
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPOP.FP8.MXU0      10, 0, 0
 
 ######################################################################
@@ -376,8 +368,7 @@
 
     # ── OVERLAP [b]: compute + weight push ──
     VMATMUL.ACC.MXU0  1, 0, 0
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.W.MXU0   1, 7
 
     ADDI  x6, x0, 0
@@ -392,9 +383,7 @@
     # ── OVERLAP [c]: compute + acc push ──
     # Preload bias→acc 0 for phase 5 scores
     VMATMUL.ACC.MXU0      1, 0, 1
-    DELAY 120
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.ACC.FP8.MXU0 0, 12
     # → acc 1 holds K[:,32:64]
     # → acc 0 holds zero bias (ready for phase 5)
@@ -468,8 +457,7 @@
 
     # ── OVERLAP [b]: compute + weight push ──
     VMATMUL.ACC.MXU0  0, 0, 0
-    # MXU0 command interface is 1-deep; separate back-to-back commands.
-    DELAY 40
+    # Back-to-back issue is intentional here; these ops overlap safely on MXU0.
     VMATPUSH.W.MXU0   1, 6
 
     # Load Q[:,32:64] activations → TRF 0

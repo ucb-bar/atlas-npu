@@ -53,9 +53,8 @@
     VTRPOSE.XLU 5, 4
     DELAY 80
 
-    # Conservative: do not overlap first two MXU commands
+    # Overlap-safe prologue push pair
     VMATPUSH.W.MXU1       0, 5
-    DELAY 40
     VMATPUSH.ACC.FP8.MXU1 0, 8
     DELAY 40
 
@@ -84,9 +83,8 @@
     DELAY 40
     ADD   x16, x16, x12
 
-    # Conservative first compute/push
+    # Overlap-safe first compute/push
     VMATMUL.ACC.MXU1  0, 0, 0
-    DELAY 40
     VMATPUSH.W.MXU1   1, 7
     DELAY 40
 
@@ -142,7 +140,6 @@ do_matmul:
 
 matmul_buf1:
     VMATMUL.ACC.MXU1  0, 0, 1
-    DELAY 40
     VMATPUSH.W.MXU1   0, 5
     DELAY 40
     BEQ   x0, x0, advance
@@ -151,7 +148,6 @@ matmul_buf1:
 
 matmul_buf0:
     VMATMUL.ACC.MXU1  0, 0, 0
-    DELAY 40
     VMATPUSH.W.MXU1   1, 7
     DELAY 40
 

@@ -16,6 +16,7 @@ import atlas.common.VpuParams
 import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
+import VectorTestUtils._
 
 import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
@@ -107,6 +108,12 @@ class RVTanhTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     it should "Verify the correctness of add" in {
         PersistentVcsRVTanhSimulator.simulate(new TanhRec(BF16)) { module =>
             val dut = module.wrapped
+
+            dut.reset.poke(true.B)
+            dut.clock.step(3)
+            dut.reset.poke(false.B)
+            dut.clock.step(1)
+
             // Test data
             val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 2)
             val dataB = Seq.fill(16)(scala.util.Random.nextFloat() * 1000)
@@ -120,27 +127,28 @@ class RVTanhTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
             // Poke inputs
             dut.io.req.valid.poke(true.B)
-            dut.io.resp.ready.poke(true.B)
             dut.io.req.bits.tag.poke(1.U) 
             dut.io.req.bits.whichBank.poke(2.U)
             dut.io.req.bits.wRow.poke(3.U)
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.xVec(i).poke(BigInt(bits & 0xFFFF)) }
+            var failed = 0
             for (i <- 0 to 5) {
-                val ir = dut.io.req.ready.peek().litValue
                 val iv = dut.io.req.valid.peek().litValue
-                val or = dut.io.resp.ready.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
-                val reqFire  = iv == 1 && ir == 1
-                val respFire = ov == 1 && or == 1
+                val reqFire  = iv == 1
+                val respFire = ov == 1
                 val tag = dut.io.resp.bits.tag.peek().litValue.toInt
                 val whichBank = dut.io.resp.bits.whichBank.peek().litValue.toInt
                 val wRow = dut.io.resp.bits.wRow.peek().litValue.toInt
-                println(f"[cycle=$i%2d] req: v=$iv%d r=$ir%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d r=$or%d f=${if(respFire)1 else 0}%d")
+                println(f"[cycle=$i%2d] req: v=$iv%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d f=${if(respFire)1 else 0}%d")
                 println(f"tag=$tag whichBank=$whichBank wRow=$wRow")
                 // Print values at after two cycles
                 if (respFire && i >= 1) {
-                    print(dataA)
+                    println(dataA)
+                    val actual_arr = Array.tabulate(16) { k => dut.io.resp.bits.result(k).peek().litValue.toShort}
+                    val expected_arr: Array[Short] = expected.map(_.toShort).toArray
+                    if(!checkVectorTolerance(actual_arr, expected_arr, false)) failed += 1
                     val actual: Seq[Int] = (0 until 16).map { i => dut.io.resp.bits.result(i).peek().litValue.toInt & 0xFFFF}
                     actual.zip(expected).zipWithIndex.foreach { case ((act, exp), i) =>
                         val actF = bfTofp(act)
@@ -155,6 +163,7 @@ class RVTanhTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.bits.whichBank.poke(0.U)
                 dut.io.req.bits.wRow.poke(0.U)
             }
+            failed shouldBe 0
         }
     }
 }

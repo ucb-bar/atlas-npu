@@ -96,13 +96,16 @@ class TanhBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   it should "compute vectorized Tanh with 2-cycle latency and handle pipelining" in {
     PersistentVcsTanhBlockSimulator.simulate(new TanhRec(BF16)) { module =>
       val dut = module.wrapped
-      
+
+      dut.reset.poke(true.B)
+      dut.clock.step(3)
+      dut.reset.poke(false.B)
+      dut.clock.step(1)
+
       val inputs1 = Seq(0.0, 0.5, 1.0, 2.0, 5.0, -0.5, -1.0, -5.0)
       val inputs2 = Seq(0.1, 0.2, 0.3, 0.4, -0.1, -0.2, -0.3, -0.4)
       
 println(s"\n>>> STIMULATING TANH PIPELINE")
-      dut.io.resp.ready.poke(true.B)
-
       // Package requests so we can iterate through them
       val requests = Seq(
         (0xAA, inputs1),
@@ -129,7 +132,7 @@ println(s"\n>>> STIMULATING TANH PIPELINE")
         }
 
         // 2. MONITOR OUTPUTS (Peek before we step!)
-        if (dut.io.resp.valid.peek().litToBoolean && dut.io.resp.ready.peek().litToBoolean) {
+        if (dut.io.resp.valid.peek().litToBoolean) {
           val tag = dut.io.resp.bits.tag.peek().litValue
           val mask = dut.io.resp.bits.laneMask.peek().litValue
           
@@ -148,8 +151,8 @@ println(s"\n>>> STIMULATING TANH PIPELINE")
           resultsFound += 1
         }
 
-        // 3. EVALUATE HANDSHAKE (Did the DUT accept our request?)
-        if (reqIdx < requests.length && dut.io.req.ready.peek().litToBoolean && dut.io.req.valid.peek().litToBoolean) {
+        // 3. Advance once the request has been presented on the valid-only interface
+        if (reqIdx < requests.length && dut.io.req.valid.peek().litToBoolean) {
           reqIdx += 1 // Advance to next request for the next cycle
         }
 
