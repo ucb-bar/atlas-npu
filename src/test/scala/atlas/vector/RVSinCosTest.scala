@@ -9,7 +9,7 @@
 package atlas.vector
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome 
@@ -17,8 +17,55 @@ import atlas.common.VpuParams
 import sp26FPUnits.hardfloat._
 import sp26FPUnits._
 
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
+import atlas.common._
+import java.nio.file.{Files, Path, Paths}
 
-class RVSinCosTest extends AnyFlatSpec with Matchers {
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
+
+object PersistentVcsRVSinCosSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val test_name = "RVSinCosTest"
+
+  private val runDir: Path = {
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve(test_name)
+    Files.createDirectories(p)
+    p.toAbsolutePath
+  }
+
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = test_name
+  override val workspacePath: String = runDir.toString
+
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
+
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName(s"${test_name}_coverage"))
+      )
+    )
+  }
+}
+
+class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
     //----------- CI/CD INCLUDE --------------
     override def withFixture(test: NoArgTest): Outcome = {
@@ -57,7 +104,8 @@ class RVSinCosTest extends AnyFlatSpec with Matchers {
 
     behavior of s"VectorEngine (BF16) SinCos lanes=${16}"
     it should "Verify the correctness of add" in {
-        simulate(new SinCos(p.BF16)) { dut =>
+        PersistentVcsRVSinCosSimulator.simulate(new SinCos(p.BF16)) { module =>
+            val dut = module.wrapped
             // Test data
             val twoPi = (2 * Math.PI).toFloat
             val threePi_over_2 = (1.5 * Math.PI).toFloat

@@ -32,13 +32,15 @@ import java.io.PrintWriter
 object PersistentVcsSAFullMatmulSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
 
   private val runDir: Path = {
-    val p = Paths.get("test_run_dir", "sa_full_matmul_vcs")
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve("SystolicArrayFullMatmulTest")
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
   override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String           = "sa_full_matmul_vcs"
+  override val tag: String           = "SystolicArrayFullMatmulTest"
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
@@ -57,7 +59,7 @@ object PersistentVcsSAFullMatmulSimulator extends Simulator[VcsBackend] with Pee
       simulationSettings = Backend.SimulationSettings(
         coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName      = Some(Backend.CoverageName("sa_full_matmul_test_coverage"))
+        coverageName      = Some(Backend.CoverageName("SystolicArrayFullMatmulTest_coverage"))
       )
     )
   }

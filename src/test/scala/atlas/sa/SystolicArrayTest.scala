@@ -13,13 +13,63 @@ package atlas.sa
 
 import chisel3._
 import chisel3.util._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
+import _root_.circt.stage.ChiselStage
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
 import atlas.common._
-import atlas.mxu.{MxuOp, MxuCmd}
+import atlas.mxu._
+import java.nio.file.{Files, Path, Paths}
+import scala.io.Source
+import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
+import java.io.PrintWriter
 import atlas.mreg.MregFile
+
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
+
+object PersistentVcsBasicSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val runDir: Path = {
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve("SystolicArrayTest")
+    Files.createDirectories(p)
+    p.toAbsolutePath
+  }
+
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = "SystolicArrayTest"
+  override val workspacePath: String = runDir.toString
+
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
+
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName("SystolicArrayTest_coverage"))
+      )
+    )
+  }
+}
+
 
 // ============================================================================
 // Test harness — SA + MREG with backdoor read/write
@@ -87,7 +137,7 @@ class SystolicArrayUnitHarness(
 // Tests
 // ============================================================================
 
-class SystolicArrayTest extends AnyFlatSpec with Matchers {
+class SystolicArrayTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
@@ -217,7 +267,8 @@ class SystolicArrayTest extends AnyFlatSpec with Matchers {
     val mregP       = MregParams()
     val compTimeout = p.accSize + saLatency(p) + 200
 
-    simulate(new SystolicArrayUnitHarness(p, mregP)) { dut =>
+    PersistentVcsBasicSimulator.simulate(new SystolicArrayUnitHarness(p, mregP)) { module =>
+      val dut = module.wrapped
       idle(dut)
       dut.reset.poke(true.B)
       dut.clock.step(5)

@@ -9,15 +9,62 @@ package atlas.vector
 
 import chisel3._
 import chisel3.util._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome 
 import sp26FPUnits._
 import sp26FPUnits.AtlasFPType._
 
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
+import atlas.common._
+import java.nio.file.{Files, Path, Paths}
 
-class TanhBlockTest extends AnyFlatSpec with Matchers {
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
+
+object PersistentVcsTanhBlockSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val test_name = "TanhBlockTest"
+
+  private val runDir: Path = {
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve(test_name)
+    Files.createDirectories(p)
+    p.toAbsolutePath
+  }
+
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = test_name
+  override val workspacePath: String = runDir.toString
+
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
+
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName(s"${test_name}_coverage"))
+      )
+    )
+  }
+}
+
+class TanhBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   //----------- CI/CD INCLUDE --------------
   override def withFixture(test: NoArgTest): Outcome = {
@@ -47,7 +94,8 @@ class TanhBlockTest extends AnyFlatSpec with Matchers {
   behavior of "TanhRec"
 
   it should "compute vectorized Tanh with 2-cycle latency and handle pipelining" in {
-    simulate(new TanhRec(fptype, numLanes, tagWidth)) { dut =>
+    PersistentVcsTanhBlockSimulator.simulate(new TanhRec(BF16)) { module =>
+      val dut = module.wrapped
       
       val inputs1 = Seq(0.0, 0.5, 1.0, 2.0, 5.0, -0.5, -1.0, -5.0)
       val inputs2 = Seq(0.1, 0.2, 0.3, 0.4, -0.1, -0.2, -0.3, -0.4)
