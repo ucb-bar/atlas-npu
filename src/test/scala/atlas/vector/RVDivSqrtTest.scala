@@ -9,7 +9,7 @@
 package atlas.vector
 
 import chisel3._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome 
@@ -18,9 +18,55 @@ import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
 
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
+import atlas.common._
+import java.nio.file.{Files, Path, Paths}
 
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
 
-class RVDivSqrtTest extends AnyFlatSpec with Matchers {
+object PersistentVcsRVDivSqrtSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val test_name = "RVDivSqrtTest"
+
+  private val runDir: Path = {
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve(test_name)
+    Files.createDirectories(p)
+    p.toAbsolutePath
+  }
+
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = test_name
+  override val workspacePath: String = runDir.toString
+
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
+
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName(s"${test_name}_coverage"))
+      )
+    )
+  }
+}
+
+class RVDivSqrtTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
     //----------- CI/CD INCLUDE --------------
     override def withFixture(test: NoArgTest): Outcome = {
@@ -61,7 +107,8 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers {
 
     behavior of s"VectorEngine (BF16) Rcp/Sqrt lanes=${16}"
     it should "Verify the correctness of Rcp/Sqrt" in {
-        simulate(new DivSqrtRec(BF16)) { dut =>
+        PersistentVcsRVDivSqrtSimulator.simulate(new DivSqrtRec(BF16)) { module =>
+            val dut = module.wrapped
             // Test data
             val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 100)
             val dataB = Seq.fill(16)(scala.util.Random.nextFloat())

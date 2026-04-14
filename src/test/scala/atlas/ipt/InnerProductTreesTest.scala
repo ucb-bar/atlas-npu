@@ -13,14 +13,62 @@ package atlas.ipt
 
 import chisel3._
 import chisel3.util._
-import chisel3.simulator.EphemeralSimulator._
+import chisel3.simulator._
 import _root_.circt.stage.ChiselStage
+import svsim.CommonCompilationSettings
+import svsim.vcs.{Backend => VcsBackend}
+import svsim.vcs.Backend
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
 import atlas.common._
-import atlas.mxu.{MxuOp, MxuCmd, MxuParams}
+import atlas.mxu._
+import java.nio.file.{Files, Path, Paths}
+import scala.io.Source
+import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
+import java.io.PrintWriter
 import atlas.mreg.MregFile
+
+// ============================================================================
+// VCS simulator — persistent workspace with coverage
+// ============================================================================
+
+class PersistentVcsBasicSimulator(testSuffix: String) extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val runDir: Path = {
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve(s"InnerProductTreesTest_$testSuffix")
+    Files.createDirectories(p)
+    p.toAbsolutePath
+  }
+
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = s"InnerProductTreesTest_$testSuffix"
+  override val workspacePath: String = runDir.toString
+
+  override val commonCompilationSettings: CommonCompilationSettings =
+    CommonCompilationSettings(
+      availableParallelism =
+        CommonCompilationSettings.AvailableParallelism.UpTo(Runtime.getRuntime.availableProcessors())
+    )
+
+  override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
+    val cov = Backend.CoverageSettings(
+      line = true, cond = true, branch = true, fsm = true, tgl = true
+    )
+    Backend.CompilationSettings(
+      coverageSettings  = cov,
+      coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+      simulationSettings = Backend.SimulationSettings(
+        coverageSettings  = cov,
+        coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
+        coverageName      = Some(Backend.CoverageName("InnerProductTreesTest_coverage"))
+      )
+    )
+  }
+}
 
 // ============================================================================
 // Test harness — IPT + MREG with backdoor read/write
@@ -88,7 +136,7 @@ class InnerProductTreesUnitHarness(
 // Tests
 // ============================================================================
 
-class InnerProductTreesTest extends AnyFlatSpec with Matchers {
+class InnerProductTreesTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
@@ -229,10 +277,13 @@ class InnerProductTreesTest extends AnyFlatSpec with Matchers {
    * Run the full battery of functional checks for a given pipeline
    * configuration.  Each test is self-contained: idle → load → compute → read.
    */
-  def runAllChecks(p: InnerProductTreeParams): Unit = {
+  def runAllChecks(p: InnerProductTreeParams, testName: String): Unit = {
     val mregP = MregParams()
+    val simulator = new PersistentVcsBasicSimulator(testName)
 
-    simulate(new InnerProductTreesUnitHarness(p, mregP)) { dut =>
+    
+    simulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
+      val dut = module.wrapped
       idle(dut)
       dut.reset.poke(true.B)
       dut.clock.step(5)
@@ -385,16 +436,16 @@ class InnerProductTreesTest extends AnyFlatSpec with Matchers {
 
   // Run the suite for several pipeline depths.
   "InnerProductTrees (combinational)" should "pass all checks" in {
-    runAllChecks(InnerProductTreeParams.withPipelineDepth(1))
+    runAllChecks(InnerProductTreeParams.withPipelineDepth(1), "comb")
   }
   "InnerProductTrees (2-stage)" should "pass all checks" in {
-    runAllChecks(InnerProductTreeParams.withPipelineDepth(2))
+    runAllChecks(InnerProductTreeParams.withPipelineDepth(2), "2stage")
   }
   "InnerProductTrees (3-stage)" should "pass all checks" in {
-    runAllChecks(InnerProductTreeParams.withPipelineDepth(3))
+    runAllChecks(InnerProductTreeParams.withPipelineDepth(3), "3stage")
   }
   "InnerProductTrees (4-stage)" should "pass all checks" in {
-    runAllChecks(InnerProductTreeParams.withPipelineDepth(4))
+    runAllChecks(InnerProductTreeParams.withPipelineDepth(4), "4stage")
   }
 
   it should "elaborate rectangular geometries" in {

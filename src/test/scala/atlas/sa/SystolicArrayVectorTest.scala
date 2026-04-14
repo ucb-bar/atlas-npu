@@ -32,13 +32,15 @@ import java.io.PrintWriter
 object PersistentVcsSAVectorSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
 
   private val runDir: Path = {
-    val p = Paths.get("test_run_dir", "sa_vector_vcs")
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve("SystolicArrayVectorTest")
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
   override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String           = "sa_vector_vcs"
+  override val tag: String           = "SystolicArrayVectorTest"
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
@@ -57,7 +59,7 @@ object PersistentVcsSAVectorSimulator extends Simulator[VcsBackend] with PeekPok
       simulationSettings = Backend.SimulationSettings(
         coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName      = Some(Backend.CoverageName("sa_vector_test_coverage"))
+        coverageName      = Some(Backend.CoverageName("SystolicArrayVectorTest_coverage"))
       )
     )
   }

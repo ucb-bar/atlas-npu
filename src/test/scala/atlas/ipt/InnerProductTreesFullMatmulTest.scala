@@ -27,19 +27,21 @@ import java.io.PrintWriter
 
 // ============================================================================
 // VCS simulator for full-matmul tests — persistent workspace under
-// test_run_dir/full_matmul_vcs with full code-coverage collection.
+// test_run_dir/InnerProductTreesFullMatmulTest with full code-coverage collection.
 // ============================================================================
 
 object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
 
   private val runDir: Path = {
-    val p = Paths.get("test_run_dir", "full_matmul_vcs")
+    val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
+    val baseDir = Paths.get(rootDirStr)
+    val p = baseDir.resolve("tmp").resolve("InnerProductTreesFullMatmulTest")
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
   override val backend: VcsBackend = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String         = "full_matmul_vcs"
+  override val tag: String         = "InnerProductTreesFullMatmulTest"
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
@@ -58,7 +60,7 @@ object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekP
       simulationSettings = Backend.SimulationSettings(
         coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName      = Some(Backend.CoverageName("full_matmul_test_coverage"))
+        coverageName      = Some(Backend.CoverageName("InnerProductTreesFullMatmulTest_coverage"))
       )
     )
   }
