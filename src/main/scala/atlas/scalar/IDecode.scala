@@ -3,7 +3,7 @@ IDecode.scala — Instruction decode table (17 columns).
    0  legal(1)   1  alu_fn(4)    2  br_type(3)   3  op1_sel(2)
    4  op2_sel(2) 5  imm_sel(3)   6  rd_wen(1)    7  jal(1)
    8  jalr(1)    9  csr_cmd(3)  10  dma_cmd(3)  11  mxu_cmd(4)
-  12  mxu_sel(1) 13  vpu_cmd(5) 14  xlu_cmd(2)  15  mem_cmd(4)
+  12  mxu_sel(1) 13  vpu_cmd(5) 14  xlu_cmd(1)  15  mem_cmd(4)
   16  lsu_cmd(2)
 */
 
@@ -69,13 +69,13 @@ object IDecode {
     FENCE  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X,   DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
     // ── Scalar loads/stores ─────────────────────────────────────────
-    LB   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LB,   LSU_X),
-    LH   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LH,   LSU_X),
-    LW   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LW,   LSU_X),
-    LBU  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LBU,  LSU_X),
-    LHU  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LHU,  LSU_X),
+    LB   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LB,   LSU_X),
+    LH   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LH,   LSU_X),
+    LW   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LW,   LSU_X),
+    LBU  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LBU,  LSU_X),
+    LHU  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_LHU,  LSU_X),
     SELD -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_SELD, LSU_X),
-    SELI -> List(Y, ALU_X,  BR_X, OP1_X,   OP2_X,   IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X,    LSU_X),
+    SELI -> List(Y, ALU_X,   BR_X, OP1_X,   OP2_X,   IMM_I, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X,    LSU_X),
     SB   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_S, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_SB,   LSU_X),
     SH   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_S, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_SH,   LSU_X),
     SW   -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_S, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_SW,   LSU_X),
@@ -90,7 +90,7 @@ object IDecode {
     DMA_CONFIG_ANY -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_CONFIG, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
     DMA_WAIT_ANY   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_WAIT,   MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
-    // ── MXU0/1, VPU, VLI, XLU ──────────────────────────────────────
+    // ── MXU0/1 ──────────────────────────────────────────────────────
     VMATPUSH_W_MXU0     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_WEIGHT,   MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATPUSH_AFP8_MXU0  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_ACC_FP8,  MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATPUSH_ABF16_MXU0 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_PUSH_ACC_BF16, MXUSEL_0, VPU_X, XLU_X, MEM_X, LSU_X),
@@ -106,22 +106,44 @@ object IDecode {
     VMATMUL_MXU1        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_MATMUL,        MXUSEL_1, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATMUL_ACC_MXU1    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_MATMUL_ACC,    MXUSEL_1, VPU_X, XLU_X, MEM_X, LSU_X),
 
-    VADD_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_ADD,    XLU_X, MEM_X, LSU_X),
-    VREDSUM_BF16 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RSUM,   XLU_X, MEM_X, LSU_X),
-    VSUB_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_SUB,    XLU_X, MEM_X, LSU_X),
-    VMIN_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MIN,    XLU_X, MEM_X, LSU_X),
-    VMAX_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MAX,    XLU_X, MEM_X, LSU_X),
-    VMUL_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MUL,    XLU_X, MEM_X, LSU_X),
-    VMOV         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MOV,    XLU_X, MEM_X, LSU_X),
-    VRECIP_BF16  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RCP,    XLU_X, MEM_X, LSU_X),
-    VEXP         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_EXP,    XLU_X, MEM_X, LSU_X),
-    VRELU        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RELU,   XLU_X, MEM_X, LSU_X),
-    VLI_ALL      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ALL, XLU_X, MEM_X, LSU_X),
-    VLI_ROW      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ROW, XLU_X, MEM_X, LSU_X),
-    VLI_COL      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_COL, XLU_X, MEM_X, LSU_X),
-    VLI_ONE      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ONE, XLU_X, MEM_X, LSU_X),
-    VTRPOSE_XLU  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_TRPOSE, MEM_X, LSU_X),
-    VREDMAX_XLU  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_RMAX,   MEM_X, LSU_X),
-    VREDSUM_XLU  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_RSUM,   MEM_X, LSU_X)
+    // ── VPU: element-wise binary ops ────────────────────────────────
+    VADD_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_ADD,       XLU_X, MEM_X, LSU_X),
+    VSUB_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_SUB,       XLU_X, MEM_X, LSU_X),
+    VMUL_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MUL,       XLU_X, MEM_X, LSU_X),
+    VMIN_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_PAIRMIN,   XLU_X, MEM_X, LSU_X),
+    VMAX_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_PAIRMAX,   XLU_X, MEM_X, LSU_X),
+
+    // ── VPU: sublane (column) reductions — result[i,j] = op(src[:,j]) ─
+    VREDSUM_BF16     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_CSUM,  XLU_X, MEM_X, LSU_X),
+    VREDMIN_BF16     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_CMIN,  XLU_X, MEM_X, LSU_X),
+    VREDMAX_BF16     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_CMAX,  XLU_X, MEM_X, LSU_X),
+
+    // ── VPU: lane (row) reductions — result[i,j] = op(src[i,:]) ────
+    VREDSUM_ROW_BF16 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RSUM,  XLU_X, MEM_X, LSU_X),
+    VREDMIN_ROW_BF16 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RMIN,  XLU_X, MEM_X, LSU_X),
+    VREDMAX_ROW_BF16 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RMAX,  XLU_X, MEM_X, LSU_X),
+
+    // ── VPU: unary ops ──────────────────────────────────────────────
+    VMOV         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_MOV,       XLU_X, MEM_X, LSU_X),
+    VRECIP_BF16  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RCP,       XLU_X, MEM_X, LSU_X),
+    VEXP         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_EXP,       XLU_X, MEM_X, LSU_X),
+    VEXP2        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_EXP2,      XLU_X, MEM_X, LSU_X),
+    VFP8PACK     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_FP8PACK,   XLU_X, MEM_X, LSU_X),
+    VFP8UNPACK   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_FP8UNPACK, XLU_X, MEM_X, LSU_X),
+    VRELU        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RELU,      XLU_X, MEM_X, LSU_X),
+    VSIN         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_SIN,       XLU_X, MEM_X, LSU_X),
+    VCOS         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_COS,       XLU_X, MEM_X, LSU_X),
+    VTANH        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_TANH,      XLU_X, MEM_X, LSU_X),
+    VLOG2        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LOG,       XLU_X, MEM_X, LSU_X),
+    VSQRT        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_SQRT,      XLU_X, MEM_X, LSU_X),
+
+    // ── VLI ─────────────────────────────────────────────────────────
+    VLI_ALL      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ALL,    XLU_X, MEM_X, LSU_X),
+    VLI_ROW      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ROW,    XLU_X, MEM_X, LSU_X),
+    VLI_COL      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_COL,    XLU_X, MEM_X, LSU_X),
+    VLI_ONE      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_LI_ONE,    XLU_X, MEM_X, LSU_X),
+
+    // ── XLU ─────────────────────────────────────────────────────────
+    VTRPOSE_XLU  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X,         XLU_TRPOSE, MEM_X, LSU_X)
   )
 }

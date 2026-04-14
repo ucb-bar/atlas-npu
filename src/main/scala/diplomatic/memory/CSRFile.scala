@@ -11,7 +11,7 @@ TileLink byte-address map (offsets from CSR_BASE):
   0x0C  illegal-instr PC   (RO — hardware-driven)
   0x10  dbg0               (RW)
   0x14  dbg1               (RW)
-  0x18  softReset          (W0 - write 1 to pulse-reset the core)
+  0x18  execControl        (RW — bit 0: 1=start, 0=stop)
 
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
@@ -36,9 +36,10 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     val tl  = Flipped(new TLBundle(tlBP))
     val csr = new CSRInternalPort
     // Direct outputs for debug / convenience
-    val dbg0      = Output(UInt(32.W))
-    val dbg1      = Output(UInt(32.W))
-    val softReset = Output(Bool())
+    val dbg0         = Output(UInt(32.W))
+    val dbg1         = Output(UInt(32.W))
+    val execRun      = Output(Bool())
+    val execRunWrite = Output(Bool())
   })
 
   // ── Registers ────────────────────────────────────────────────────
@@ -49,9 +50,11 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   val reg_dbg0        = RegInit(0.U(32.W))
   val reg_dbg1        = RegInit(0.U(32.W))
 
-  val reg_softReset = RegInit(false.B)
-  reg_softReset := false.B
-  io.softReset  := reg_softReset
+  val reg_execRun      = RegInit(false.B)
+  val reg_execRunWrite = RegInit(false.B)
+  reg_execRunWrite := false.B
+  io.execRun      := reg_execRun
+  io.execRunWrite := reg_execRunWrite
 
   // Hardware auto-updates
   reg_cycle := reg_cycle + 1.U
@@ -75,7 +78,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     3.U -> reg_illegal,
     4.U -> reg_dbg0,
     5.U -> reg_dbg1,
-    6.U -> 0.U
+    6.U -> Cat(0.U(31.W), reg_execRun)
   ))
 
   // ── Internal (scalar-core) access ────────────────────────────────
@@ -143,7 +146,14 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
       // 2 (status) and 3 (illegal) are read-only from TL as well
       when(wordIdx === 4.U) { reg_dbg0  := tl.a.bits.data }
       when(wordIdx === 5.U) { reg_dbg1  := tl.a.bits.data }
-      when(wordIdx === 6.U) { reg_softReset := tl.a.bits.data(0) }
+      when(wordIdx === 6.U) {
+        reg_execRun      := tl.a.bits.data(0)
+        reg_execRunWrite := true.B
+        when(tl.a.bits.data(0)) {
+          reg_halt_reason := 0.U
+          reg_illegal     := 0.U
+        }
+      }
     }
   }
 

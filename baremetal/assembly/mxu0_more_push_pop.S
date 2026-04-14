@@ -61,7 +61,7 @@
 
     DELAY 40
 
-# ── Push weights into MXU0 weight FIFO ──
+# ── Push weights ──
     VMATPUSH.W.MXU0  0, 4
     DELAY 40
 

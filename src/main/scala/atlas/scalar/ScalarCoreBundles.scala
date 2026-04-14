@@ -60,11 +60,12 @@ class MxuCmd extends Bundle {
 }
 
 class VpuCmd extends Bundle {
-  val op  = UInt(5.W)
-  val vd  = UInt(6.W)
-  val vs1 = UInt(6.W)
-  val vs2 = UInt(6.W)
-  val imm = UInt(16.W)
+  val op        = UInt(5.W)
+  val vd        = UInt(6.W)
+  val vs1       = UInt(6.W)
+  val vs2       = UInt(6.W)
+  val imm       = UInt(16.W)
+  val scaleE8M0 = UInt(8.W)
 }
 
 class XluCmd extends Bundle {
@@ -108,5 +109,6 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val scaleRegs     = Output(Vec(NUM_SCALE_REGS, UInt(8.W)))
   val dmaBaseReg    = Output(UInt(32.W))
   val halted        = Output(Bool())
-  val softReset     = Input(Bool())
+  val execRun       = Input(Bool())
+  val execRunWrite  = Input(Bool())
 }

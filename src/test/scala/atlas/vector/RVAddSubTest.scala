@@ -5,7 +5,6 @@
 // RUN: (from sp26-atlas-acc)
 //    mill atlas.test.testOnly atlas.vector.RVAddSubTest
 // ============================================================================
-
 package atlas.vector
 
 import chisel3._
@@ -107,6 +106,12 @@ class RVAddSubTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     it should "Verify the correctness of add" in {
         PersistentVcsRVAddSubSimulator.simulate(new AddSubRec(BF16)) { module =>
             val dut = module.wrapped
+
+            dut.reset.poke(true.B)
+            dut.clock.step(3)
+            dut.reset.poke(false.B)
+            dut.clock.step(1)
+
             // Test data
             val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 100)
             val dataB = Seq.fill(16)(scala.util.Random.nextFloat() * 100)
@@ -121,7 +126,6 @@ class RVAddSubTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
             // Flushing the circuit 
             dut.io.req.valid.poke(false.B)
-            dut.io.resp.ready.poke(true.B)
             dut.io.req.bits.roundingMode.poke(0.U) 
             dut.io.req.bits.tag.poke(1.U) 
             dut.io.req.bits.whichBank.poke(2.U)
@@ -137,16 +141,14 @@ class RVAddSubTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
             dataB_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.bVec(i).poke(BigInt(bits & 0xFFFF)) }
             for (i <- 2 to 4) {
-                val ir = dut.io.req.ready.peek().litValue
                 val iv = dut.io.req.valid.peek().litValue
-                val or = dut.io.resp.ready.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
-                val reqFire  = iv == 1 && ir == 1
-                val respFire = ov == 1 && or == 1
+                val reqFire  = iv == 1
+                val respFire = ov == 1
                 val tag = dut.io.resp.bits.tag.peek().litValue.toInt
                 val whichBank = dut.io.resp.bits.whichBank.peek().litValue.toInt
                 val wRow = dut.io.resp.bits.wRow.peek().litValue.toInt
-                println(f"[cycle=$i%2d] req: v=$iv%d r=$ir%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d r=$or%d f=${if(respFire)1 else 0}%d")
+                println(f"[cycle=$i%2d] req: v=$iv%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d f=${if(respFire)1 else 0}%d")
                 println(f"tag=$tag whichBank=$whichBank wRow=$wRow")
 
                 // Print values at after two cycles
@@ -156,6 +158,7 @@ class RVAddSubTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         val actF = bfTofp(act)
                         val expF = bfTofp(exp)
                         println(f"lane=$i%2d  act=0x$act%04x ($actF%f)  exp=0x$exp%04x ($expF%f)")
+                        act should be (exp)
                     }
                 }
                 // Step to next cycle and turn off input validity
@@ -175,16 +178,14 @@ class RVAddSubTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
             dataB_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.bVec(i).poke(BigInt(bits & 0xFFFF)) }
             for (i <- 5 to 8) {
-                val ir = dut.io.req.ready.peek().litValue
                 val iv = dut.io.req.valid.peek().litValue
-                val or = dut.io.resp.ready.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
-                val reqFire  = iv == 1 && ir == 1
-                val respFire = ov == 1 && or == 1
+                val reqFire  = iv == 1
+                val respFire = ov == 1
                 val tag = dut.io.resp.bits.tag.peek().litValue.toInt
                 val whichBank = dut.io.resp.bits.whichBank.peek().litValue.toInt
                 val wRow = dut.io.resp.bits.wRow.peek().litValue.toInt
-                println(f"[cycle=$i%2d] req: v=$iv%d r=$ir%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d r=$or%d f=${if(respFire)1 else 0}%d")
+                println(f"[cycle=$i%2d] req: v=$iv%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d f=${if(respFire)1 else 0}%d")
                 println(f"tag=$tag whichBank=$whichBank wRow=$wRow")
 
                 // Print values at after two cycles

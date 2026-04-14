@@ -29,7 +29,7 @@ class PcControl(resetPC: Int = 0) extends Module {
     val redirect_target = Input(UInt(32.W))
     val stall           = Input(Bool())
     val halted          = Input(Bool())
-    val softReset       = Input(Bool())
+    val restart         = Input(Bool())
     val pc              = Output(UInt(32.W))   // word index for IMEM fetch
     val s1_pc           = Output(UInt(32.W))   // PC of instruction in execute
     val s1_valid        = Output(Bool())
@@ -44,7 +44,7 @@ class PcControl(resetPC: Int = 0) extends Module {
   val delay_count  = RegInit(0.U(2.W))
   val saved_target = Reg(UInt(32.W))
 
-  when(io.softReset) {
+  when(io.restart) {
     pc_reg        := resetPC.U
     fetch_pc_reg  := resetPC.U
     s1_valid_reg  := false.B
@@ -52,7 +52,10 @@ class PcControl(resetPC: Int = 0) extends Module {
   }.elsewhen(io.halted) {
     s1_valid_reg := false.B
   }.elsewhen(io.stall) {
-    fetch_pc_reg := pc_reg
+    // All registers hold their values.  Do NOT overwrite fetch_pc_reg
+    // with pc_reg here: by the time a stall takes effect, pc_reg has
+    // already advanced past the stalled instruction.  Copying it would
+    // corrupt s1_pc, breaking PC-relative branches after DELAY stalls.
   }.otherwise {
     s1_valid_reg := true.B
     fetch_pc_reg := pc_reg

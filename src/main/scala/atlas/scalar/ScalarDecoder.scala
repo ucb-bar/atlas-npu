@@ -23,7 +23,7 @@ class DecodedInstr extends Bundle {
   val mxu_cmd  = UInt(4.W)
   val mxu_sel  = UInt(1.W)
   val vpu_cmd  = UInt(5.W)
-  val xlu_cmd  = UInt(2.W)
+  val xlu_cmd  = UInt(1.W)
   val mem_cmd  = UInt(4.W)   // scalar load/store type
   val lsu_cmd  = UInt(2.W)   // vload / vstore
 

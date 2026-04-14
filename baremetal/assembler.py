@@ -127,6 +127,9 @@ def BGEU(rs1, rs2, off): return b_type(off * 2, rs2, rs1, 7, 0x63)
 def JAL(rd, off):        return j_type(off * 2, rd, 0x6F)
 def JALR(rd, rs1, off):  return i_type(off, rs1, 0, rd, 0x67)
 
+# Hardware DELAY instruction (opcode=JALR 0x67, funct3=1, I-type)
+def DELAY_INSN(imm):     return i_type(imm, 0, 1, 0, 0x67)
+
 def NOP():               return ADDI(0, 0, 0)
 def FENCE():             return i_type(0, 0, 0, 0, 0x0F)
 def ECALL():             return 0x00000073
@@ -192,23 +195,44 @@ def VMATMUL_ACC_MXU0(accSel, vs1, wSlot):return vr_type(0x0C, wSlot, vs1, accSel
 def VMATMUL_ACC_MXU1(accSel, vs1, wSlot):return vr_type(0x0D, wSlot, vs1, accSel, 0x77)
 
 # ─── VPU (opcode 0x57 = 1010111, VR format) ──────────────────────────────────
+# funct7 values from Instructions.scala
 
-def VADD_BF16(vd, vs1, vs2):    return vr_type(0x00, vs2, vs1, vd, 0x57)
-def VREDSUM_BF16(vd, vs1):      return vr_type(0x01, 0, vs1, vd, 0x57)
-def VSUB_BF16(vd, vs1, vs2):    return vr_type(0x02, vs2, vs1, vd, 0x57)
-def VMIN_BF16(vd, vs1, vs2):    return vr_type(0x04, vs2, vs1, vd, 0x57)
-def VMAX_BF16(vd, vs1, vs2):    return vr_type(0x06, vs2, vs1, vd, 0x57)
-def VMUL_BF16(vd, vs1, vs2):    return vr_type(0x24, vs2, vs1, vd, 0x57)
-def VMOV(vd, vs):               return vr_type(0x40, 0, vs, vd, 0x57)
-def VRECIP_BF16(vd, vs):        return vr_type(0x41, 0, vs, vd, 0x57)
-def VEXP(vd, vs):               return vr_type(0x42, 0, vs, vd, 0x57)
-def VRELU(vd, vs):              return vr_type(0x44, 0, vs, vd, 0x57)
+# Two-operand element-wise arithmetic
+def VADD_BF16(vd, vs1, vs2):    return vr_type(0x00, vs2, vs1, vd, 0x57)  # 57/00
+def VSUB_BF16(vd, vs1, vs2):    return vr_type(0x02, vs2, vs1, vd, 0x57)  # 57/02
+def VMUL_BF16(vd, vs1, vs2):    return vr_type(0x03, vs2, vs1, vd, 0x57)  # 57/03
+
+# Two-operand element-wise min/max
+def VMIN_BF16(vd, vs1, vs2):    return vr_type(0x04, vs2, vs1, vd, 0x57)  # 57/04
+def VMAX_BF16(vd, vs1, vs2):    return vr_type(0x06, vs2, vs1, vd, 0x57)  # 57/06
+
+# Sublane (column) reductions: result[i,j] = op(src[:,j])
+def VREDSUM_BF16(vd, vs1):      return vr_type(0x01, 0, vs1, vd, 0x57)    # 57/01
+def VREDMIN_BF16(vd, vs1):      return vr_type(0x05, 0, vs1, vd, 0x57)    # 57/05
+def VREDMAX_BF16(vd, vs1):      return vr_type(0x07, 0, vs1, vd, 0x57)    # 57/07
+
+# Lane (row) reductions: result[i,j] = op(src[i,:])
+def VREDSUM_ROW_BF16(vd, vs1):  return vr_type(0x21, 0, vs1, vd, 0x57)    # 57/21
+def VREDMIN_ROW_BF16(vd, vs1):  return vr_type(0x24, 0, vs1, vd, 0x57)    # 57/24
+def VREDMAX_ROW_BF16(vd, vs1):  return vr_type(0x26, 0, vs1, vd, 0x57)    # 57/26
+
+# Unary ops
+def VMOV(vd, vs):               return vr_type(0x40, 0, vs, vd, 0x57)     # 57/40
+def VRECIP_BF16(vd, vs):        return vr_type(0x41, 0, vs, vd, 0x57)     # 57/41
+def VEXP(vd, vs):               return vr_type(0x42, 0, vs, vd, 0x57)     # 57/42
+def VEXP2(vd, vs):              return vr_type(0x43, 0, vs, vd, 0x57)     # 57/43
+def VFP8PACK(vd, vs2, es1):     return vr_type(0x44, vs2, es1, vd, 0x57)  # 57/44
+def VFP8UNPACK(vd, vs2, es1):   return vr_type(0x45, vs2, es1, vd, 0x57)  # 57/45
+def VRELU(vd, vs):              return vr_type(0x48, 0, vs, vd, 0x57)     # 57/48
+def VSIN(vd, vs):               return vr_type(0x49, 0, vs, vd, 0x57)     # 57/49
+def VCOS(vd, vs):               return vr_type(0x4A, 0, vs, vd, 0x57)     # 57/4A
+def VTANH(vd, vs):              return vr_type(0x4B, 0, vs, vd, 0x57)     # 57/4B
+def VLOG2(vd, vs):              return vr_type(0x4C, 0, vs, vd, 0x57)     # 57/4C
+def VSQRT(vd, vs):              return vr_type(0x4D, 0, vs, vd, 0x57)     # 57/4D
 
 # ─── XLU (opcode 0x6B = 1101011, VR format) ──────────────────────────────────
 
 def VTRPOSE_XLU(vd, vs1):  return vr_type(0x00, 0, vs1, vd, 0x6B)
-def VREDMAX_XLU(vd, vs1):  return vr_type(0x01, 0, vs1, vd, 0x6B)
-def VREDSUM_XLU(vd, vs1):  return vr_type(0x02, 0, vs1, vd, 0x6B)
 
 # ─── VLI immediate tensor fill (opcode 0x5F) ──────────────────────────────────
 def VLI_ALL(vd, imm16): return vi_type(imm16, 0, vd, 0x5F)
@@ -277,8 +301,6 @@ def assemble(source):
             if toks:
                 if toks[0].upper() == "LI":
                     addr += len(expand_li(0, parse_imm(toks[2])))
-                elif toks[0].upper() == "DELAY":
-                    addr += parse_imm(toks[1])
                 else:
                     addr += 1
 
@@ -309,8 +331,8 @@ def assemble(source):
         elif mnem == "EBREAK":
             code.append(EBREAK()); pc += 1
         elif mnem == "DELAY":
-            n_nops = parse_imm(p[1])
-            code.extend([NOP()] * n_nops); pc += n_nops
+            # Hardware DELAY instruction (opcode=JALR, funct3=1)
+            code.append(DELAY_INSN(parse_imm(p[1]))); pc += 1
         elif mnem == "LI":
             e = expand_li(parse_reg(p[1]), parse_imm(p[2]))
             code.extend(e); pc += len(e)
@@ -420,23 +442,40 @@ def assemble(source):
         elif mnem == "VMATMUL.ACC.MXU0":  code.append(VMATMUL_ACC_MXU0(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VMATMUL.ACC.MXU1":  code.append(VMATMUL_ACC_MXU1(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
 
-        # VPU
+        # VPU — element-wise binary
         # VADD.BF16 vd, vs1, vs2
         elif mnem == "VADD.BF16":    code.append(VADD_BF16(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VSUB.BF16":    code.append(VSUB_BF16(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VMUL.BF16":    code.append(VMUL_BF16(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VMIN.BF16":    code.append(VMIN_BF16(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VMAX.BF16":    code.append(VMAX_BF16(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
+
+        # VPU — sublane (column) reductions
         elif mnem == "VREDSUM.BF16": code.append(VREDSUM_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VREDMIN.BF16": code.append(VREDMIN_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VREDMAX.BF16": code.append(VREDMAX_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+
+        # VPU — lane (row) reductions
+        elif mnem == "VREDSUM.ROW.BF16": code.append(VREDSUM_ROW_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VREDMIN.ROW.BF16": code.append(VREDMIN_ROW_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VREDMAX.ROW.BF16": code.append(VREDMAX_ROW_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+
+        # VPU — unary ops
         elif mnem == "VMOV":         code.append(VMOV(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
         elif mnem == "VRECIP.BF16":  code.append(VRECIP_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
         elif mnem == "VEXP":         code.append(VEXP(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VEXP2":        code.append(VEXP2(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VFP8PACK":     code.append(VFP8PACK(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
+        elif mnem == "VFP8UNPACK":   code.append(VFP8UNPACK(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VRELU":        code.append(VRELU(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VSIN":         code.append(VSIN(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VCOS":         code.append(VCOS(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VTANH":        code.append(VTANH(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VLOG2":        code.append(VLOG2(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VSQRT":        code.append(VSQRT(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
 
         # XLU
         elif mnem == "VTRPOSE.XLU":  code.append(VTRPOSE_XLU(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
-        elif mnem == "VREDMAX.XLU":  code.append(VREDMAX_XLU(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
-        elif mnem == "VREDSUM.XLU":  code.append(VREDSUM_XLU(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
 
         else:
             raise ValueError(f"Unknown mnemonic: {mnem} (line: {line})")
@@ -495,6 +534,69 @@ def _parse_golden_json(path, dram_base, beat_bytes):
     return p_addrs, p_words, c_addrs, c_words
 
 
+def _parse_inline_golden(source, beat_bytes):
+    """Parse inline @DRAM annotations from assembly comments.
+
+    Supported directives:
+      # @DRAM_BASE   <addr>
+      # @DRAM        <beat_offset> <hex_payload>
+      # @CHECK_DRAM  <beat_offset> <hex_payload>
+
+    Returns:
+      (dram_base, preload_addrs, preload_words, check_addrs, check_words)
+      or None if no inline preload/check directives were found.
+    """
+    dram_base = 0x90000000
+    words_per_beat = beat_bytes // 4
+
+    dram_base_re = re.compile(r"^\s*#\s*@DRAM_BASE\s+(\S+)\s*$", re.IGNORECASE)
+    dram_re = re.compile(r"^\s*#\s*@DRAM\s+(\d+)\s+(0x[0-9a-fA-F]+)\s*$", re.IGNORECASE)
+    check_re = re.compile(r"^\s*#\s*@CHECK_DRAM\s+(\d+)\s+(0x[0-9a-fA-F]+)\s*$", re.IGNORECASE)
+
+    preload_pairs = []
+    check_pairs = []
+
+    for raw_line in source.splitlines():
+        m = dram_base_re.match(raw_line)
+        if m:
+            dram_base = int(m.group(1), 0)
+            continue
+
+        m = dram_re.match(raw_line)
+        if m:
+            beat_off = int(m.group(1), 0)
+            beat_addr = dram_base + beat_off * beat_bytes
+            raw = _hex_to_words(m.group(2))
+            while len(raw) < words_per_beat:
+                raw.append(0)
+            for i, word in enumerate(raw[:words_per_beat]):
+                preload_pairs.append((beat_addr + i * 4, word))
+            continue
+
+        m = check_re.match(raw_line)
+        if m:
+            beat_off = int(m.group(1), 0)
+            beat_addr = dram_base + beat_off * beat_bytes
+            raw = _hex_to_words(m.group(2))
+            while len(raw) < words_per_beat:
+                raw.append(0)
+            for i, word in enumerate(raw[:words_per_beat]):
+                check_pairs.append((beat_addr + i * 4, word))
+
+    if not preload_pairs and not check_pairs:
+        return None
+
+    preload_pairs.sort(key=lambda p: p[0])
+    check_pairs.sort(key=lambda p: p[0])
+
+    def _split(pairs):
+        return ([addr for addr, _ in pairs], [word for _, word in pairs])
+
+    p_addrs, p_words = _split(preload_pairs)
+    c_addrs, c_words = _split(check_pairs)
+    return dram_base, p_addrs, p_words, c_addrs, c_words
+
+
 def _fmt_array(words, name, ctype="uint32_t", indent="    "):
     """Format a C array initializer."""
     lines = []
@@ -541,7 +643,10 @@ static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t 
 #define CSR_ILLEGAL_PC    (ATLAS_CSR_BASE + 0x0C)
 #define CSR_DBG0          (ATLAS_CSR_BASE + 0x10)
 #define CSR_DBG1          (ATLAS_CSR_BASE + 0x14)
-#define CSR_SOFT_RESET    (ATLAS_CSR_BASE + 0x18)
+#define CSR_EXEC_CONTROL  (ATLAS_CSR_BASE + 0x18)
+
+#define ATLAS_EXEC_STOP   0U
+#define ATLAS_EXEC_START  1U
 
 #define ATLAS_PROGRAM_LEN {n}
 
@@ -579,6 +684,11 @@ int main(void)
 """
 
     out += f"""
+    printf("Stopping Atlas core before programming IMEM ...\\n");
+    mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
+    mmio_write32(CSR_DBG0, 0);
+    asm volatile ("fence" ::: "memory");
+
     printf("Writing program to ATLAS IMEM (%u words) ...\\n", ATLAS_PROGRAM_LEN);
     for (i = 0; i < ATLAS_PROGRAM_LEN; i++) {{
         mmio_write32(ATLAS_IMEM_BASE + i * 4, atlas_program[i]);
@@ -601,8 +711,8 @@ int main(void)
     }}
     printf("IMEM readback OK\\n");
 
-    printf("Issuing soft-reset to start Atlas core ...\\n");
-    mmio_write32(CSR_SOFT_RESET, 1);
+    printf("Issuing Atlas START command ...\\n");
+    mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_START);
     asm volatile ("fence" ::: "memory");
 
     printf("Waiting for Atlas core to execute ...\\n");
@@ -611,6 +721,10 @@ int main(void)
         dbg0 = mmio_read32(CSR_DBG0);
         if (dbg0 != 0) break;
     }}
+
+    printf("Issuing Atlas STOP command ...\\n");
+    mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
+    asm volatile ("fence" ::: "memory");
 
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
@@ -707,6 +821,15 @@ def main():
             n_pre = len(golden[1])
             n_chk = len(golden[3])
             print(f"Golden data: {n_pre} preload words, {n_chk} check words")
+        else:
+            inline = _parse_inline_golden(source, args.beat_bytes)
+            if inline is not None:
+                inline_dram_base, p_addrs, p_words, c_addrs, c_words = inline
+                golden = (p_addrs, p_words, c_addrs, c_words)
+                print(
+                    f"Inline golden data @DRAM_BASE 0x{inline_dram_base:08X}: "
+                    f"{len(p_words)} preload words, {len(c_words)} check words"
+                )
         c_source = emit_c_file(code, test_name, golden=golden)
         with open(args.out_c, "w") as f:
             f.write(c_source)
@@ -721,3 +844,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

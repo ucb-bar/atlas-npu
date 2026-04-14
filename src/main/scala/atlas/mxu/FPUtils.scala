@@ -4,31 +4,31 @@ FPUtils.scala — All floating-point conversion utilities for both MXU datapaths
 Everything lives in one object with a readable functional API:
 
   ┌─────────────────────────────────────────────────────────────────┐
-  │  HardFloat recoding (SA PE architectures)                      │
-  │    FPUtils.recode(bits, fmt)                                   │
-  │    FPUtils.decode(bits, fmt)                                   │
-  │    FPUtils.convert(bits, inFmt, outFmt)                        │
+  │  HardFloat recoding (SA PE architectures)                       │
+  │    FPUtils.recode(bits, fmt)                                    │
+  │    FPUtils.decode(bits, fmt)                                    │
+  │    FPUtils.convert(bits, inFmt, outFmt)                         │
   ├─────────────────────────────────────────────────────────────────┤
-  │  FP8 ↔ BF16 data-movement (push / pop paths)                  │
-  │    FPUtils.e4m3ToBf16(fp8)                                     │
-  │    FPUtils.bf16ToE4m3(bf16, scaleE8M0)                         │
-  │    FPUtils.e4m3ToBf16Row(fp8s)                                 │
-  │    FPUtils.bf16ToE4m3Row(bf16s, scaleE8M0)                     │
+  │  FP8 ↔ BF16 data-movement (push / pop paths)                    │
+  │    FPUtils.e4m3ToBf16(fp8)                                      │
+  │    FPUtils.bf16ToE4m3(bf16, scaleE8M0)                          │
+  │    FPUtils.e4m3ToBf16Row(fp8s)                                  │
+  │    FPUtils.bf16ToE4m3Row(bf16s, scaleE8M0)                      │
   ├─────────────────────────────────────────────────────────────────┤
-  │  Anchor-aligned converters (IPT accumulation tree)             │
-  │    FPUtils.ieeeToAlignedInt(ieee, anchor, fmt, intW, expW)     │
-  │    FPUtils.alignedIntToIEEE(intIn, anchor, outFmt, intW, expW) │
-  │    FPUtils.e4m3ProdToAlignedInt(prod, anchor, intW, expW)      │
+  │  Anchor-aligned converters (IPT accumulation tree)              │
+  │    FPUtils.ieeeToAlignedInt(ieee, anchor, fmt, intW, expW)      │
+  │    FPUtils.alignedIntToIEEE(intIn, anchor, outFmt, intW, expW)  │
+  │    FPUtils.e4m3ProdToAlignedInt(prod, anchor, intW, expW)       │
   ├─────────────────────────────────────────────────────────────────┤
-  │  RecFN helpers (HardFloat recoded-format field access)         │
-  │    FPUtils.RecFN.fields(fmt, rec)                              │
-  │    FPUtils.RecFN.isZero(fmt, recExp)                           │
-  │    FPUtils.RecFN.unbiasedExp(fmt, recExp)                      │
-  │    FPUtils.RecFN.fullSig(fmt, recExp, mantissa)                │
+  │  RecFN helpers (HardFloat recoded-format field access)          │
+  │    FPUtils.RecFN.fields(fmt, rec)                               │
+  │    FPUtils.RecFN.isZero(fmt, recExp)                            │
+  │    FPUtils.RecFN.unbiasedExp(fmt, recExp)                       │
+  │    FPUtils.RecFN.fullSig(fmt, recExp, mantissa)                 │
   ├─────────────────────────────────────────────────────────────────┤
-  │  Converter banks (shared hardware for sequencer FSMs)          │
-  │    FPUtils.E4M3ToBF16Bank(n)                                   │
-  │    FPUtils.BF16ToE4M3Bank(n)                                   │
+  │  Converter banks (shared hardware for sequencer FSMs)           │
+  │    FPUtils.E4M3ToBF16Bank(n)                                    │
+  │    FPUtils.BF16ToE4M3Bank(n)                                    │
   └─────────────────────────────────────────────────────────────────┘
 */
 

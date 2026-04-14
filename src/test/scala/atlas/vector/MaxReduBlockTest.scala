@@ -99,7 +99,12 @@ class MaxReduBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   it should "find the maximum BF16 value in a 16-lane vector with 1-cycle latency" in {
     PersistentVcsMaxReduBlockSimulator.simulate(new MaxRedu(fptype, numLanes, tagWidth)) { module =>
       val dut = module.wrapped
-      
+
+      dut.reset.poke(true.B)
+      dut.clock.step(3)
+      dut.reset.poke(false.B)
+      dut.clock.step(1)
+
       // Test Case 1: Mixed positive and negative
       val inputs1 = Seq(1.2, -5.0, 3.14, 0.0, 10.5, -20.0, 8.8, 0.1, 
                         -1.0, 2.2, 4.4, 6.6, -100.0, 0.5, 9.9, -0.2)
@@ -109,8 +114,6 @@ class MaxReduBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         -20.0, -15.0, -6.0, -7.0, -9.0, -12.0, -1.1, -0.05)
       
       println(s"\n>>> STIMULATING MAX REDUCTION PIPELINE")
-      dut.io.resp.ready.poke(true.B)
-
       val requests = Seq(
         (0x11, inputs1),
         (0x22, inputs2)
@@ -135,7 +138,7 @@ class MaxReduBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         }
 
         // 2. MONITOR OUTPUTS
-        if (dut.io.resp.valid.peek().litToBoolean && dut.io.resp.ready.peek().litToBoolean) {
+        if (dut.io.resp.valid.peek().litToBoolean) {
           val tag = dut.io.resp.bits.tag.peek().litValue
           val resultBits = dut.io.resp.bits.result.peek().litValue.toInt
           val actual = bf16IntToDouble(resultBits)
@@ -151,8 +154,8 @@ class MaxReduBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
           resultsFound += 1
         }
 
-        // 3. EVALUATE HANDSHAKE
-        if (reqIdx < requests.length && dut.io.req.ready.peek().litToBoolean && dut.io.req.valid.peek().litToBoolean) {
+        // 3. Advance once the request has been presented on the valid-only interface
+        if (reqIdx < requests.length && dut.io.req.valid.peek().litToBoolean) {
           reqIdx += 1 
         }
 

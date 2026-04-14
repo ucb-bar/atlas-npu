@@ -4,7 +4,6 @@
 // RUN: (from sp26-atlas-acc)
 //    mill atlas.test.testOnly atlas.vector.ReluBlockTest
 // ============================================================================
-
 package atlas.vector
 
 import chisel3._
@@ -128,8 +127,6 @@ class ReluBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut.clock.step(3)
       dut.reset.poke(false.B)
       dut.clock.step(1)
-      dut.io.resp.ready.poke(true.B)
-
       var reqIdx = 0
       var resultsFound = 0
       var cycles = 0
@@ -155,7 +152,7 @@ class ReluBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         }
 
         // Monitor Outputs
-        if (dut.io.resp.valid.peek().litToBoolean && dut.io.resp.ready.peek().litToBoolean) {
+        if (dut.io.resp.valid.peek().litToBoolean) {
           val outTag = dut.io.resp.bits.tag.peek().litValue.toInt
           
           // Match output to the correct test case via Tag
@@ -189,8 +186,8 @@ class ReluBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
           resultsFound += 1
         }
 
-        // Handshake logic: Advance reqIdx if request was accepted
-        if (reqIdx < allTests.length && dut.io.req.ready.peek().litToBoolean && dut.io.req.valid.peek().litToBoolean) {
+        // Advance once the request has been presented on the valid-only interface
+        if (reqIdx < allTests.length && dut.io.req.valid.peek().litToBoolean) {
           reqIdx += 1 
         }
 

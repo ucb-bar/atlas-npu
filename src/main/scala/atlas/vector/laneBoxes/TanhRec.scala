@@ -44,11 +44,11 @@ class TanhRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extend
     val n1   = BF16T.lutValN 
 
     val io = IO(new Bundle {
-        val req = Flipped(Decoupled(new TanhReq(BF16T.wordWidth, numLanes, tagWidth)))
-        val resp = Decoupled(new TanhResp(BF16T.wordWidth, numLanes, tagWidth))
+        val req = Flipped(Valid(new TanhReq(BF16T.wordWidth, numLanes, tagWidth)))
+        val resp = Valid(new TanhResp(BF16T.wordWidth, numLanes, tagWidth))
     })
 
-    val laneEnable = VecInit((io.req.bits.laneMask & VecInit.fill(numLanes)(io.req.fire).asUInt).asBools)
+    val laneEnable = VecInit((io.req.bits.laneMask & VecInit.fill(numLanes)(io.req.valid).asUInt).asBools)
     val lut = Module(new TanhLUT(ports = numLanes, addrBits = BF16T.lutAddrBits, m = 1, n = n1))
     val tanhModules = Seq.fill(numLanes) { Module(new Tanh(BF16T)) }
 
@@ -60,16 +60,14 @@ class TanhRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extend
 
     def numIntermediateStages = 1
     val commonState = RegInit(VecInit(Seq.fill(numIntermediateStages)(0.U.asTypeOf(new CommonStageState))))
-    val backPressure = Wire(Vec(numIntermediateStages, Bool()))
+    val backPressure = WireInit(VecInit(Seq.fill(numIntermediateStages)(false.B)))
     val stateWithBp = commonState.zip(backPressure)
     def st(i: Int) = commonState(i-1)
-    def bp(i: Int) = backPressure(i-1)
     stateWithBp.take(1).foreach { case (state, back) =>
-        state.valid := Mux(!back, io.req.fire, state.valid)
-        state.req := Mux(io.req.fire, io.req.bits, state.req)
+        state.valid := Mux(!back, io.req.valid, state.valid)
+        state.req := Mux(io.req.valid, io.req.bits, state.req)
         state.laneEn := Mux(!back, laneEnable, state.laneEn)
     }
-    backPressure(numIntermediateStages-1) := !io.resp.ready
 
     for (i <- 0 until numLanes) {
         tanhModules(i).io.x := io.req.bits.xVec(i)
@@ -82,7 +80,6 @@ class TanhRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) extend
         tanhModules(i).io.lutVal2 := lut.io.rdata(1)(i)
     }
 
-    io.req.ready := !backPressure(0)
     io.resp.valid := commonState(0).valid
     io.resp.bits.tag := commonState(0).req.tag
     io.resp.bits.whichBank := commonState(0).req.whichBank

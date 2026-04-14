@@ -13,7 +13,7 @@ Pipeline overview
 Software-scheduled hazard model:
   The frontend never stalls for resource hazards.  The compiler / programmer
   is responsible for scheduling instructions so that no bank conflicts,
-  engine-busy violations, or command-backpressure violations occur.
+  engine-busy violations, or other structural/data hazards occur.
   Hardware assertions fire on any such violation to aid debugging.
 
   The only conditions that stall the pipeline are:
@@ -43,18 +43,6 @@ object AtlasMemMap {
   val DRAM_BASE      = 0x8000_0000L
 }
 
-object StallType {
-  val WIDTH     = 3
-  val NONE      = 0.U(WIDTH.W)
-  val DMA_WAIT  = 1.U(WIDTH.W)
-  val ENGINE    = 2.U(WIDTH.W)
-  val MREG_BANK = 3.U(WIDTH.W)
-  val MEM_LOAD  = 4.U(WIDTH.W)
-  val MEM_STORE = 5.U(WIDTH.W)
-  val DELAY     = 6.U(WIDTH.W)
-  val CMD_READY = 7.U(WIDTH.W)
-}
-
 /** Scalar controller coordinating fetch, decode, execute, and engine launch.
   *
   * @param spP  Shared VMEM / scalar-memory geometry parameters.
@@ -80,18 +68,41 @@ class ScalarCore(spP: VmemParams) extends Module {
   val memLoadRd      = Reg(UInt(5.W))
   val memLoadByteOff = Reg(UInt(2.W))
 
-  val inStall     = RegInit(false.B)
-  val stallTypeR  = RegInit(StallType.NONE)
-
   val delayCounter = RegInit(0.U(12.W))
 
   // ==============================================================
   // Helper functions
   // ==============================================================
 
+  /** VPU operation classification helpers — used by hazard detection.
+    *
+    * The VPU's VectorFSM reads 64 rows per source register, with a bank
+    * toggle at readCounter(5).  This means every source operand touches
+    * two consecutive mreg banks (bank, bank+1).  The same applies to
+    * writes (writeCounter(5) toggles the write bank).
+    *
+    * Pack/unpack ops remap instReadBank1 to vs2 inside VectorEngineTop,
+    * so the scalar core must check vs2 (not vs1) for those operations.
+    */
+  private def vpuIsVli(cmd: UInt): Bool =
+    cmd === VPU_LI_ALL || cmd === VPU_LI_ROW ||
+    cmd === VPU_LI_COL || cmd === VPU_LI_ONE
+
+  private def vpuIsTwoInput(cmd: UInt): Bool =
+    cmd === VPU_ADD || cmd === VPU_SUB || cmd === VPU_MUL ||
+    cmd === VPU_PAIRMAX || cmd === VPU_PAIRMIN
+
+  private def vpuIsPackUnpack(cmd: UInt): Bool =
+    cmd === VPU_FP8PACK || cmd === VPU_FP8UNPACK
+
+  /** RAW hazard: does this instruction read an mreg bank that has a
+    * pending write from another engine?
+    */
   private def instrMregReadHazard(dec: DecodedInstr): Bool = {
     val wb = io.mregWriteBusy
     val h  = WireDefault(false.B)
+
+    // ── MXU push / compute reads ──
     when(dec.mxu_cmd === MXU_PUSH_WEIGHT || dec.mxu_cmd === MXU_PUSH_ACC_FP8 ||
          dec.mxu_cmd === MXU_MATMUL      || dec.mxu_cmd === MXU_MATMUL_ACC) {
       h := wb(dec.vs1)
@@ -99,19 +110,50 @@ class ScalarCore(spP: VmemParams) extends Module {
     when(dec.mxu_cmd === MXU_PUSH_ACC_BF16) {
       h := wb(dec.vs1) || wb(dec.vs1 + 1.U)
     }
+
+    // ── LSU vstore reads ──
     when(dec.is_lsu && dec.lsu_cmd === LSU_VSTORE) {
       h := wb(dec.vd)
     }
+
+    // ── XLU reads ──
     when(dec.xlu_cmd =/= XLU_NONE) {
       h := wb(dec.vs1)
+    }
+
+    // ── VPU reads ──
+    //   Every source operand spans 2 consecutive banks due to the FSM's
+    //   64-row read with bank toggle at readCounter(5).
+    //
+    //   VLI:           write-only, no mreg reads.
+    //   Pack/unpack:   VectorEngineTop remaps instReadBank1 to vs2,
+    //                  so hardware reads (vs2, vs2+1).
+    //   Two-input:     reads (vs1, vs1+1) and (vs2, vs2+1).
+    //   All other:     reads (vs1, vs1+1).
+    when(dec.vpu_cmd =/= VPU_NONE) {
+      val isVli       = vpuIsVli(dec.vpu_cmd)
+      val isTwoInput  = vpuIsTwoInput(dec.vpu_cmd)
+      val isPU        = vpuIsPackUnpack(dec.vpu_cmd)
+
+      // Source 1 base bank: vs2 for pack/unpack, vs1 otherwise
+      val src1Bank = Mux(isPU, dec.vs2, dec.vs1)
+
+      h := Mux(isVli, false.B,
+             wb(src1Bank) || wb(src1Bank + 1.U) ||
+             (isTwoInput && (wb(dec.vs2) || wb(dec.vs2 + 1.U))))
     }
     h
   }
 
+  /** WAR / WAW hazard: does this instruction write an mreg bank that has
+    * a pending read or write from another engine?
+    */
   private def instrMregWriteHazard(dec: DecodedInstr): Bool = {
     val rb = io.mregReadBusy
     val wb = io.mregWriteBusy
     val h  = WireDefault(false.B)
+
+    // ── MXU pop writes ──
     when(dec.mxu_cmd === MXU_POP_FP8) {
       h := rb(dec.vd) || wb(dec.vd)
     }
@@ -119,11 +161,25 @@ class ScalarCore(spP: VmemParams) extends Module {
       h := rb(dec.vd)         || wb(dec.vd) ||
            rb(dec.vd + 1.U)   || wb(dec.vd + 1.U)
     }
+
+    // ── LSU vload writes ──
     when(dec.is_lsu && dec.lsu_cmd === LSU_VLOAD) {
       h := wb(dec.vd)
     }
+
+    // ── XLU writes ──
     when(dec.xlu_cmd =/= XLU_NONE) {
       h := rb(dec.vd) || wb(dec.vd)
+    }
+
+    // ── VPU writes ──
+    //   Most VPU destinations span 2 consecutive banks due to the FSM's
+    //   64-row write with bank toggle at writeCounter(5).
+    //   VLI is the exception: it writes exactly one 32x16 BF16 mreg.
+    when(dec.vpu_cmd =/= VPU_NONE) {
+      val isVli = vpuIsVli(dec.vpu_cmd)
+      h := rb(dec.vd) || wb(dec.vd) ||
+           (!isVli && (rb(dec.vd + 1.U) || wb(dec.vd + 1.U)))
     }
     h
   }
@@ -208,32 +264,17 @@ class ScalarCore(spP: VmemParams) extends Module {
 
   val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
   val ecall_ebreak     = s1_valid && (dec.is_ecall || dec.is_ebreak)
+  val hostStart        = io.execRunWrite && io.execRun
+  val hostStop         = io.execRunWrite && !io.execRun
 
-  val halt_now = halted || illegal_detected || ecall_ebreak
-  when((illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
+  val halt_now = halted || hostStop || illegal_detected || ecall_ebreak
+  when((hostStop || illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
 
   // ==============================================================
-  // Full stall computation
+  // Stall computation
   // ==============================================================
 
-  val fullStall = delay_stall || dma_wait_stall
-
-  val stall = fullStall
-
-  when(reset.asBool || halted) {
-    inStall    := false.B
-    stallTypeR := StallType.NONE
-  }.elsewhen(!inStall && fullStall) {
-    inStall := true.B
-    when(delay_stall) {
-      stallTypeR := StallType.DELAY
-    }.otherwise {
-      stallTypeR := StallType.DMA_WAIT
-    }
-  }.elsewhen(inStall && !fullStall) {
-    inStall    := false.B
-    stallTypeR := StallType.NONE
-  }
+  val stall = delay_stall || dma_wait_stall
 
   // ==============================================================
   // Execute units: ALU + branch
@@ -276,52 +317,42 @@ class ScalarCore(spP: VmemParams) extends Module {
   val link_value = s1_pc + 1.U
 
   // ==============================================================
-  // Software-scheduling assertions (printf + assert for visibility)
+  // Software-scheduling assertions with descriptive failure messages
   //
-  // Engine cmd_ready assertions are now in the sequencers/engines
-  // themselves, where the structural hazards are directly observable.
+  // Engine structural-hazard assertions live in the sequencers/engines
+  // themselves, where the busy conditions are directly observable.
   // ==============================================================
 
-  when(s1_fire && instrMregReadHazard(dec)) {
-    printf("ASSERT FAIL [pc=0x%x]: MREG RAW hazard: instruction reads bank with pending write\n", s1_pc)
-  }
-  assert(!(s1_fire && instrMregReadHazard(dec)))
+  // ── Direction-aware MREG bank hazard assertions ──
 
-  when(s1_fire && instrMregWriteHazard(dec)) {
-    printf("ASSERT FAIL [pc=0x%x]: MREG WAR/WAW hazard: instruction writes bank with pending read/write\n", s1_pc)
-  }
-  assert(!(s1_fire && instrMregWriteHazard(dec)))
+  assert(!(s1_fire && instrMregReadHazard(dec)),
+    "ASSERT FAIL: MREG RAW hazard: instruction reads bank with pending write")
 
-  when(s1_fire && dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy) {
-    printf("ASSERT FAIL [pc=0x%x]: VPU command issued while VPU is busy\n", s1_pc)
-  }
-  assert(!(s1_fire && dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy))
+  assert(!(s1_fire && instrMregWriteHazard(dec)),
+    "ASSERT FAIL: MREG WAR/WAW hazard: instruction writes bank with pending read/write")
 
-  when(s1_fire && dec.is_lsu && io.lsu_busy) {
-    printf("ASSERT FAIL [pc=0x%x]: LSU command issued while LSU is busy\n", s1_pc)
-  }
-  assert(!(s1_fire && dec.is_lsu && io.lsu_busy))
+  // ── Engine busy assertions ──
 
-  when(s1_fire && dec.is_mem_load && memLoadPending) {
-    printf("ASSERT FAIL [pc=0x%x]: scalar load issued while prior load response pending\n", s1_pc)
-  }
-  assert(!(s1_fire && dec.is_mem_load && memLoadPending))
+  assert(!(s1_fire && dec.vpu_cmd =/= VPU_NONE && io.vpu_status.busy),
+    "ASSERT FAIL: VPU command issued while VPU is busy")
 
-  when(s1_fire && dec.is_mem_load && io.lsu_busy) {
-    printf("ASSERT FAIL [pc=0x%x]: scalar load issued while LSU is busy\n", s1_pc)
-  }
-  assert(!(s1_fire && dec.is_mem_load && io.lsu_busy))
+  assert(!(s1_fire && dec.is_lsu && io.lsu_busy),
+    "ASSERT FAIL: LSU command issued while LSU is busy")
 
-  when(s1_fire && dec.is_mem_store && io.lsu_busy) {
-    printf("ASSERT FAIL [pc=0x%x]: scalar store issued while LSU is busy\n", s1_pc)
-  }
-  assert(!(s1_fire && dec.is_mem_store && io.lsu_busy))
+  assert(!(s1_fire && dec.is_mem_load && memLoadPending),
+    "ASSERT FAIL: scalar load issued while prior load response pending")
+
+  assert(!(s1_fire && dec.is_mem_load && io.lsu_busy),
+    "ASSERT FAIL: scalar load issued while LSU is busy")
+
+  assert(!(s1_fire && dec.is_mem_store && io.lsu_busy),
+    "ASSERT FAIL: scalar store issued while LSU is busy")
 
   // ==============================================================
   // Delay counter
   // ==============================================================
 
-  when(reset.asBool || halt_now) {
+  when(reset.asBool || halt_now || hostStart) {
     delayCounter := 0.U
   }.elsewhen(s1_fire && dec.is_delay) {
     delayCounter := dec.imm(11, 0).asUInt
@@ -330,10 +361,10 @@ class ScalarCore(spP: VmemParams) extends Module {
   }
 
   // ==============================================================
-  // Instruction hold
+  // Instruction hold across frontend stalls
   // ==============================================================
 
-  when(reset.asBool || halt_now) {
+  when(reset.asBool || halt_now || hostStart) {
     s1_hold_active := false.B
     s1_instr_hold  := 0.U
   }.elsewhen(stall && !s1_hold_active) {
@@ -347,8 +378,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   // Scalar memory path via LSU (no store buffer — direct issue)
   // ==============================================================
 
-  val issueScalarLoad =
-    s1_fire && dec.is_mem_load && !memLoadPending
+  val issueScalarLoad = s1_fire && dec.is_mem_load
 
   val issueScalarStore = s1_fire && dec.is_mem_store
 
@@ -399,7 +429,9 @@ class ScalarCore(spP: VmemParams) extends Module {
     memLoadRd      := dec.rd
     memLoadByteOff := alu_result(1, 0)
   }
-  when(memLoadPending && s1_fire) {
+
+  val memRespArrived = memLoadPending && io.scalarMemResp.valid
+  when(memRespArrived) {
     memLoadPending := false.B
   }
 
@@ -446,19 +478,27 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.csrPort.illegal_pc  := s1_pc
   io.csrPort.inst_retire := s1_fire
 
-  val seldWriteEn = memLoadPending && s1_fire && memLoadCmd === MEM_SELD
+  val s1WritesScalarRd = s1_fire && dec.rd_wen && dec.rd =/= 0.U
+
+  assert(!(memRespArrived && s1WritesScalarRd),
+    "ASSERT FAIL: scalar load response collides with scalar register writeback")
+
+  assert(!(memRespArrived && s1_fire && dec.is_seli),
+    "ASSERT FAIL: SELD response collides with SELI scale-register write")
+
+  val seldWriteEn = memRespArrived && memLoadCmd === MEM_SELD
   scaleRF.io.writeEn   := (s1_fire && dec.is_seli) || seldWriteEn
   scaleRF.io.writeIdx  := Mux(seldWriteEn, memLoadRd, dec.rd)
   scaleRF.io.writeData := Mux(seldWriteEn, memLoadResult(7, 0), dec.imm(7, 0))
 
-  val isMemLoadWB = memLoadPending && memLoadCmd =/= MEM_SELD
+  val isMemLoadWB = memRespArrived && memLoadCmd =/= MEM_SELD
   val wb_data = Mux(
     isMemLoadWB, memLoadResult,
     Mux(dec.is_csr, io.csrPort.rdata,
     Mux(dec.is_jal || dec.is_jalr, link_value, alu_result))
   )
 
-  regfile.io.wr_en   := (s1_fire && dec.rd_wen) || (s1_fire && isMemLoadWB)
+  regfile.io.wr_en   := s1WritesScalarRd || isMemLoadWB
   regfile.io.wr_addr := Mux(isMemLoadWB, memLoadRd, dec.rd)
   regfile.io.wr_data := wb_data
 
@@ -470,7 +510,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   pc_ctrl.io.redirect_target := redirect_target
   pc_ctrl.io.stall           := stall
   pc_ctrl.io.halted          := halt_now
-  pc_ctrl.io.softReset       := io.softReset
+  pc_ctrl.io.restart         := hostStart
 
   // ==============================================================
   // Engine launch flags
@@ -506,12 +546,13 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.mxu1Cmd.valid := is_mxu1_launch
   io.mxu1Cmd.bits  := buildMxuCmd(dec)
 
-  io.vpuCmd.valid     := is_vpu_launch
-  io.vpuCmd.bits.op   := dec.vpu_cmd
-  io.vpuCmd.bits.vd   := dec.vd
-  io.vpuCmd.bits.vs1  := dec.vs1
-  io.vpuCmd.bits.vs2  := dec.vs2
-  io.vpuCmd.bits.imm  := dec.vi_imm
+  io.vpuCmd.valid           := is_vpu_launch
+  io.vpuCmd.bits.op         := dec.vpu_cmd
+  io.vpuCmd.bits.scaleE8M0  := scaleRF.io.regs(dec.vs1(4, 0))
+  io.vpuCmd.bits.vd         := dec.vd
+  io.vpuCmd.bits.vs1        := dec.vs1
+  io.vpuCmd.bits.vs2        := dec.vs2
+  io.vpuCmd.bits.imm        := dec.vi_imm
 
   io.xluCmd.valid        := is_xlu_launch
   io.xluCmd.bits.op      := dec.xlu_cmd
@@ -527,7 +568,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.scaleRegs := scaleRF.io.regs
   io.halted    := halt_now
 
-  when(io.softReset) {
+  when(hostStart) {
     halted          := false.B
     dmaBaseReg      := 0.U
     s1_hold_active  := false.B
