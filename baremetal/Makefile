@@ -12,7 +12,10 @@ RUN_SCRIPT := $(CURDIR)/run_combo_suite.py
 TESTS_DIR := $(CURDIR)/tests
 BUILD_DIR := $(TESTS_DIR)/build
 
-.PHONY: gen list-tests cmake build build-smoke build-all run run-smoke run-all run-test clean-results
+.PHONY: cicd gen list-tests cmake build build-smoke build-all run run-smoke run-all run-test clean-results
+
+cicd: gen build-all
+	mv "$(BUILD_DIR)"/*.riscv "$(CURDIR)/"
 
 gen:
 	$(PYTHON) "$(GEN_SCRIPT)" --stress-count $(STRESS_COUNT) --seed $(SEED)
