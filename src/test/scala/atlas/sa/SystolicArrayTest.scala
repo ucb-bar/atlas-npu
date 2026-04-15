@@ -414,6 +414,55 @@ class SystolicArrayTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
           assert(v == BF16_32, s"Row $row: expected 0x4200, got 0x${v.toHexString}")
         }
       }
+
+      // ── Test 9: overlap compute keeps busy high until tail writebacks finish ──
+      println("  Test 9: overlap compute drain accounting")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, accSel = false)
+      // Land in the first command's drain window so the second compute starts
+      // while old writebacks are already emerging from the array.
+      dut.clock.step(70)
+      sendCmd(dut, MxuOp.MatmulAcc, mregId = ACT_BANK, accSel = false)
+      waitComputeIdle(dut, compTimeout * 2)
+
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO, accSel = false)
+      waitDataIdle(dut)
+      for (row <- 0 until p.accSize) {
+        readBF16Results(dut, p, OUT_BANK_LO, row).foreach { v =>
+          assert(v == BF16_64, s"Overlap row $row: expected 0x4280, got 0x${v.toHexString}")
+        }
+      }
+
+      // ── Test 10: drain-complete boundary still accepts next compute ──
+      println("  Test 10: compute accepted on drain-complete boundary")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK, weightSlot = false)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_2)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK, weightSlot = true)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, E4M3_1)
+
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK, accSel = false, weightSlot = false)
+      // Land the second launch at the edge where the first command is
+      // finishing its final drain writeback.
+      dut.clock.step(p.accSize + saLatency(p))
+      sendCmd(dut, MxuOp.MatmulAcc, mregId = ACT_BANK, accSel = false, weightSlot = true)
+      waitComputeIdle(dut, compTimeout * 2)
+
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO, accSel = false)
+      waitDataIdle(dut)
+      for (row <- 0 until p.accSize) {
+        readBF16Results(dut, p, OUT_BANK_LO, row).foreach { v =>
+          assert(v == BF16_64, s"Boundary row $row: expected 0x4280, got 0x${v.toHexString}")
+        }
+      }
     }
   }
 
