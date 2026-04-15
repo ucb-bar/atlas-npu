@@ -11,7 +11,7 @@ TileLink byte-address map (offsets from CSR_BASE):
   0x0C  illegal-instr PC   (RO — hardware-driven)
   0x10  dbg0               (RW)
   0x14  dbg1               (RW)
-  0x18  execControl        (RW — bit 0: 1=start, 0=stop)
+  0x18  execControl        (RW — bit 0: 1=start, 0=stop; auto-clears on scalar halt)
 
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
@@ -155,6 +155,15 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
         }
       }
     }
+  }
+
+  //this connects the ECALL instruction to the execControl register
+  val csrTlPuts = tl.a.bits.opcode === TLMessages.PutFullData ||
+    tl.a.bits.opcode === TLMessages.PutPartialData
+  val csrTlWritesExec =
+    tl.a.fire && csrTlPuts && tl.a.bits.address(4, 2) === 6.U
+  when(io.csr.halted && !csrTlWritesExec) {
+    reg_execRun := false.B
   }
 
   when(tl.d.fire && !tl.a.fire) { respValid := false.B }

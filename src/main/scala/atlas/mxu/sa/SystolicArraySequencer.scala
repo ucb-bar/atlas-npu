@@ -356,6 +356,8 @@ class SystolicArraySequencer(
   val compRowsIssued  = Reg(UInt(rowCountW.W))
   val compRowsSent    = Reg(UInt(rowCountW.W))
   val compRowsWritten = Reg(UInt(rowCountW.W))
+  val overlapStartCompute =
+    (slotAState === aCompDrain) && acceptCompute && !isDraining
 
   val isAccumulate = (slotACmd.op === MxuOp.MatmulAcc)
 
@@ -555,16 +557,16 @@ class SystolicArraySequencer(
       }
     }
     is(aCompDrain) {
-      when(compRowsWritten >= tileRows.U && !isDraining) {
-        // All writebacks (current + any prior drain) complete.
-        slotAState := aIdle
-      }.elsewhen(acceptCompute && !isDraining) {
-        // Overlap: promote remaining current-compute writebacks into the
-        // drain counter.  The !isDraining guard ensures drainPending == 0
-        // here, so no multi-level drain tracking is needed.
+      when(acceptCompute && !isDraining) {
+        // Accept a new compute before falling back to idle. This keeps a
+        // command landing on the exact drain-complete boundary from being
+        // silently dropped.
         drainPending := tileRows.U - compRowsWritten
         drainAccSel  := slotACmd.accSel
         startNewCompute(io.cmd.bits)
+      }.elsewhen(compRowsWritten >= tileRows.U && !isDraining) {
+        // All writebacks (current + any prior drain) complete.
+        slotAState := aIdle
       }
     }
   }
@@ -582,9 +584,11 @@ class SystolicArraySequencer(
     io.accComputeWrite.bits.data   := io.coreOut.bits
 
     // The pipeline is strictly ordered: old-compute results exit before
-    // new-compute results.  Attribute the first drainPending writebacks
-    // to the old command, then count toward the current command.
-    when(drainPending > 0.U) {
+    // new-compute results. If a new compute launches on the same cycle an
+    // old writeback emerges, that beat still belongs to the old command.
+    when(overlapStartCompute) {
+      drainPending := tileRows.U - compRowsWritten - 1.U
+    }.elsewhen(drainPending > 0.U) {
       drainPending := drainPending - 1.U
     }.otherwise {
       compRowsWritten := compRowsWritten + 1.U

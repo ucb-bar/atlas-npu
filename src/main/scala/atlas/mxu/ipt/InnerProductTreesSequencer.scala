@@ -540,12 +540,15 @@ class InnerProductTreesSequencer(
       }
     }
     is(aCompDrain) {
-      when(compRowsWritten >= tileRows.U && !isDraining) {
-        slotAState := aIdle
-      }.elsewhen(acceptCompute && !isDraining) {
+      when(acceptCompute && !isDraining) {
+        // Accept a new compute before falling back to idle. This keeps a
+        // command landing on the exact drain-complete boundary from being
+        // silently dropped.
         drainPending := tileRows.U - compRowsWritten
         drainAccSel  := slotACmd.accSel
         startNewCompute(io.cmd.bits)
+      }.elsewhen(compRowsWritten >= tileRows.U && !isDraining) {
+        slotAState := aIdle
       }
     }
   }
