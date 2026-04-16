@@ -1,10 +1,6 @@
-/*
-ScalarCoreBundles.scala
-Shared scalar-core bundles and command formats.
-
-Collects the small protocol bundles used between ScalarCore and neighboring
-blocks such as the DMA engine, LSU, MXUs, VPU, XLU, and CSR path.
-*/
+// ============================================================================
+// ScalarCoreBundles.scala — Shared scalar-core bundles and command formats.
+// ============================================================================
 
 package atlas.scalar
 
@@ -13,10 +9,6 @@ import chisel3.util._
 import atlas.common.VmemParams
 import atlas.lsu.LsuScalarCmd
 import ScalarISA._
-
-// ================================================================
-// Shared bundles used by ScalarCore and neighboring engine modules
-// ================================================================
 
 class CSRInternalPort extends Bundle {
   val addr        = Input(UInt(12.W))
@@ -43,6 +35,14 @@ class EngineStatus extends Bundle {
   val error = Bool()
 }
 
+class VpuStatus extends Bundle {
+  val busy      = Bool()
+  val done      = Bool()
+  val error     = Bool()
+  // Bit i matches ScalarISA.VPU_* encoding i; bit 0 corresponds to VPU_NONE.
+  val issueBusy = UInt(NUM_VPU_STATUS_OPS.W)
+}
+
 class DmaCmd extends Bundle {
   val op       = UInt(3.W)
   val vmemAddr = UInt(32.W)
@@ -53,7 +53,7 @@ class DmaCmd extends Bundle {
 
 class MxuCmd extends Bundle {
   val op         = UInt(4.W)
-  val mregBank    = UInt(6.W)
+  val mregBank   = UInt(6.W)
   val accSel     = Bool()
   val weightSlot = Bool()
   val scaleE8M0  = UInt(8.W)
@@ -80,10 +80,6 @@ class LsuCmd extends Bundle {
   val vmemLineAddr = UInt(13.W)
 }
 
-/** Top-level ScalarCore IO bundle.
-  *
-  * @param spP  Shared VMEM / scalar-memory geometry parameters.
-  */
 class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val imemFetch     = new ImemFetchPort
   val dmaCmd        = Valid(new DmaCmd)
@@ -93,15 +89,16 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val xluCmd        = Valid(new XluCmd)
   val lsuCmd        = Valid(new LsuCmd)
 
-  // Scalar mem via LSU
   val scalarMemCmd  = Valid(new LsuScalarCmd(spP))
   val scalarMemResp = Flipped(Valid(UInt(32.W)))
 
   val dma_busy      = Input(Vec(8, Bool()))
-  val vpu_status    = Input(new EngineStatus)
-  val lsu_busy      = Input(Bool())
+  val vpu_status    = Input(new VpuStatus)
 
-  // Direction-aware MREG bank busy bitvectors from the bank tracker
+  // Split LSU busy: scalar path (load pending) and vector path (vload/vstore active).
+  val lsu_scalar_busy = Input(Bool())
+  val lsu_vec_busy    = Input(Bool())
+
   val mregReadBusy   = Input(UInt(64.W))
   val mregWriteBusy  = Input(UInt(64.W))
 

@@ -8,11 +8,14 @@ reference the golden generator and the torch adapter both use.
 
 Functional entry point only — `cycle_step()` is an intentional stub.
 The model ships final-output match only and should not be used as a
-cycle-accurate driver.
+cycle-accurate driver. Register-level helpers such as
+`execute_vli_registers()` mirror the RTL's bank-pair semantics when a
+single architectural op spans multiple physical tensor registers.
 
-`exp` / `exp2` still route through a small Python-`math` fallback
-pending HardFloat-faithful lane_box ports. Search for
-`_MATH_FALLBACK_OPS` to find the seam.
+`exp` now routes through the exact BF16 FPEX model in
+`lane_boxes/exp.py`; `exp2` still uses a temporary Python-`math`
+fallback inside that lane box until the RTL-faithful base-2 path is
+ported.
 
 `fp8pack` / `fp8unpack` are phased 2→1 / 1→2 and don't fit the
 single-pulse vector file format, so `gen_vectors.py` skips them in
@@ -29,9 +32,6 @@ is unwired in `VectorEngine.scala`. `execute("fp8", ...)` raises
 """
 
 from __future__ import annotations
-
-import math
-import struct
 
 from . import bf16_utils as fp
 from .vector_params import VectorParams
@@ -83,12 +83,13 @@ _UNARY_POINTWISE = {
     "rcp", "sqrt", "sin", "cos", "tanh", "log", "exp", "exp2",
     "square", "cube", "relu", "mov",
 }
-# Row reductions: 16-lane input → 16-lane scalar broadcast.
+# Row reductions: BF16 bank pair input → 16-lane scalar broadcast.
 _ROW_REDUCE = {"rsum", "rmax", "rmin"}
 # Col reductions: 32-lane input → 32-lane scalar broadcast.
 _COL_REDUCE = {"csum", "cmax", "cmin"}
 _VLI_OPS = {"vliAll", "vliRow", "vliCol", "vliOne"}
-_MATH_FALLBACK_OPS = {"exp", "exp2"}
+_VLI_TWO_BANK_OPS = {"vliAll", "vliRow"}
+_VLI_SINGLE_BANK_OPS = {"vliCol", "vliOne"}
 
 
 class VectorEngineModel:
@@ -136,8 +137,12 @@ class VectorEngineModel:
         list of BF16 bit patterns.
 
         Lane-count semantics:
-          - Pointwise / row-reduction ops:  `a_vec` is `num_lanes` long,
-            output is `num_lanes` long.
+          - Pointwise ops: `a_vec` is `num_lanes` long, output is
+            `num_lanes` long.
+          - Row reductions (BF16 pair semantics): provide either
+            (`a_vec`, `b_vec`) as the two physical rows or pass `a_vec`
+            with `2 * num_lanes` entries. Output is `num_lanes` long
+            with the scalar broadcast across every lane.
           - Col reductions (csum/cmax/cmin): `a_vec` is `2 * num_lanes`
             long (two stacked rows), output is `2 * num_lanes` long
             with the scalar broadcast across every slot — matches the
@@ -182,7 +187,7 @@ class VectorEngineModel:
             return self._exec_binary(op, list(a_vec or []), list(b_vec or []))
 
         if op in _ROW_REDUCE:
-            return self._exec_row_reduce(op, list(a_vec or []))
+            return self._exec_row_reduce(op, list(a_vec or []), list(b_vec or []))
 
         if op in _COL_REDUCE:
             return self._exec_col_reduce(op, list(a_vec or []))
@@ -198,14 +203,55 @@ class VectorEngineModel:
             "Cycle-accurate driver is a stub; only execute() is supported."
         )
 
+    def execute_vli_registers(
+        self,
+        op: str,
+        imm: int,
+        dst_bank: int = 0,
+    ) -> dict[int, list[list[int]]]:
+        """Mirror the RTL-visible register effects of a VLI instruction.
+
+        `execute()` is row-local because the lane box itself only emits one
+        16-lane row per pulse. The engine wraps that row primitive with
+        register-level sequencing:
+
+        - `vliAll` / `vliRow`: write a full BF16 tensor pair, so the selected
+          destination bank must be even and both `dst_bank` and `dst_bank + 1`
+          receive 32 rows.
+        - `vliCol` / `vliOne`: write exactly one physical 32x16 register, so
+          only `dst_bank` is updated and odd destinations are legal.
+        """
+        if op not in _VLI_OPS:
+            raise ValueError(
+                f"execute_vli_registers: unknown VLI op {op!r}; expected one of "
+                f"{sorted(_VLI_OPS)}"
+            )
+
+        rows = [
+            list(self.execute(op, imm=imm, row_idx=row_idx))
+            for row_idx in range(self.p.rows_per_register)
+        ]
+
+        if op in _VLI_TWO_BANK_OPS:
+            if dst_bank & 1:
+                raise ValueError(
+                    f"{op}: destination bank must be even, got {dst_bank}"
+                )
+            return {
+                dst_bank: [list(row) for row in rows],
+                dst_bank + 1: [list(row) for row in rows],
+            }
+
+        if op in _VLI_SINGLE_BANK_OPS:
+            return {dst_bank: rows}
+
+        raise AssertionError(f"execute_vli_registers: unhandled VLI op {op!r}")
+
     # ----------------------------------------------------------------
     #  Per-op helpers
     # ----------------------------------------------------------------
 
     def _exec_unary(self, op: str, a: list[int]) -> list[int]:
-        if op in _MATH_FALLBACK_OPS:
-            return _legacy_math_fallback(op, a)
-
         if op == "rcp":
             return self.rcp.compute_now(RcpReq(aVec=a)).result
         if op == "sqrt":
@@ -214,6 +260,10 @@ class VectorEngineModel:
             return self.sin_cos.compute_now(SinCosVecReq(xVec=a, cos=False)).result
         if op == "cos":
             return self.sin_cos.compute_now(SinCosVecReq(xVec=a, cos=True)).result
+        if op == "exp":
+            return self.exp_box.compute_now(FPEXReq(xVec=a, isBase2=False)).result
+        if op == "exp2":
+            return self.exp_box.compute_now(FPEXReq(xVec=a, isBase2=True)).result
         if op == "log":
             return self.log_box.compute_now(LogReq(aVec=a)).result
         if op == "tanh":
@@ -253,15 +303,36 @@ class VectorEngineModel:
             ).result
         raise AssertionError(f"unhandled binary op {op!r}")
 
-    def _exec_row_reduce(self, op: str, a: list[int]) -> list[int]:
+    def _exec_row_reduce(self, op: str, a: list[int], b: list[int]) -> list[int]:
+        n = self.p.num_lanes
+        if len(a) == 2 * n and not b:
+            lo = list(a[:n])
+            hi = list(a[n:])
+        elif len(a) == n and len(b) == n:
+            lo = list(a)
+            hi = list(b)
+        else:
+            raise ValueError(
+                f"row-reduce {op}: expected (a_vec, b_vec) each with {n} lanes "
+                f"or a_vec with {2 * n} lanes, got len(a)={len(a)} len(b)={len(b)}"
+            )
+
         if op == "rsum":
-            return self.add_sub_sum.compute_now(
-                AddSubSumReq(aVec=a, isSum=True)
-            ).result
+            acc = _FP32_PLUS_ZERO
+            for lane in lo + hi:
+                acc = fp.fp32_bits_add(acc, fp.fp32_bits_from_bf16(lane))
+            scalar = fp.bf16_upper_half_of_fp32_bits(acc)
+            return [scalar] * n
         if op == "rmax":
-            return self.row_max.compute_now(RowMaxReq(aVec=a)).result
+            lo_max = self.row_max.compute_now(RowMaxReq(aVec=lo)).result[0]
+            hi_max = self.row_max.compute_now(RowMaxReq(aVec=hi)).result[0]
+            scalar = fp.compare_return_max(lo_max, hi_max)
+            return [scalar] * n
         if op == "rmin":
-            return self.row_min.compute_now(RowMinReq(aVec=a)).result
+            lo_min = self.row_min.compute_now(RowMinReq(aVec=lo)).result[0]
+            hi_min = self.row_min.compute_now(RowMinReq(aVec=hi)).result[0]
+            scalar = fp.compare_return_min(lo_min, hi_min)
+            return [scalar] * n
         raise AssertionError(f"unhandled row-reduce op {op!r}")
 
     def _exec_col_reduce(self, op: str, a: list[int]) -> list[int]:
@@ -400,57 +471,3 @@ class VectorEngineModel:
             FP8UnpackReq(xVec=a_vec, expShift=exp_shift)
         )
         return list(low_resp.result) + list(high_resp.result)
-
-
-# --------------------------------------------------------------------
-#  Temporary math fallback for exp / exp2.
-#  Drop when the HardFloat-faithful Exp lane box lands.
-# --------------------------------------------------------------------
-
-def _legacy_math_fallback(op: str, a_vec: list[int]) -> list[int]:
-    """Python-`math` based `exp` / `exp2` fallback. The real `Exp`
-    lane box is not yet HardFloat-faithful; route through this until
-    it lands, then delete."""
-    out: list[int] = []
-    for bits in a_vec:
-        x = _bf16_bits_to_f32(bits)
-        try:
-            if op == "exp":
-                y = math.exp(x)
-            elif op == "exp2":
-                y = 2.0 ** x
-            else:
-                raise AssertionError(f"_legacy_math_fallback: bad op {op!r}")
-        except OverflowError:
-            y = float("inf") if x > 0 else 0.0
-        except ValueError:
-            y = float("nan")
-        out.append(_f32_to_bf16_bits_rne(y))
-    return out
-
-
-def _bf16_bits_to_f32(bits: int) -> float:
-    """Zero-pad BF16 → FP32 → Python float."""
-    return struct.unpack(
-        ">f", struct.pack(">I", (bits & 0xFFFF) << 16)
-    )[0]
-
-
-def _f32_to_bf16_bits_rne(x: float) -> int:
-    """FP32 → BF16 with RNE truncation plus canonical NaN/inf encoding.
-    Inlined here rather than using `bf16_utils.f32_to_bf16_bits_rne`
-    because the IPT base helper has slightly different NaN payload
-    handling; these paths feed the file-based golden which needs
-    byte-stable NaN bits."""
-    if math.isnan(x):
-        return 0x7FC0
-    if x == float("inf"):
-        return 0x7F80
-    if x == float("-inf"):
-        return 0xFF80
-    fp32_int = struct.unpack(">I", struct.pack(">f", x))[0]
-    lower_16 = fp32_int & 0xFFFF
-    bit_16 = (fp32_int >> 16) & 1
-    if lower_16 > 0x8000 or (lower_16 == 0x8000 and bit_16 == 1):
-        fp32_int = (fp32_int + 0x8000) & 0xFFFFFFFF
-    return (fp32_int >> 16) & 0xFFFF

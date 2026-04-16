@@ -3,35 +3,44 @@
 
 import json
 
-from vpu_gen_utils import ROWS_PER_REGISTER, float_to_bf16, run_vli_rows, tensor_checks
+from vpu_gen_utils import (
+    float_to_bf16,
+    run_vli_registers,
+    tensor_checks,
+)
 
 
-BEATS_PER_REGISTER = ROWS_PER_REGISTER
 TIMEOUT = 20000
 
 BF16_1 = float_to_bf16(1.0)
 BF16_2 = float_to_bf16(2.0)
 BF16_3 = float_to_bf16(3.0)
 BF16_4 = float_to_bf16(4.0)
-BF16_5 = float_to_bf16(5.0)
+
+EVEN_BANK = 4
+ODD_BANK = 5
 
 
 def main():
     preloads = []
     checks = []
-    sentinel_rows = run_vli_rows("vliAll", BF16_5)
 
-    checks.extend(tensor_checks(0, run_vli_rows("vliAll", BF16_1)))
-    checks.extend(tensor_checks(32, sentinel_rows))
+    all_regs = run_vli_registers("vliAll", BF16_1, dst_bank=EVEN_BANK)
+    checks.extend(tensor_checks(0, all_regs[EVEN_BANK]))
+    checks.extend(tensor_checks(32, all_regs[ODD_BANK]))
 
-    checks.extend(tensor_checks(64, run_vli_rows("vliRow", BF16_2)))
-    checks.extend(tensor_checks(96, sentinel_rows))
+    row_regs = run_vli_registers("vliRow", BF16_2, dst_bank=EVEN_BANK)
+    checks.extend(tensor_checks(64, row_regs[EVEN_BANK]))
+    checks.extend(tensor_checks(96, row_regs[ODD_BANK]))
 
-    checks.extend(tensor_checks(128, run_vli_rows("vliCol", BF16_3)))
-    checks.extend(tensor_checks(160, sentinel_rows))
+    zero_regs = run_vli_registers("vliAll", 0, dst_bank=EVEN_BANK)
+    col_regs = run_vli_registers("vliCol", BF16_3, dst_bank=ODD_BANK)
+    checks.extend(tensor_checks(128, zero_regs[EVEN_BANK]))
+    checks.extend(tensor_checks(160, col_regs[ODD_BANK]))
 
-    checks.extend(tensor_checks(192, run_vli_rows("vliOne", BF16_4)))
-    checks.extend(tensor_checks(224, sentinel_rows))
+    one_regs = run_vli_registers("vliOne", BF16_4, dst_bank=ODD_BANK)
+    checks.extend(tensor_checks(192, zero_regs[EVEN_BANK]))
+    checks.extend(tensor_checks(224, one_regs[ODD_BANK]))
 
     print(json.dumps({
         "dram_preloads": preloads,

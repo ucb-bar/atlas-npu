@@ -26,7 +26,13 @@ def main():
     preloads = tensor_preloads(0, A_ROWS)
 
     checks = []
-    for op, base in [("mov", 64), ("relu", 128), ("rcp", 192)]:
+    for op, base in [
+        ("mov", 64),
+        ("relu", 128),
+        ("rcp", 192),
+        ("square", 256),
+        ("cube", 320),
+    ]:
         checks.extend(tensor_checks(base, run_unary_rows(op, A_ROWS)))
 
     print(json.dumps({

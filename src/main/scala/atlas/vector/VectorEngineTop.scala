@@ -6,9 +6,14 @@
 //
 // Bank tracking rationale:
 //   Most BF16 VPU ops span two consecutive mregs because the FSM toggles
-//   the bank at counter(5). VLI is the exception: it writes exactly one
-//   32x16 BF16 tensor register. We expose enough read/write ports for the
-//   MregBankTracker to see every bank the VPU accesses.
+//   the bank at counter(5). The exceptions are:
+//     - fp8pack:   reads two BF16 mregs, writes one packed-FP8 mreg
+//     - fp8unpack: reads one packed-FP8 mreg, writes two BF16 mregs
+//     - vliCol / vliOne: write exactly one 32x16 BF16 tensor register
+//     - vliAll / vliRow: write a full BF16 tensor pair
+//   We expose enough ports for the MregBankTracker to see every live bank the
+//   VPU is reading or reserving for writeback, including overlap between two
+//   independent single-input ops.
 // ============================================================================
 
 package atlas.vector
@@ -35,12 +40,13 @@ class VectorEngineTop(
     val mregWriteReq0 = Valid(new MregWriteReq(mregP))
     val mregWriteReq1 = Valid(new MregWriteReq(mregP))
 
-    // ── Busy signal ──
-    val busy = Output(Bool())
+    // ── Busy signals ──
+    val busy      = Output(Bool())
+    val issueBusy = Output(UInt((VPUOp.all.size + 1).W))
 
     // ── Active mreg bank tracking (for MregBankTracker) ──
     val activeReads  = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
-    val activeWrites = Output(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
+    val activeWrites = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
   })
 
   // ==========================================================================
@@ -57,11 +63,21 @@ class VectorEngineTop(
   // Subtract 1 before casting to align the two numbering schemes.
   // ==========================================================================
 
+  private def opIsVliAllOrRow(op: VPUOp.Type): Bool =
+    op === VPUOp.vliAll || op === VPUOp.vliRow
+
+  private def opIsVliColOrOne(op: VPUOp.Type): Bool =
+    op === VPUOp.vliCol || op === VPUOp.vliOne
+
   val vecInput = Wire(new VectorInput(p))
   val cmdOp    = VPUOp.safe(io.cmd.bits.op - 1.U)._1
 
-  val isPackUnpack = (cmdOp === VPUOp.fp8pack) ||
-                     (cmdOp === VPUOp.fp8unpack)
+  val isFp8pack   = cmdOp === VPUOp.fp8pack
+  val isFp8unpack = cmdOp === VPUOp.fp8unpack
+  val isPackUnpack = isFp8pack || isFp8unpack
+  val isVliAllOrRow = opIsVliAllOrRow(cmdOp)
+  val isVliColOrOne = opIsVliColOrOne(cmdOp)
+  val isVli = isVliAllOrRow || isVliColOrOne
 
   vecInput.instType      := cmdOp
   vecInput.instReadBank1 := Mux(isPackUnpack, io.cmd.bits.vs2, io.cmd.bits.vs1)
@@ -119,51 +135,35 @@ class VectorEngineTop(
   // Busy
   // ==========================================================================
 
-  io.busy := core.io.busy
+  io.busy      := core.io.busy
+  io.issueBusy := core.io.issueBusy
 
   // ==========================================================================
   // Structural hazard assertion (debug only)
   // ==========================================================================
 
-  assert(!(io.cmd.valid && io.busy),
-    "VPU: command issued while engine is busy (software-scheduling contract violated)")
+  val cmdIssueBusy = core.io.issueBusy(io.cmd.bits.op)
+  assert(!(io.cmd.valid && cmdIssueBusy),
+    "VPU: command issued while selected VPU resources are busy (software-scheduling contract violated)")
+
+  val isTwoInput = (cmdOp === VPUOp.add || cmdOp === VPUOp.sub ||
+                    cmdOp === VPUOp.mul || cmdOp === VPUOp.pairmax ||
+                    cmdOp === VPUOp.pairmin)
+  val readsPrimaryPair = !isVli && !isFp8unpack
+  val readsSecondaryPair = isTwoInput
+  val writesPair = !isFp8pack && !isVliColOrOne
+
+  assert(!(io.cmd.valid && readsPrimaryPair && vecInput.instReadBank1(0)),
+    "VPU: pair-read primary bank must be even")
+  assert(!(io.cmd.valid && readsSecondaryPair && vecInput.instReadBank2(0)),
+    "VPU: pair-read secondary bank must be even")
+  assert(!(io.cmd.valid && writesPair && vecInput.instWriteBank(0)),
+    "VPU: pair-write destination bank must be even")
 
   // ==========================================================================
   // Active mreg bank tracking
   // ==========================================================================
 
-  val isVli = (cmdOp === VPUOp.vliAll || cmdOp === VPUOp.vliRow ||
-               cmdOp === VPUOp.vliCol || cmdOp === VPUOp.vliOne)
-  val isTwoInput = (cmdOp === VPUOp.add || cmdOp === VPUOp.sub ||
-                    cmdOp === VPUOp.mul || cmdOp === VPUOp.pairmax ||
-                    cmdOp === VPUOp.pairmin)
-
-  val activeRd = Reg(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
-  val activeWr = Reg(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
-
-  when(reset.asBool || !core.io.busy) {
-    for (i <- 0 until 4) { activeRd(i).valid := false.B }
-    for (i <- 0 until 2) { activeWr(i).valid := false.B }
-  }
-
-  when(io.cmd.valid) {
-    val readsAny = !isVli
-    activeRd(0).valid := readsAny
-    activeRd(0).bits  := vecInput.instReadBank1
-    activeRd(1).valid := readsAny
-    activeRd(1).bits  := vecInput.instReadBank1 + 1.U
-
-    activeRd(2).valid := isTwoInput
-    activeRd(2).bits  := vecInput.instReadBank2
-    activeRd(3).valid := isTwoInput
-    activeRd(3).bits  := vecInput.instReadBank2 + 1.U
-
-    activeWr(0).valid := true.B
-    activeWr(0).bits  := vecInput.instWriteBank
-    activeWr(1).valid := !isVli
-    activeWr(1).bits  := vecInput.instWriteBank + 1.U
-  }
-
-  io.activeReads  := activeRd
-  io.activeWrites := activeWr
+  io.activeReads  := core.io.activeReads
+  io.activeWrites := core.io.activeWrites
 }

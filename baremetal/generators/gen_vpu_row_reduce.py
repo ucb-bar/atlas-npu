@@ -8,7 +8,7 @@ from vpu_gen_utils import (
     ROWS_PER_TENSOR,
     float_to_bf16,
     repeat_bf16_row,
-    run_unary_rows,
+    run_row_reduce_tensor,
     tensor_checks,
     tensor_preloads,
 )
@@ -26,7 +26,7 @@ def main():
 
     checks = []
     for op, base in [("rsum", 64), ("rmin", 128), ("rmax", 192)]:
-        checks.extend(tensor_checks(base, run_unary_rows(op, INPUT_ROWS)))
+        checks.extend(tensor_checks(base, run_row_reduce_tensor(op, INPUT_ROWS)))
 
     print(json.dumps({
         "dram_preloads": preloads,

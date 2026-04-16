@@ -152,6 +152,7 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   val BF16_1   = 0x3F80  // 1.0
   val BF16_2   = 0x4000  // 2.0
   val BF16_3   = 0x4040  // 3.0
+  val BF16_48  = 0x4240  // 48.0
 
   // ── MREG bank assignments ──
   val SRC1_BANK = 0
@@ -223,7 +224,7 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     rows:     Int = 1
   ): Unit = {
     dut.io.cmd.valid.poke(true.B)
-    dut.io.cmd.bits.op.poke(op.litValue.U)
+    dut.io.cmd.bits.op.poke((op.litValue + 1).U)
     dut.io.cmd.bits.vs1.poke(src1Bank.U)
     dut.io.cmd.bits.vs2.poke(src2Bank.U)
     dut.io.cmd.bits.vd.poke(destBank.U)
@@ -264,34 +265,46 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut.clock.step(1)
       idle(dut)
 
-      // ── Test 1: VPU RMax (all 1.0 vector) ──
-      println("  Test 1: Vector Rmax")
-      // 1. Load inputs to MREG via Backdoor
+      // ── Test 1: VPU RMax across a BF16 register pair ──
+      println("  Test 1: Vector Rmax across bank pair")
       loadUniformVector(dut, p, SRC1_BANK, row = 0, BF16_1)
-      
-      // 2. Issue VPU Command (Assuming Op 0 is ADD based on logs)
+      loadUniformVector(dut, p, SRC1_BANK + 1, row = 0, BF16_2)
+
       sendVpuCmd(dut, op = VPUOp.rmax, src1Bank = SRC1_BANK, src2Bank = SRC2_BANK, destBank = DEST1_BANK)
-      
-      // 3. Wait for Hardware to compute
-      waitVpuIdle(dut)
-      dut.clock.step(2) // Ensure writeback finishes
-      
-      // 4. Read Dest Bank via Backdoor and Verify
-      readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe BF16_1)
 
-
-      // ── Test 2: VPU Rmin (all 3.0) ──
-      println("  Test 2: Vector Rmin")
-      idle(dut)
-      loadUniformVector(dut, p, SRC1_BANK, row = 0, BF16_3)
-      
-      // Issue VPU Command (Assuming Op 1 is SUB based on logs)
-      sendVpuCmd(dut, op = VPUOp.rmin, src1Bank = SRC1_BANK, src2Bank = SRC2_BANK, destBank = DEST2_BANK)
-      
       waitVpuIdle(dut)
       dut.clock.step(2)
-      
-      readBF16Results(dut, p, DEST2_BANK, row = 0).foreach(_ shouldBe BF16_3)
+
+      readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe BF16_2)
+      readBF16Results(dut, p, DEST1_BANK + 1, row = 0).foreach(_ shouldBe BF16_2)
+
+      // ── Test 2: VPU Rmin across a BF16 register pair ──
+      println("  Test 2: Vector Rmin across bank pair")
+      idle(dut)
+      loadUniformVector(dut, p, SRC1_BANK, row = 0, BF16_3)
+      loadUniformVector(dut, p, SRC1_BANK + 1, row = 0, BF16_2)
+
+      sendVpuCmd(dut, op = VPUOp.rmin, src1Bank = SRC1_BANK, src2Bank = SRC2_BANK, destBank = DEST1_BANK)
+
+      waitVpuIdle(dut)
+      dut.clock.step(2)
+
+      readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe BF16_2)
+      readBF16Results(dut, p, DEST1_BANK + 1, row = 0).foreach(_ shouldBe BF16_2)
+
+      // ── Test 3: VPU RSum across a BF16 register pair ──
+      println("  Test 3: Vector Rsum across bank pair")
+      idle(dut)
+      loadUniformVector(dut, p, SRC1_BANK, row = 0, BF16_1)
+      loadUniformVector(dut, p, SRC1_BANK + 1, row = 0, BF16_2)
+
+      sendVpuCmd(dut, op = VPUOp.rsum, src1Bank = SRC1_BANK, src2Bank = SRC2_BANK, destBank = DEST1_BANK)
+
+      waitVpuIdle(dut, max = 800)
+      dut.clock.step(2)
+
+      readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe BF16_48)
+      readBF16Results(dut, p, DEST1_BANK + 1, row = 0).foreach(_ shouldBe BF16_48)
     }
   }
 

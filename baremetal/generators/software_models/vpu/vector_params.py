@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 class VectorParams:
     num_lanes: int = 16
     word_width: int = 16              # BF16 lane width
+    rows_per_register: int = 32       # one physical tensor register = 32 rows
 
     # BF16 format (from sp26FPUnits.AtlasFPType.BF16)
     bf16_exp_width: int = 8

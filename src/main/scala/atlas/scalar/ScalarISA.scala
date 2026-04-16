@@ -120,8 +120,8 @@ object ScalarISA {
   val VPU_LOG        =  9.U(5.W)  // VPUOp.log        =  9
   val VPU_EXP        = 10.U(5.W)  // VPUOp.exp        = 10
   val VPU_EXP2       = 11.U(5.W)  // VPUOp.exp2       = 11
-  val VPU_SQUARE     = 12.U(5.W)  // VPUOp.square     = 12
-  val VPU_CUBE       = 13.U(5.W)  // VPUOp.cube       = 13
+  val VPU_SQUARE     = 12.U(5.W)  // VSQUARE.BF16 / VPUOp.square = 12
+  val VPU_CUBE       = 13.U(5.W)  // VCUBE.BF16   / VPUOp.cube   = 13
   val VPU_RSUM       = 14.U(5.W)  // VPUOp.rsum       = 14
   val VPU_CSUM       = 15.U(5.W)  // VPUOp.csum       = 15
   val VPU_FP8        = 16.U(5.W)  // VPUOp.fp8        = 16
@@ -140,6 +140,7 @@ object ScalarISA {
   val VPU_LI_ROW     = 29.U(5.W)  // VPUOp.vliRow     = 29
   val VPU_LI_ALL     = 30.U(5.W)  // VPUOp.vliAll     = 30
   val VPU_X          =  0.U(5.W)  // don't-care
+  val NUM_VPU_STATUS_OPS = 31     // status bit i matches VPU_* encoding i; bit 0 = VPU_NONE
 
   // ── XLU command (2-bit) ────────────────────────────────────────────
   val XLU_NONE    = 0.U(1.W)

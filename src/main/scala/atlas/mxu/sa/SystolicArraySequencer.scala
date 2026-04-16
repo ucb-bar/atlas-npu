@@ -78,9 +78,11 @@ class SystolicArraySequencer(
     // ── Accumulation buffer ──
     val accComputeWrite    = Valid(new AccBufWriteReq(p.mxu))
     val accComputeReadAddr = Output(new AccBufReadAddr(p.mxu))
+    val accComputeReadEn   = Output(Bool())
     val accComputeReadData = Input(Vec(p.cols, UInt(p.outT.ieeeWidth.W)))
     val accLoadReq         = Valid(new AccBufLoadReq(p.mxu))
     val accStoreAddr       = Output(new AccBufStoreAddr(p.mxu))
+    val accStoreReadEn     = Output(Bool())
     val accStoreData       = Input(Vec(p.cols, UInt(p.outT.ieeeWidth.W)))
 
     // ── Granular busy signals for scalar-core hazard logic ──
@@ -124,9 +126,11 @@ class SystolicArraySequencer(
   io.accComputeWrite.valid   := false.B
   io.accComputeWrite.bits    := 0.U.asTypeOf(new AccBufWriteReq(p.mxu))
   io.accComputeReadAddr      := 0.U.asTypeOf(new AccBufReadAddr(p.mxu))
+  io.accComputeReadEn        := false.B
   io.accLoadReq.valid        := false.B
   io.accLoadReq.bits         := 0.U.asTypeOf(new AccBufLoadReq(p.mxu))
   io.accStoreAddr            := 0.U.asTypeOf(new AccBufStoreAddr(p.mxu))
+  io.accStoreReadEn          := false.B
   io.mregReadReq0.valid      := false.B
   io.mregReadReq0.bits       := 0.U.asTypeOf(new MregReadReq(mregP))
   io.mregReadReq1.valid      := false.B
@@ -363,7 +367,6 @@ class SystolicArraySequencer(
 
   private def driveCoreBeat(rowIdx: UInt): Unit = {
     io.accComputeReadAddr.accSel := slotACmd.accSel
-    io.accComputeReadAddr.rowIdx := rowIdx
     io.compute.valid             := true.B
     io.compute.bits.act          := unpackRow(io.mregReadResp0.bits, p.inT.ieeeWidth, p.rows)
     io.compute.bits.psum         := io.accComputeReadData
@@ -371,6 +374,18 @@ class SystolicArraySequencer(
     io.compute.bits.weightBufSel := slotACmd.weightSlot
     rowTagData(0)   := rowIdx
     rowTagAccSel(0) := slotACmd.accSel
+  }
+
+  private def issueAccComputeRead(cmd: MxuCmd, row: UInt): Unit = {
+    io.accComputeReadAddr.accSel := cmd.accSel
+    io.accComputeReadAddr.rowIdx := row(rowBits - 1, 0)
+    io.accComputeReadEn          := true.B
+  }
+
+  private def issueAccStoreRead(cmd: MxuCmd, row: UInt): Unit = {
+    io.accStoreAddr.accSel := cmd.accSel
+    io.accStoreAddr.rowIdx := row(rowBits - 1, 0)
+    io.accStoreReadEn      := true.B
   }
 
   // ==========================================================================
@@ -433,6 +448,7 @@ class SystolicArraySequencer(
     io.mregReadReq0.valid       := true.B
     io.mregReadReq0.bits.mregId := cmd.mregId
     io.mregReadReq0.bits.row    := 0.U
+    issueAccComputeRead(cmd, 0.U(rowBits.W))
     compNextRow      := 1.U
     compRowsIssued   := 1.U
     compRowsSent     := 0.U
@@ -534,6 +550,7 @@ class SystolicArraySequencer(
         io.mregReadReq0.valid       := true.B
         io.mregReadReq0.bits.mregId := slotACmd.mregId
         io.mregReadReq0.bits.row    := compNextRow
+        issueAccComputeRead(slotACmd, compNextRow)
         compNextRow    := compNextRow + 1.U
         compRowsIssued := compRowsIssued + 1.U
         slotAState     := aCompActive
@@ -549,6 +566,7 @@ class SystolicArraySequencer(
         io.mregReadReq0.valid       := true.B
         io.mregReadReq0.bits.mregId := slotACmd.mregId
         io.mregReadReq0.bits.row    := compNextRow
+        issueAccComputeRead(slotACmd, compNextRow)
         compNextRow    := compNextRow + 1.U
         compRowsIssued := compRowsIssued + 1.U
       }.otherwise {
@@ -643,14 +661,12 @@ class SystolicArraySequencer(
       when(acceptPop) {
         slotCCmd   := io.cmd.bits
         slotCRow   := 0.U
+        issueAccStoreRead(io.cmd.bits, 0.U(rowBits.W))
         slotCState := cRunning
       }
     }
 
     is(cRunning) {
-      io.accStoreAddr.accSel := slotCCmd.accSel
-      io.accStoreAddr.rowIdx := slotCRow(rowBits - 1, 0)
-
       when(slotCCmd.op === MxuOp.PopAccFP8) {
         val fp8Row = quantBank(io.accStoreData, slotCCmd.scaleE8M0)
         io.mregWriteReq0.valid       := true.B
@@ -671,6 +687,7 @@ class SystolicArraySequencer(
       when(slotCRow + 1.U >= tileRows.U) {
         slotCState := cIdle
       }.otherwise {
+        issueAccStoreRead(slotCCmd, slotCRow + 1.U)
         slotCRow := slotCRow + 1.U
       }
     }

@@ -1,30 +1,13 @@
 // ============================================================================
-// AtlasCore.scala — Non-diplomatic top-level core.
+// AtlasCore.scala — Non-diplomatic top-level core (VMEM, concurrent LSU).
 //
 // Data-path topology:
-//   System bus ←TL→ DMA ←line port→ VMEM
-//   System bus ←TL→ VMEM (host direct access, lowest priority)
-//   VMEM ←line read/write→ LSU ←row port→ MREG (mreg file)
-//   LSU ←scalar cmd/resp→ ScalarCore  (all VMEM access is serialised)
-//   Host ←TL→ IMEM,  Host ←TL→ CSR
-//
-// Software-scheduled command dispatch:
-//   All engine commands (MXU, XLU, DMA, VPU) are dispatched directly from
-//   the scalar core to the engines with no intermediate pending registers
-//   or backpressure.  Software guarantees that engines are ready to accept
-//   commands when they are issued.  Structural hazard assertions live in
-//   the engines/sequencers themselves.
-//
-// MREG bank hazard tracking:
-//   All engines report which mreg banks they are actively reading / writing.
-//   A MregBankTracker aggregates these into readBusy / writeBusy bitvectors
-//   consumed by the scalar core for direction-aware hazard assertions.
-//
-// DMA busy bridging:
-//   A per-channel `dmaLaunched` flag bridges the gap between the command
-//   issue and the DMA engine asserting `channelBusy`.  The flag is set on
-//   issue and cleared only when `channelBusy` rises, so `dma_busy` fed to
-//   the scalar core has no momentary false dip.
+//   Vmem.lsuScalar{Read,Write}  ←→  LSU scalar path
+//   Vmem.lsuVec{Read,Write}     ←→  LSU vector path
+//   Vmem.dma{Read,Write}+grant  ←→  DMA engine
+//   Vmem.tl                     ←→  io.vmemTL (Saturn / SBUS)
+//   LSU ←row port→ MREG
+//   LSU ←scalar cmd/resp→ ScalarCore
 // ============================================================================
 
 package atlas.tile
@@ -35,7 +18,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters}
 
 import atlas.common._
-import atlas.scalar.{ScalarCore, ScalarISA, EngineStatus, AtlasMemMap,
+import atlas.scalar.{ScalarCore, ScalarISA, VpuStatus, AtlasMemMap,
                       CSRFile, LsuCmd, InstrMem, ImemFetchPort, DmaCmd,
                       MxuCmd => ScalarMxuCmd, VpuCmd, XluCmd,
                       MregBankTracker}
@@ -47,23 +30,8 @@ import atlas.dma.{DmaEngine, DmaCommand, DmaDirection}
 import atlas.xlu.{XluEngine, XluCommand}
 import atlas.lsu.LSU
 import atlas.mreg.MregFile
-import atlas.vmem.VMEM
+import atlas.vmem.Vmem
 
-// ============================================================================
-// AtlasCore — top-level non-diplomatic module
-// ============================================================================
-
-/** Instantiates every functional unit and wires them together.
-  *
-  * Externally exposes three TileLink ports (IMEM, CSR, DMA), a `halted`
-  * flag, and a debug bundle.
-  *
-  * @param tp      Full set of Atlas design parameters.
-  * @param imemBP  TileLink bundle parameters for the instruction-memory port.
-  * @param csrBP   TileLink bundle parameters for the CSR port.
-  * @param dmaBP   TileLink bundle parameters for the DMA port.
-  * @param vmemBP  TileLink bundle parameters for the VMEM slave port.
-  */
 class AtlasCore(
   tp:     AtlasParams        = AtlasParams(),
   imemBP: TLBundleParameters,
@@ -79,8 +47,6 @@ class AtlasCore(
   private val vmemP = tp.vmem
   private val saP   = tp.sa
   import ScalarISA._
-
-  // ---------- IO ----------
 
   val io = IO(new Bundle {
     val imemTL = Flipped(new TLBundle(imemBP))
@@ -108,7 +74,7 @@ class AtlasCore(
 
   val imem    = Module(new InstrMem(imemBP))
   val csrfile = Module(new CSRFile(csrBP))
-  val vmem    = Module(new VMEM(vmemP, vmemBP))
+  val vmem    = Module(new Vmem(vmemP, vmemBP))
   val scalar  = Module(new ScalarCore(vmemP))
   val dma     = Module(new DmaEngine(tp, dmaBP))
   val lsu     = Module(new LSU(vmemP, mregP))
@@ -119,7 +85,7 @@ class AtlasCore(
   val mreg    = Module(new MregFile(mregP))
 
   // ==========================================================================
-  // TileLink port connections
+  // TileLink ports
   // ==========================================================================
 
   imem.io.fetch       <> scalar.io.imemFetch
@@ -131,7 +97,7 @@ class AtlasCore(
   vmem.io.tl    <> io.vmemTL
 
   // ==========================================================================
-  // CSR interface
+  // CSR
   // ==========================================================================
 
   csrfile.io.csr <> scalar.io.csrPort
@@ -139,23 +105,33 @@ class AtlasCore(
   scalar.io.execRunWrite := csrfile.io.execRunWrite
 
   // ==========================================================================
-  // DMA ↔ VMEM (line-granularity ports)
+  // Vmem ↔ LSU scalar ports
   // ==========================================================================
 
-  vmem.io.dmaRead     <> dma.io.vmemRead
-  dma.io.vmemReadData := vmem.io.dmaReadData
-  vmem.io.dmaWrite    <> dma.io.vmemWrite
+  vmem.io.lsuScalarRead     <> lsu.io.vmemScalarRead
+  lsu.io.vmemScalarReadData := vmem.io.lsuScalarReadData
+  vmem.io.lsuScalarWrite    <> lsu.io.vmemScalarWrite
 
   // ==========================================================================
-  // LSU ↔ VMEM (line-granularity read / write)
+  // Vmem ↔ LSU vector ports
   // ==========================================================================
 
-  vmem.io.lsuRead     <> lsu.io.vmemRead
-  lsu.io.vmemReadData := vmem.io.lsuReadData
-  vmem.io.lsuWrite    <> lsu.io.vmemWrite
+  vmem.io.lsuVecRead     <> lsu.io.vmemVecRead
+  lsu.io.vmemVecReadData := vmem.io.lsuVecReadData
+  vmem.io.lsuVecWrite    <> lsu.io.vmemVecWrite
 
   // ==========================================================================
-  // LSU ↔ MREG (mreg row-level access)
+  // Vmem ↔ DMA (with backpressure)
+  // ==========================================================================
+
+  vmem.io.dmaRead       <> dma.io.vmemRead
+  dma.io.vmemReadGrant  := vmem.io.dmaReadGrant
+  dma.io.vmemReadData   := vmem.io.dmaReadData
+  vmem.io.dmaWrite      <> dma.io.vmemWrite
+  dma.io.vmemWriteGrant := vmem.io.dmaWriteGrant
+
+  // ==========================================================================
+  // LSU ↔ MREG
   // ==========================================================================
 
   mreg.io.lsuReadReq   <> lsu.io.mregReadReq
@@ -163,28 +139,31 @@ class AtlasCore(
   mreg.io.lsuWriteReq  <> lsu.io.mregWriteReq
 
   // ==========================================================================
-  // ScalarCore ↔ LSU (scalar memory + matrix-move commands)
+  // ScalarCore ↔ LSU
   // ==========================================================================
 
   lsu.io.scalarCmd        <> scalar.io.scalarMemCmd
   scalar.io.scalarMemResp := lsu.io.scalarResp
   lsu.io.cmd              := scalar.io.lsuCmd
-  scalar.io.lsu_busy      := lsu.io.busy
+
+  scalar.io.lsu_scalar_busy := lsu.io.scalarBusy
+  scalar.io.lsu_vec_busy    := lsu.io.vecBusy
 
   // ==========================================================================
-  // Utility: build an EngineStatus from a single busy signal
+  // Utility
   // ==========================================================================
 
-  def makeStatus(busy: Bool): EngineStatus = {
-    val s = Wire(new EngineStatus)
-    s.busy  := busy
-    s.done  := !busy
-    s.error := false.B
+  def makeVpuStatus(busy: Bool, issueBusy: UInt): VpuStatus = {
+    val s = Wire(new VpuStatus)
+    s.busy      := busy
+    s.done      := !busy
+    s.error     := false.B
+    s.issueBusy := issueBusy
     s
   }
 
   // ==========================================================================
-  // DMA command dispatch (ScalarCore → DmaEngine, combinational)
+  // DMA command dispatch
   // ==========================================================================
 
   private val wordOffBits = vmemP.wordOffBits
@@ -202,25 +181,17 @@ class AtlasCore(
   dma.io.command.valid := scalar.io.dmaCmd.valid
   dma.io.command.bits  := dmaCmdWire
 
-  // Per-channel launched flags: set on command issue, cleared when channelBusy
-  // rises.  Bridges any latency gap so dma_busy never has a false dip.
   val dmaLaunched = RegInit(VecInit(Seq.fill(dmaP.numChannels)(false.B)))
-
   for (ch <- 0 until dmaP.numChannels) {
-    when(dma.io.channelBusy(ch)) {
-      dmaLaunched(ch) := false.B
-    }
+    when(dma.io.channelBusy(ch)) { dmaLaunched(ch) := false.B }
   }
-  when(scalar.io.dmaCmd.valid) {
-    dmaLaunched(scDma.channel) := true.B  // last-connect wins over clear
-  }
-
+  when(scalar.io.dmaCmd.valid) { dmaLaunched(scDma.channel) := true.B }
   for (ch <- 0 until dmaP.numChannels) {
     scalar.io.dma_busy(ch) := dma.io.channelBusy(ch) || dmaLaunched(ch)
   }
 
   // ==========================================================================
-  // MXU-0 command dispatch (ScalarCore → SystolicArray, combinational)
+  // MXU-0 / MXU-1 / VPU / XLU command dispatch
   // ==========================================================================
 
   val mxu0CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
@@ -230,13 +201,8 @@ class AtlasCore(
   mxu0CmdWire.accSel     := sc0.accSel
   mxu0CmdWire.weightSlot := sc0.weightSlot
   mxu0CmdWire.scaleE8M0  := sc0.scaleE8M0
-
   mxu0.io.cmd.valid := scalar.io.mxu0Cmd.valid
   mxu0.io.cmd.bits  := mxu0CmdWire
-
-  // ==========================================================================
-  // MXU-1 command dispatch (ScalarCore → InnerProductTrees, combinational)
-  // ==========================================================================
 
   val mxu1CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
   val sc1 = scalar.io.mxu1Cmd.bits
@@ -245,128 +211,86 @@ class AtlasCore(
   mxu1CmdWire.accSel     := sc1.accSel
   mxu1CmdWire.weightSlot := sc1.weightSlot
   mxu1CmdWire.scaleE8M0  := sc1.scaleE8M0
-
   mxu1.io.cmd.valid := scalar.io.mxu1Cmd.valid
   mxu1.io.cmd.bits  := mxu1CmdWire
 
-  // ==========================================================================
-  // VPU command dispatch (ScalarCore → VectorEngine, combinational)
-  //
-  // VectorEngineTop.io.cmd accepts a VpuCmd directly — the VpuCmd→VectorInput
-  // translation (including the ScalarISA-to-VPUOp offset subtraction) is
-  // handled inside VectorEngineTop.  No field remapping needed here.
-  // ==========================================================================
-
   vpu.io.cmd.valid := scalar.io.vpuCmd.valid
   vpu.io.cmd.bits  := scalar.io.vpuCmd.bits
-
-  // ==========================================================================
-  // XLU command dispatch (ScalarCore → XluEngine, combinational)
-  // ==========================================================================
 
   val xluCmdWire = Wire(new XluCommand(mregP.mregIdBits))
   val scX = scalar.io.xluCmd.bits
   xluCmdWire.op        := scX.op
   xluCmdWire.srcMregId := scX.srcBank
   xluCmdWire.dstMregId := scX.dstBank
-
   xlu.io.cmd.valid := scalar.io.xluCmd.valid
   xlu.io.cmd.bits  := xluCmdWire
 
-  // ==========================================================================
-  // Engine status feedback to the scalar core (VPU only)
-  // ==========================================================================
-
-  scalar.io.vpu_status := makeStatus(vpu.io.busy)
+  scalar.io.vpu_status := makeVpuStatus(vpu.io.busy, vpu.io.issueBusy)
 
   // ==========================================================================
-  // MREG bank tracker — direction-aware hazard detection
+  // MREG bank tracker
   // ==========================================================================
-  //
-  // Collects read/write bank reports from all active engines.
-  //
-  // Port budget (10 readers, 10 writers):
-  //   Readers 0–1:  MXU0 (2 active-read ports)
-  //   Readers 2–3:  MXU1 (2 active-read ports)
-  //   Reader  4:    XLU  (1 active-read port)
-  //   Readers 5–8:  VPU  (4 active-read ports: src1, src1+1, src2, src2+1)
-  //   Reader  9:    unused
-  //
-  //   Writers 0–1:  MXU0 (2 active-write ports)
-  //   Writers 2–3:  MXU1 (2 active-write ports)
-  //   Writer  4:    XLU  (1 active-write port)
-  //   Writers 5–6:  VPU  (2 active-write ports: dst, dst+1)
-  //   Writers 7–9:  unused
 
   private val numBanks = 64
-  private val bankBits = log2Ceil(numBanks)
   val mregTracker = Module(new MregBankTracker(numBanks, numReaders = 10, numWriters = 10))
 
-  // ── Reader ports ──
   mregTracker.io.readers(0) := mxu0.io.activeReads(0)
   mregTracker.io.readers(1) := mxu0.io.activeReads(1)
   mregTracker.io.readers(2) := mxu1.io.activeReads(0)
   mregTracker.io.readers(3) := mxu1.io.activeReads(1)
   mregTracker.io.readers(4) := xlu.io.activeMregRead
-  mregTracker.io.readers(5) := vpu.io.activeReads(0)  // src1 bank
-  mregTracker.io.readers(6) := vpu.io.activeReads(1)  // src1 bank + 1
-  mregTracker.io.readers(7) := vpu.io.activeReads(2)  // src2 bank (two-input only)
-  mregTracker.io.readers(8) := vpu.io.activeReads(3)  // src2 bank + 1 (two-input only)
-  mregTracker.io.readers(9).valid := false.B
-  mregTracker.io.readers(9).bits  := 0.U
+  mregTracker.io.readers(5) := vpu.io.activeReads(0)
+  mregTracker.io.readers(6) := vpu.io.activeReads(1)
+  mregTracker.io.readers(7) := vpu.io.activeReads(2)
+  mregTracker.io.readers(8) := vpu.io.activeReads(3)
+  mregTracker.io.readers(9) := lsu.io.activeMregRead
 
-  // ── Writer ports ──
   mregTracker.io.writers(0) := mxu0.io.activeWrites(0)
   mregTracker.io.writers(1) := mxu0.io.activeWrites(1)
   mregTracker.io.writers(2) := mxu1.io.activeWrites(0)
   mregTracker.io.writers(3) := mxu1.io.activeWrites(1)
   mregTracker.io.writers(4) := xlu.io.activeMregWrite
-  mregTracker.io.writers(5) := vpu.io.activeWrites(0)  // dst bank
-  mregTracker.io.writers(6) := vpu.io.activeWrites(1)  // dst bank + 1
-  for (i <- 7 until 10) {
-    mregTracker.io.writers(i).valid := false.B
-    mregTracker.io.writers(i).bits  := 0.U
-  }
+  mregTracker.io.writers(5) := vpu.io.activeWrites(0)
+  mregTracker.io.writers(6) := vpu.io.activeWrites(1)
+  mregTracker.io.writers(7) := vpu.io.activeWrites(2)
+  mregTracker.io.writers(8) := vpu.io.activeWrites(3)
+  mregTracker.io.writers(9) := lsu.io.activeMregWrite
 
   scalar.io.mregReadBusy  := mregTracker.io.readBusy
   scalar.io.mregWriteBusy := mregTracker.io.writeBusy
 
   // ==========================================================================
-  // Matrix Register File (mreg) wiring
+  // MREG wiring
   // ==========================================================================
 
-  // ── MXU-1 ──
-  mreg.io.mxu1ReadReq0    := mxu1.io.mregReadReq0
-  mxu1.io.mregReadResp0   := mreg.io.mxu1ReadResp0
-  mreg.io.mxu1ReadReq1    := mxu1.io.mregReadReq1
-  mxu1.io.mregReadResp1   := mreg.io.mxu1ReadResp1
-  mreg.io.mxu1WriteReq0   := mxu1.io.mregWriteReq0
-  mreg.io.mxu1WriteReq1   := mxu1.io.mregWriteReq1
+  mreg.io.mxu1ReadReq0  := mxu1.io.mregReadReq0
+  mxu1.io.mregReadResp0 := mreg.io.mxu1ReadResp0
+  mreg.io.mxu1ReadReq1  := mxu1.io.mregReadReq1
+  mxu1.io.mregReadResp1 := mreg.io.mxu1ReadResp1
+  mreg.io.mxu1WriteReq0 := mxu1.io.mregWriteReq0
+  mreg.io.mxu1WriteReq1 := mxu1.io.mregWriteReq1
 
-  // ── MXU-0 ──
-  mreg.io.mxu0ReadReq0    := mxu0.io.mregReadReq0
-  mreg.io.mxu0ReadReq1    := mxu0.io.mregReadReq1
-  mxu0.io.mregReadResp0   := mreg.io.mxu0ReadResp0
-  mxu0.io.mregReadResp1   := mreg.io.mxu0ReadResp1
-  mreg.io.mxu0WriteReq0   := mxu0.io.mregWriteReq0
-  mreg.io.mxu0WriteReq1   := mxu0.io.mregWriteReq1
+  mreg.io.mxu0ReadReq0  := mxu0.io.mregReadReq0
+  mreg.io.mxu0ReadReq1  := mxu0.io.mregReadReq1
+  mxu0.io.mregReadResp0 := mreg.io.mxu0ReadResp0
+  mxu0.io.mregReadResp1 := mreg.io.mxu0ReadResp1
+  mreg.io.mxu0WriteReq0 := mxu0.io.mregWriteReq0
+  mreg.io.mxu0WriteReq1 := mxu0.io.mregWriteReq1
 
-  // ── VPU ──
-  mreg.io.vpuReadReq0    := vpu.io.mregReadReq0
-  vpu.io.mregReadResp0   := mreg.io.vpuReadResp0
-  mreg.io.vpuReadReq1    := vpu.io.mregReadReq1
-  vpu.io.mregReadResp1   := mreg.io.vpuReadResp1
-  mreg.io.vpuWriteReq0   := vpu.io.mregWriteReq0
-  mreg.io.vpuWriteReq1   := vpu.io.mregWriteReq1
+  mreg.io.vpuReadReq0  := vpu.io.mregReadReq0
+  vpu.io.mregReadResp0 := mreg.io.vpuReadResp0
+  mreg.io.vpuReadReq1  := vpu.io.mregReadReq1
+  vpu.io.mregReadResp1 := mreg.io.vpuReadResp1
+  mreg.io.vpuWriteReq0 := vpu.io.mregWriteReq0
+  mreg.io.vpuWriteReq1 := vpu.io.mregWriteReq1
 
-  // ── XLU ──
   mreg.io.xluReadReq         := xlu.io.mregReadReq
   xlu.io.mregReadResp.valid := mreg.io.xluReadResp.valid
   xlu.io.mregReadResp.bits  := mreg.io.xluReadResp.bits
   mreg.io.xluWriteReq        := xlu.io.mregWriteReq
 
   // ==========================================================================
-  // Debug outputs
+  // Debug
   // ==========================================================================
 
   io.dbg.mxu0DataBusy := mxu0.io.dataBusy
@@ -375,7 +299,7 @@ class AtlasCore(
   io.dbg.mxu1CompBusy := mxu1.io.computeBusy
   io.dbg.xluBusy      := xlu.io.busy
   io.dbg.dmaBusy      := dma.io.channelBusy
-  io.dbg.lsuBusy      := lsu.io.busy
+  io.dbg.lsuBusy      := lsu.io.scalarBusy || lsu.io.vecBusy
   io.dbg.scaleRegs    := scalar.io.scaleRegs
   io.dbg.dbg0         := csrfile.io.dbg0
   io.dbg.dbg1         := csrfile.io.dbg1

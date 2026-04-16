@@ -126,8 +126,10 @@ class InnerProductTreesTop(
 
   accBuf.io.computeWriteReq <> seq.io.accComputeWrite
   accBuf.io.computeReadAddr := seq.io.accComputeReadAddr
+  accBuf.io.computeReadEn   := seq.io.accComputeReadEn
   seq.io.accComputeReadData := accBuf.io.computeReadData
   accBuf.io.loadReq         <> seq.io.accLoadReq
   accBuf.io.storeAddr       := seq.io.accStoreAddr
+  accBuf.io.storeReadEn     := seq.io.accStoreReadEn
   seq.io.accStoreData       := accBuf.io.storeData
 }

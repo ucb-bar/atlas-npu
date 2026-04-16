@@ -1,5 +1,5 @@
 # vpu_unary_simple.S — VPU simple unary operations integration test
-# Tests: vmov, vrelu.bf16, vrecip.bf16
+# Tests: vmov, vrelu.bf16, vrecip.bf16, vsquare.bf16, vcube.bf16
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_unary_simple.py
@@ -9,6 +9,8 @@
 #   [0x0800..0x0FFF]  vmov output        (2048 B)
 #   [0x1000..0x17FF]  vrelu output       (2048 B)
 #   [0x1800..0x1FFF]  vrecip output      (2048 B)
+#   [0x2000..0x27FF]  vsquare output     (2048 B)
+#   [0x2800..0x2FFF]  vcube output       (2048 B)
 #
 # Mreg: m0,m1 = A    m4,m5 = result
 
@@ -89,6 +91,46 @@
     DMA.WAIT  1
     LI    x8, 1280
     LI    x3, 0x1C00
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+
+    # ================================================================
+    # Test 4: vsquare.bf16  m4, m0
+    # ================================================================
+    VSQUARE.BF16 4, 0
+    DELAY 150
+
+    LI    x8, 1024
+    VSTORE 4, x8, 0
+    DELAY 40
+    VSTORE 5, x8, 8
+    DELAY 40
+    LI    x8, 1024
+    LI    x3, 0x2000
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+    LI    x8, 1280
+    LI    x3, 0x2400
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+
+    # ================================================================
+    # Test 5: vcube.bf16  m4, m0
+    # ================================================================
+    VCUBE.BF16 4, 0
+    DELAY 150
+
+    LI    x8, 1024
+    VSTORE 4, x8, 0
+    DELAY 40
+    VSTORE 5, x8, 8
+    DELAY 40
+    LI    x8, 1024
+    LI    x3, 0x2800
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+    LI    x8, 1280
+    LI    x3, 0x2C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

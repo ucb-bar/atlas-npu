@@ -73,7 +73,8 @@ class ScalarDecoder extends Module {
   val funct7 = io.instr(31, 25)
   val funct3 = io.instr(14, 12)
 
-  // VR format fields
+  // VR format fields (all register-register tensor ops, including
+  // unary VR instructions such as VSQUARE.BF16 / VCUBE.BF16).
   val vr_vd  = io.instr(12, 7)   // 6 bits
   val vr_vs1 = io.instr(18, 13)  // 6 bits
   val vr_vs2 = io.instr(24, 19)  // 6 bits
