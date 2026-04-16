@@ -137,24 +137,17 @@ def _build_case(
     vec_a_hex, vec_b_hex = _build_inputs(op, num_lanes)
 
     if op in _VLI_OPS:
-        # VLI: vecA becomes a single 16-bit slot; exp shape depends on
-        # variant (this layout is what the Scala family driver expects):
-        #   vliOne → 1 slot  (lane 0 only on row 0)
-        #   vliRow → 16 slots (full row 0 broadcast)
-        #   vliCol → 32 slots (one column, broadcast across 32 row slots)
-        #   vliAll → 32 slots (all lanes × 2 rows broadcast)
+        # VLI: vecA becomes a single 16-bit slot. The golden keeps one
+        # scalar per physical row of the bank under test; the Scala VLI
+        # family driver uses that row scalar to check either:
+        #   - both banks of an even/odd BF16 pair (`vliAll`, `vliRow`)
+        #   - one targeted physical bank (`vliCol`, `vliOne`)
         imm = bf16_hex_to_int(vec_a_hex[0])
         vec_a_hex = [f"{imm:04X}"]
         vec_b_hex = ["0000"] * num_lanes
-        result = model.execute(op, imm=imm)
-        # `result[0]` == imm for all four VLI ops (see lane_boxes/vector_load_imm.py).
-        imm_hex = f"{result[0] & 0xFFFF:04X}"
-        if op == "vliOne":
-            exp_hex = [imm_hex]
-        elif op == "vliRow":
-            exp_hex = [imm_hex] * num_lanes
-        else:  # vliCol, vliAll
-            exp_hex = [imm_hex] * (2 * num_lanes)
+        dst_bank = 0 if op in ("vliAll", "vliRow") else 1
+        rows = model.execute_vli_registers(op, imm=imm, dst_bank=dst_bank)[dst_bank]
+        exp_hex = [f"{row[0] & 0xFFFF:04X}" for row in rows]
     elif op == "mov":
         # Mov is identity: exp = vecA. Route through the model anyway so
         # the dispatcher path gets exercised.
@@ -167,7 +160,8 @@ def _build_case(
         exp_hex = [f"{v & 0xFFFF:04X}" for v in result]
     elif op in ("rsum", "rmax", "rmin"):
         a_bits = [bf16_hex_to_int(h) for h in vec_a_hex]
-        result = model.execute(op, a_vec=a_bits)
+        b_bits = [bf16_hex_to_int(h) for h in vec_b_hex]
+        result = model.execute(op, a_vec=a_bits, b_vec=b_bits)
         exp_hex = [f"{v & 0xFFFF:04X}" for v in result]
     else:
         # Unary pointwise (rcp/sqrt/sin/cos/tanh/log/exp/exp2/square/cube/relu)

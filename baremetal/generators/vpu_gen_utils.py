@@ -20,7 +20,7 @@ MODEL = VectorEngineModel(PARAMS)
 
 BF16_PER_BEAT = PARAMS.num_lanes
 FP8_PER_BEAT = 2 * PARAMS.num_lanes
-ROWS_PER_REGISTER = 32
+ROWS_PER_REGISTER = PARAMS.rows_per_register
 ROWS_PER_TENSOR = 2 * ROWS_PER_REGISTER
 
 
@@ -97,6 +97,24 @@ def run_unary_rows(op: str, rows: Sequence[Sequence[int]]) -> list[list[int]]:
     return [list(MODEL.execute(op, a_vec=list(row))) for row in rows]
 
 
+def run_row_reduce_tensor(op: str, rows: Sequence[Sequence[int]]) -> list[list[int]]:
+    if len(rows) != ROWS_PER_TENSOR:
+        raise ValueError(
+            f"{op}: expected {ROWS_PER_TENSOR} rows for a BF16 tensor pair, got {len(rows)}"
+        )
+    out_rows: list[list[int]] = []
+    for row_idx in range(ROWS_PER_REGISTER):
+        reduced = list(
+            MODEL.execute(
+                op,
+                a_vec=list(rows[row_idx]),
+                b_vec=list(rows[row_idx + ROWS_PER_REGISTER]),
+            )
+        )
+        out_rows.append(list(reduced))
+    return out_rows + [list(row) for row in out_rows]
+
+
 def run_binary_rows(
     op: str,
     a_rows: Sequence[Sequence[int]],
@@ -127,21 +145,33 @@ def run_fp8_pack_rows(
     high_rows: Sequence[Sequence[int]],
     scale_e8m0: int,
 ) -> list[list[int]]:
+    """Mirror the current VPU `fp8pack` register-level contract.
+
+    The hardware streams the full first BF16 mreg (rows 0..31) and then the
+    full second BF16 mreg (rows 0..31) through the 2→1 phased pack lane box.
+    That means packed output row `i` is formed from source stream rows
+    `2*i` and `2*i+1`, not from `low_rows[i]` paired with `high_rows[i]`.
+    """
     if len(low_rows) != len(high_rows):
         raise ValueError(
             f"fp8pack needs matching row counts, got {len(low_rows)} and "
             f"{len(high_rows)}"
         )
+    stream_rows = [list(row) for row in low_rows] + [list(row) for row in high_rows]
+    if len(stream_rows) % 2 != 0:
+        raise ValueError(
+            f"fp8pack needs an even total row count, got {len(stream_rows)}"
+        )
     return [
         list(
             MODEL.execute(
                 "fp8pack",
-                a_vec=list(low_row),
-                b_vec=list(high_row),
+                a_vec=stream_rows[row_idx],
+                b_vec=stream_rows[row_idx + 1],
                 scale_e8m0=scale_e8m0,
             )
         )
-        for low_row, high_row in zip(low_rows, high_rows)
+        for row_idx in range(0, len(stream_rows), 2)
     ]
 
 
@@ -149,15 +179,20 @@ def run_fp8_unpack_rows(
     packed_rows: Sequence[Sequence[int]],
     scale_e8m0: int,
 ) -> list[list[int]]:
-    low_rows: list[list[int]] = []
-    high_rows: list[list[int]] = []
+    """Mirror the current VPU `fp8unpack` register-level contract.
+
+    The hardware expands one packed row into two BF16 rows and writes them as a
+    single stream: low0, high0, low1, high1, ... . It does NOT write all low
+    rows first and all high rows second.
+    """
+    out_rows: list[list[int]] = []
     for packed_row in packed_rows:
         unpacked = list(
             MODEL.execute("fp8unpack", a_vec=list(packed_row), scale_e8m0=scale_e8m0)
         )
-        low_rows.append(unpacked[:BF16_PER_BEAT])
-        high_rows.append(unpacked[BF16_PER_BEAT:])
-    return low_rows + high_rows
+        out_rows.append(unpacked[:BF16_PER_BEAT])
+        out_rows.append(unpacked[BF16_PER_BEAT:])
+    return out_rows
 
 
 def run_vli_rows(op: str, imm: int, num_rows: int = ROWS_PER_REGISTER) -> list[list[int]]:
@@ -165,3 +200,14 @@ def run_vli_rows(op: str, imm: int, num_rows: int = ROWS_PER_REGISTER) -> list[l
         list(MODEL.execute(op, imm=imm, row_idx=row_idx))
         for row_idx in range(num_rows)
     ]
+
+
+def run_vli_registers(
+    op: str,
+    imm: int,
+    dst_bank: int = 0,
+) -> dict[int, list[list[int]]]:
+    return {
+        bank: [list(row) for row in rows]
+        for bank, rows in MODEL.execute_vli_registers(op, imm=imm, dst_bank=dst_bank).items()
+    }

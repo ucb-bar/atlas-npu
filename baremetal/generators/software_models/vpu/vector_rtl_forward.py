@@ -20,10 +20,11 @@ Design notes:
   flat length is not a multiple of `num_lanes`), dispatch each chunk,
   then reshape the output back to the input shape.
 - Row reductions (`rsum`, `rmax`, `rmin`) require the last dim to be
-  a multiple of `num_lanes`. The adapter reshapes `(..., K)` →
-  `(..., K // num_lanes, num_lanes)`, runs the reduction on each
-  length-`num_lanes` slice, and returns a tensor of shape
-  `(..., K // num_lanes)` holding each slice's scalar reduction.
+  a multiple of `2 * num_lanes`, because BF16 row-reduce instructions
+  operate on a pair of physical tensor registers. The adapter reshapes
+  `(..., K)` → `(..., K // (2 * num_lanes), 2 * num_lanes)`, reduces
+  each 32-lane logical row, and returns a tensor of shape
+  `(..., K // (2 * num_lanes))`.
 - Col reductions (`csum`, `cmax`, `cmin`) take an input of shape
   `(rows, num_lanes)` and return a length-`num_lanes` vector of
   per-column reductions, via `VectorEngineModel.stream_col_reduce`.
@@ -247,25 +248,24 @@ class VectorRTLFunctions:
         return self._reshape_out(out_bits, a.shape, a.device, a.dtype)
 
     def _row_reduce(self, op: str, a: torch.Tensor) -> torch.Tensor:
-        """`(..., K)` → `(..., K // num_lanes)` where the last dim must
-        be a multiple of `num_lanes`. Each length-`num_lanes` slice is
-        reduced via the lane_box; the scalar result (always lane 0)
-        becomes one element of the output."""
-        if a.shape[-1] % self.num_lanes != 0:
+        """`(..., K)` → `(..., K // (2 * num_lanes))` where the last dim
+        must be a multiple of `2 * num_lanes`. Each logical BF16 row
+        reduction consumes two physical `num_lanes` slices."""
+        pair_width = 2 * self.num_lanes
+        if a.shape[-1] % pair_width != 0:
             raise ValueError(
                 f"{op}: last dim {a.shape[-1]} must be a multiple of "
-                f"{self.num_lanes}"
+                f"{pair_width}"
             )
         leading = a.shape[:-1]
         last = a.shape[-1]
-        num_slices = last // self.num_lanes
+        num_slices = last // pair_width
         bits = self._flatten_to_bits(a)
         out_scalars: list[int] = []
-        for i in range(0, len(bits), self.num_lanes):
-            chunk = bits[i : i + self.num_lanes]
-            result = self.model.execute(op, a_vec=chunk)
-            # Every reduction lane_box broadcasts the scalar across all
-            # `num_lanes` output slots. Take the first one.
+        for i in range(0, len(bits), pair_width):
+            lo_chunk = bits[i : i + self.num_lanes]
+            hi_chunk = bits[i + self.num_lanes : i + pair_width]
+            result = self.model.execute(op, a_vec=lo_chunk, b_vec=hi_chunk)
             out_scalars.append(result[0] & 0xFFFF)
         out_shape = tuple(leading) + (num_slices,)
         out_tensor = torch.tensor(out_scalars, dtype=torch.int32, device="cpu")

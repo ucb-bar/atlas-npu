@@ -221,6 +221,8 @@ def VMOV(vd, vs):               return vr_type(0x40, 0, vs, vd, 0x57)     # 57/4
 def VRECIP_BF16(vd, vs):        return vr_type(0x41, 0, vs, vd, 0x57)     # 57/41
 def VEXP(vd, vs):               return vr_type(0x42, 0, vs, vd, 0x57)     # 57/42
 def VEXP2(vd, vs):              return vr_type(0x43, 0, vs, vd, 0x57)     # 57/43
+def VSQUARE_BF16(vd, vs):       return vr_type(0x46, 0, vs, vd, 0x57)     # 57/46
+def VCUBE_BF16(vd, vs):         return vr_type(0x47, 0, vs, vd, 0x57)     # 57/47
 def VFP8PACK(vd, vs2, es1):     return vr_type(0x44, vs2, es1, vd, 0x57)  # 57/44
 def VFP8UNPACK(vd, vs2, es1):   return vr_type(0x45, vs2, es1, vd, 0x57)  # 57/45
 def VRELU(vd, vs):              return vr_type(0x48, 0, vs, vd, 0x57)     # 57/48
@@ -465,6 +467,8 @@ def assemble(source):
         elif mnem == "VRECIP.BF16":  code.append(VRECIP_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
         elif mnem == "VEXP":         code.append(VEXP(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
         elif mnem == "VEXP2":        code.append(VEXP2(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VSQUARE.BF16": code.append(VSQUARE_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
+        elif mnem == "VCUBE.BF16":   code.append(VCUBE_BF16(parse_imm(p[1]), parse_imm(p[2]))); pc += 1
         elif mnem == "VFP8PACK":     code.append(VFP8PACK(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VFP8UNPACK":   code.append(VFP8UNPACK(parse_imm(p[1]), parse_imm(p[2]), parse_imm(p[3]))); pc += 1
         elif mnem == "VRELU":        code.append(VRELU(parse_imm(p[1]), parse_imm(p[2]))); pc += 1

@@ -5,27 +5,27 @@
 # @PYTHON_GEN gen_vpu_vli.py
 #
 # VLI instructions write an immediate BF16 constant into a tensor
-# register with no source read. Each tensor register is one 32x16 BF16
-# tile (1024 B), so each VLI must only modify m[vd].
+# register with no source read. Each physical tensor register is one
+# 32x16 BF16 tile (1024 B); a full 32x32 BF16 tensor therefore spans an
+# even/odd register pair.
 #
-#   vli.all vd, imm : m[vd][:, :] = imm   (all elements)
-#   vli.row vd, imm : m[vd][0, :] = imm   (first row)
-#   vli.col vd, imm : m[vd][:, 0] = imm   (first column)
-#   vli.one vd, imm : m[vd][0, 0] = imm   (single element)
+#   vli.all vd, imm : m[vd][:, :]   = imm and m[vd+1][:, :]   = imm
+#   vli.row vd, imm : m[vd][0, :]   = imm and m[vd+1][0, :]   = imm
+#   vli.col vd, imm : m[vd][:, 0]   = imm   (single physical register)
+#   vli.one vd, imm : m[vd][0, 0]   = imm   (single physical register)
 #
 # BF16 immediates used:
-#   0x3F80 = 1.0     0x4000 = 2.0     0x4040 = 3.0
-#   0x4080 = 4.0     0x40A0 = 5.0     (neighbor-register sentinel)
+#   0x3F80 = 1.0     0x4000 = 2.0     0x4040 = 3.0     0x4080 = 4.0
 #
 # DRAM layout:
 #   [0x0000..0x03FF]  vli.all  m4 output        (1024 B)
-#   [0x0400..0x07FF]  vli.all  m5 sentinel      (1024 B)
+#   [0x0400..0x07FF]  vli.all  m5 output        (1024 B)
 #   [0x0800..0x0BFF]  vli.row  m4 output        (1024 B)
-#   [0x0C00..0x0FFF]  vli.row  m5 sentinel      (1024 B)
-#   [0x1000..0x13FF]  vli.col  m4 output        (1024 B)
-#   [0x1400..0x17FF]  vli.col  m5 sentinel      (1024 B)
-#   [0x1800..0x1BFF]  vli.one  m4 output        (1024 B)
-#   [0x1C00..0x1FFF]  vli.one  m5 sentinel      (1024 B)
+#   [0x0C00..0x0FFF]  vli.row  m5 output        (1024 B)
+#   [0x1000..0x13FF]  vli.col  m4 untouched     (1024 B)
+#   [0x1400..0x17FF]  vli.col  m5 output        (1024 B)
+#   [0x1800..0x1BFF]  vli.one  m4 untouched     (1024 B)
+#   [0x1C00..0x1FFF]  vli.one  m5 output        (1024 B)
 
     ADDI  x28, x0, 1
     LI    x5, 0x90000000
@@ -33,11 +33,8 @@
     LI    x2, 1024
 
     # ================================================================
-    # Test 1: vli.all  m4, 0x3F80    (1.0 to all elements)
+    # Test 1: vli.all  m4, 0x3F80    (1.0 to the full BF16 register pair)
     # ================================================================
-    VLI.ALL 5, 0x40A0
-    DELAY 150
-
     VLI.ALL 4, 0x3F80
     DELAY 150
 
@@ -57,13 +54,9 @@
     DMA.WAIT  1
 
     # ================================================================
-    # Test 2: vli.row  m4, 0x4000    (2.0 to first row)
+    # Test 2: vli.row  m4, 0x4000    (2.0 to row 0 of the full BF16 pair)
     # ================================================================
-    # First zero out m4, then reload the untouched-neighbor sentinel in m5.
     VLI.ALL 4, 0x0000
-    DELAY 150
-
-    VLI.ALL 5, 0x40A0
     DELAY 150
 
     VLI.ROW 4, 0x4000
@@ -85,15 +78,12 @@
     DMA.WAIT  1
 
     # ================================================================
-    # Test 3: vli.col  m4, 0x4040    (3.0 to first column)
+    # Test 3: vli.col  m5, 0x4040    (3.0 to first column of one register)
     # ================================================================
     VLI.ALL 4, 0x0000
     DELAY 150
 
-    VLI.ALL 5, 0x40A0
-    DELAY 150
-
-    VLI.COL 4, 0x4040
+    VLI.COL 5, 0x4040
     DELAY 150
 
     LI    x8, 0
@@ -112,15 +102,12 @@
     DMA.WAIT  1
 
     # ================================================================
-    # Test 4: vli.one  m4, 0x4080    (4.0 to element [0,0])
+    # Test 4: vli.one  m5, 0x4080    (4.0 to one element in one register)
     # ================================================================
     VLI.ALL 4, 0x0000
     DELAY 150
 
-    VLI.ALL 5, 0x40A0
-    DELAY 150
-
-    VLI.ONE 4, 0x4080
+    VLI.ONE 5, 0x4080
     DELAY 150
 
     LI    x8, 0

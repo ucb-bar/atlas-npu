@@ -47,7 +47,9 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     val computeWriteReq = Flipped(Valid(new AccBufWriteReq(p)))
     /** Address for a compute-side partial-sum read. */
     val computeReadAddr = Input(new AccBufReadAddr(p))
-    /** Partial-sum row returned to the compute pipeline. */
+    /** Pulse to request a compute-side partial-sum read. */
+    val computeReadEn   = Input(Bool())
+    /** Partial-sum row returned one cycle after `computeReadEn`. */
     val computeReadData = Output(Vec(numCols, UInt(colWidth.W)))
 
     // ── Load path (sequencer → accum buffer) ───────────────────────
@@ -57,16 +59,18 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     // ── Store path (accum buffer → sequencer) ──────────────────────
     /** Address for a store/pop read-out. */
     val storeAddr   = Input(new AccBufStoreAddr(p))
-    /** Raw BF16 row read out for the sequencer's pop path. */
+    /** Pulse to request a store/pop read-out. */
+    val storeReadEn = Input(Bool())
+    /** Raw BF16 row returned one cycle after `storeReadEn`. */
     val storeData   = Output(Vec(numCols, UInt(colWidth.W)))
   })
 
   // ==========================================================================
-  // Storage — one Chisel Mem per buffer
+  // Storage — one synchronous-read memory per buffer
   // ==========================================================================
 
-  val buffer0 = Mem(p.accumBufferRows, Vec(numCols, UInt(colWidth.W)))
-  val buffer1 = Mem(p.accumBufferRows, Vec(numCols, UInt(colWidth.W)))
+  val buffer0 = SyncReadMem(p.accumBufferRows, Vec(numCols, UInt(colWidth.W)))
+  val buffer1 = SyncReadMem(p.accumBufferRows, Vec(numCols, UInt(colWidth.W)))
 
   // ==========================================================================
   // Safety: compute-write and load must not target the same buffer
@@ -80,9 +84,13 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   // Helper: select buffer by accSel for reads
   // ==========================================================================
 
-  /** Combinational read from whichever buffer `sel` indicates. */
-  private def readBuffer(sel: Bool, row: UInt): Vec[UInt] =
-    Mux(sel, buffer1.read(row), buffer0.read(row))
+  /** Synchronous read from whichever buffer `sel` indicates. */
+  private def readBuffer(sel: Bool, row: UInt, en: Bool): Vec[UInt] = {
+    val readSel = RegEnable(sel, en)
+    val data0   = buffer0.read(row, en && !sel)
+    val data1   = buffer1.read(row, en && sel)
+    Mux(readSel, data1, data0)
+  }
 
   /** Write to whichever buffer `sel` indicates. */
   private def writeBuffer(sel: Bool, row: UInt, data: Vec[UInt]): Unit = {
@@ -111,7 +119,8 @@ class AccumulationBuffers(p: MxuParams) extends Module {
 
   io.computeReadData := readBuffer(
     io.computeReadAddr.accSel,
-    io.computeReadAddr.rowIdx
+    io.computeReadAddr.rowIdx,
+    io.computeReadEn
   )
 
   // ==========================================================================
@@ -132,6 +141,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
 
   io.storeData := readBuffer(
     io.storeAddr.accSel,
-    io.storeAddr.rowIdx
+    io.storeAddr.rowIdx,
+    io.storeReadEn
   )
 }

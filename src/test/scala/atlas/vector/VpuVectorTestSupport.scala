@@ -350,6 +350,10 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
         val isVli =
           opEnum == VPUOp.vliOne || opEnum == VPUOp.vliCol ||
             opEnum == VPUOp.vliRow || opEnum == VPUOp.vliAll
+        val isVliPair = opEnum == VPUOp.vliAll || opEnum == VPUOp.vliRow
+        val isVliSingle = opEnum == VPUOp.vliCol || opEnum == VPUOp.vliOne
+        val destBank =
+          if (isVliSingle) DEST2_BANK else DEST1_BANK
 
         if (isCol) {
           clearBank(dut, SRC2_BANK)
@@ -365,7 +369,7 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
             op       = opEnum,
             src1Bank = 0,
             src2Bank = 0,
-            destBank = DEST1_BANK,
+            destBank = destBank,
             imm      = tv.vecA(0)
           )
         } else {
@@ -374,7 +378,7 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
             op       = opEnum,
             src1Bank = SRC1_BANK,
             src2Bank = SRC2_BANK,
-            destBank = DEST1_BANK
+            destBank = destBank
           )
         }
 
@@ -383,67 +387,91 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
         dut.clock.step(2)
 
         var caseOk    = true
-        val actualSeq = readBF16Results(dut, p, DEST1_BANK, row = 0)
+        val actualSeq = readBF16Results(dut, p, destBank, row = 0)
 
-        val wideRead = isCol || opEnum == VPUOp.vliCol || opEnum == VPUOp.vliAll
-        if (wideRead) {
-          for (i <- 0 until 32) {
-            val rowindex        = if (opEnum == VPUOp.vliAll) 16 else 1
-            val rowData: BigInt = trfReadRow(dut, DEST1_BANK, i)
-            for (j <- 0 until rowindex) {
-              val actual                       = ((rowData >> (16 * j)) & 0xFFFF).toInt
-              val expected                     = tv.expected(i) & 0xFFFF
-              val aFloat                       = bf16BitsToFloat(actual)
-              val eFloat                       = bf16BitsToFloat(expected)
-              val (ok, absError, relError)     = checkTolerance(actual, expected, tv.vpuOp, tv.leftAlign)
-              val relErrorPct                  = relError * 100.0f
-              val aHexStr                      = f"0x${actual & 0xFFFF}%04x"
-              val eHexStr                      = f"0x${expected & 0xFFFF}%04x"
-              val matchStr                     = if (ok) "PASS" else "FAIL"
+        def logCompare(actual: Int, expected: Int, index: Int, label: String): Unit = {
+          val aFloat                   = bf16BitsToFloat(actual)
+          val eFloat                   = bf16BitsToFloat(expected)
+          val (ok, absError, relError) = checkTolerance(actual, expected, tv.vpuOp, tv.leftAlign)
+          val relErrorPct              = relError * 100.0f
+          val aHexStr                  = f"0x${actual & 0xFFFF}%04x"
+          val eHexStr                  = f"0x${expected & 0xFFFF}%04x"
+          val matchStr                 = if (ok) "PASS" else "FAIL"
 
-              outFile.println(
-                f"  ${tv.id}%6d  ${"\"" + tv.desc + "\""}%-32s $i%4d ${tv.vpuOp}%-8s " +
-                  f"$aHexStr%12s $eHexStr%12s " +
-                  f"$aFloat%14.4f $eFloat%14.4f ${f"$relErrorPct%.2f%%"}%8s $matchStr%-6s"
-              )
-              if (!ok) {
+          outFile.println(
+            f"  ${tv.id}%6d  ${"\"" + tv.desc + "\""}%-32s $index%4d ${tv.vpuOp}%-8s " +
+              f"$aHexStr%12s $eHexStr%12s " +
+              f"$aFloat%14.4f $eFloat%14.4f ${f"$relErrorPct%.2f%%"}%8s $matchStr%-6s"
+          )
+
+          if (!ok) {
+            caseOk = false
+            println(
+              f"  FAIL case ${tv.id}%3d [${tv.desc}] $label: " +
+                f"got 0x${actual & 0xFFFF}%04x ($aFloat%.4f), " +
+                f"expected 0x${expected & 0xFFFF}%04x ($eFloat%.4f) " +
+                f"[RelErr $relErrorPct%.2f%%, AbsErr $absError%.4f]"
+            )
+          }
+        }
+
+        val wideRead = isCol
+        if (isVliPair) {
+          for (bank <- Seq(destBank, destBank + 1)) {
+            for (row <- 0 until mregP.mregRows) {
+              val rowData = trfReadRow(dut, bank, row)
+              val expected = tv.expected(row) & 0xFFFF
+              for (lane <- 0 until p.numLanes) {
+                val actual = ((rowData >> (16 * lane)) & 0xFFFF).toInt
+                logCompare(actual, expected, row, s"bank $bank row $row slot $lane")
+              }
+            }
+          }
+        } else if (isVliSingle) {
+          val untouchedBank = DEST1_BANK
+          for (row <- 0 until mregP.mregRows) {
+            val rowData = trfReadRow(dut, destBank, row)
+            val expected = tv.expected(row) & 0xFFFF
+            val actualHead = (rowData & 0xFFFF).toInt
+            logCompare(actualHead, expected, row, s"bank $destBank row $row slot 0")
+
+            for (lane <- 1 until p.numLanes) {
+              val actual = ((rowData >> (16 * lane)) & 0xFFFF).toInt
+              if (actual != 0) {
                 caseOk = false
                 println(
-                  f"  FAIL case ${tv.id}%3d [${tv.desc}] row $i%2d slot $j%2d: " +
-                    f"got 0x${actual & 0xFFFF}%04x ($aFloat%.4f), " +
-                    f"expected 0x${expected & 0xFFFF}%04x ($eFloat%.4f) " +
-                    f"[RelErr $relErrorPct%.2f%%, AbsErr $absError%.4f]"
+                  f"  FAIL case ${tv.id}%3d [${tv.desc}] bank $destBank row $row%2d slot $lane%2d: " +
+                    f"got non-zero 0x${actual & 0xFFFF}%04x, expected 0x0000"
+                )
+              }
+            }
+
+            val untouchedRow = trfReadRow(dut, untouchedBank, row)
+            for (lane <- 0 until p.numLanes) {
+              val actual = ((untouchedRow >> (16 * lane)) & 0xFFFF).toInt
+              if (actual != 0) {
+                caseOk = false
+                println(
+                  f"  FAIL case ${tv.id}%3d [${tv.desc}] untouched bank $untouchedBank row $row%2d slot $lane%2d: " +
+                    f"got non-zero 0x${actual & 0xFFFF}%04x, expected 0x0000"
                 )
               }
             }
           }
+        } else if (wideRead) {
+          for (i <- 0 until 32) {
+            val rowData: BigInt = trfReadRow(dut, DEST1_BANK, i)
+            for (j <- 0 until 1) {
+              val actual                       = ((rowData >> (16 * j)) & 0xFFFF).toInt
+              val expected                     = tv.expected(i) & 0xFFFF
+              logCompare(actual, expected, i, s"row $i slot $j")
+            }
+          }
         } else {
-          val rowindex = if (opEnum == VPUOp.vliOne) 1 else p.numLanes
-          for (r <- 0 until rowindex) {
+          for (r <- 0 until p.numLanes) {
             val actual                       = actualSeq(r)
             val expected                     = tv.expected(r)
-            val aFloat                       = bf16BitsToFloat(actual)
-            val eFloat                       = bf16BitsToFloat(expected)
-            val (ok, absError, relError)     = checkTolerance(actual, expected, tv.vpuOp, tv.leftAlign)
-            val relErrorPct                  = relError * 100.0f
-            val aHexStr                      = f"0x${actual & 0xFFFF}%04x"
-            val eHexStr                      = f"0x${expected & 0xFFFF}%04x"
-            val matchStr                     = if (ok) "PASS" else "FAIL"
-
-            outFile.println(
-              f"  ${tv.id}%6d  ${"\"" + tv.desc + "\""}%-32s $r%4d ${tv.vpuOp}%-8s " +
-                f"$aHexStr%12s $eHexStr%12s " +
-                f"$aFloat%14.4f $eFloat%14.4f ${f"$relErrorPct%.2f%%"}%8s $matchStr%-6s"
-            )
-            if (!ok) {
-              caseOk = false
-              println(
-                f"  FAIL case ${tv.id}%3d [${tv.desc}] lane $r%2d: " +
-                  f"got 0x${actual & 0xFFFF}%04x ($aFloat%.4f), " +
-                  f"expected 0x${expected & 0xFFFF}%04x ($eFloat%.4f) " +
-                  f"[RelErr $relErrorPct%.2f%%, AbsErr $absError%.4f]"
-              )
-            }
+            logCompare(actual, expected, r, s"lane $r")
           }
         }
 

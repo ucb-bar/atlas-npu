@@ -1,25 +1,13 @@
-"""lane_boxes/exp.py — placeholder for `ExpLane.scala` (`class Exp`).
+"""lane_boxes/exp.py — funct model of `ExpLane.scala`.
 
-`Exp` is the BF16 vector exp / exp2 lane box. The Scala module wraps
-`ExLUT(numLanes, lutAddrBits, lutValM, lutValN)` plus per-lane
-`RoundRawFNToRecFN` rounding modules and uses HardFloat
-`rawFloatFromFN`/`fNFromRecFN` for the input decode + output
-conversion (`ExpLane.scala:32-140`). The hard part isn't the LUT —
-it's that the input is converted to a `RawFloat`, scaled into a
-Q(qmnM, qmnN) fixed-point value via `qmnFromRawFloat`, then the
-result of the LUT-interp is fed back through `rawFloatFromQmnK` and
-RNE-rounded to BF16 via the Berkeley HardFloat round module.
+`Exp` is the BF16 vector exp / exp2 lane box. The `exp(x)` path is now
+bit-exact with the RTL by delegating to the standalone FPEX BF16 model
+under `dependencies/fpex/model/bf16_exp_model.py`, which already
+captures the RawFloat → Q(m,n) → LUT → HardFloat-round-trip exactly.
 
-That round module is currently only mirrored end-to-end in the
-arithmetic spine via `f32_to_bf16_bits_rne` (which goes BF16 → FP32 →
-RNE → BF16). Porting the full `RawFloat` ↔ Q(m,n) round-trip is
-pending future work.
-
-This skeleton exists so that:
-  - tests can import the class and skip the real compute check,
-  - the engine wiring can register the op name with the dispatcher,
-  - the request / response shape matches the Scala bundle so future
-    tests don't need to be rewritten.
+`exp2(x)` is still routed through a Python-math fallback for now; the
+current failing overlap suites only exercise the natural-exponential
+path, and matching that path exactly is the critical correctness fix.
 
 Visible latency assumption: 1 cycle (`ExpLane.scala:77` says
 `numIntermediateStages = 1`, no extra LUT-output register downstream
@@ -31,6 +19,11 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import importlib.util
+import math
+from pathlib import Path
+import struct
+import sys
 from typing import Optional
 
 from ..vector_params import VectorParams
@@ -48,8 +41,54 @@ class FPEXResp:
     result: list[int]                   # 16 BF16 bit patterns
 
 
+def _load_exact_exp_bf16_bits():
+    model_path = (
+        Path(__file__).resolve().parents[5]
+        / "dependencies"
+        / "fpex"
+        / "model"
+        / "bf16_exp_model.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_atlas_exact_bf16_exp_model",
+        model_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"unable to load exact BF16 exp model from {model_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(spec.name, module)
+    spec.loader.exec_module(module)
+    return module.exp_bf16_bits
+
+
+_EXACT_EXP_BF16_BITS = _load_exact_exp_bf16_bits()
+
+
+def _bf16_bits_to_f32(bits: int) -> float:
+    return struct.unpack(">f", struct.pack(">I", (bits & 0xFFFF) << 16))[0]
+
+
+def _f32_to_bf16_bits_rne(x: float) -> int:
+    if math.isnan(x):
+        return 0x7FC0
+    if x == float("inf"):
+        return 0x7F80
+    if x == float("-inf"):
+        return 0xFF80
+    fp32_int = struct.unpack(">I", struct.pack(">f", x))[0]
+    lower_16 = fp32_int & 0xFFFF
+    bit_16 = (fp32_int >> 16) & 1
+    if lower_16 > 0x8000 or (lower_16 == 0x8000 and bit_16 == 1):
+        fp32_int = (fp32_int + 0x8000) & 0xFFFFFFFF
+    return (fp32_int >> 16) & 0xFFFF
+
+
 class Exp:
-    """Placeholder — see module docstring."""
+    """Mirror of `class Exp` in `ExpLane.scala`.
+
+    The natural-exponential path is exact. Base-2 exponential is kept as
+    a temporary math fallback until the RTL-faithful port lands.
+    """
 
     LATENCIES: dict[str, int] = {"exp": 1, "exp2": 1}
 
@@ -64,22 +103,37 @@ class Exp:
             self._queues[op] = deque([None] * lat)
 
     def compute_now(self, req: FPEXReq) -> FPEXResp:
-        raise NotImplementedError(
-            "Exp / exp2 funct model is a placeholder pending the "
-            "HardFloat RawFloat ↔ Q(m,n) round-trip port."
-        )
+        n = self.p.num_lanes
+        if len(req.xVec) != n:
+            raise ValueError(f"xVec must have {n} lanes, got {len(req.xVec)}")
+
+        out: list[int] = []
+        for i in range(n):
+            lane_en = bool((req.laneMask >> i) & 1)
+            if not lane_en:
+                out.append(0x0000)
+                continue
+
+            bits = req.xVec[i] & 0xFFFF
+            if req.isBase2:
+                x = _bf16_bits_to_f32(bits)
+                try:
+                    y = 2.0 ** x
+                except OverflowError:
+                    y = float("inf") if x > 0 else 0.0
+                except ValueError:
+                    y = float("nan")
+                out.append(_f32_to_bf16_bits_rne(y))
+            else:
+                out.append(_EXACT_EXP_BF16_BITS(bits))
+        return FPEXResp(result=out)
 
     def step(self, op_name: str, req: Optional[FPEXReq]) -> Optional[FPEXResp]:
         if op_name not in self._queues:
             raise KeyError(
                 f"Exp has no op {op_name!r}; valid: {sorted(self.LATENCIES)}"
             )
-        if req is not None:
-            raise NotImplementedError(
-                "Exp.step with a live request is a placeholder; see compute_now."
-            )
-        # Drain only path (req=None) is safe: returns whatever was
-        # queued earlier (which is also None if no work has been done).
+        produced = self.compute_now(req) if req is not None else None
         q = self._queues[op_name]
-        q.append(None)
+        q.append(produced)
         return q.popleft()

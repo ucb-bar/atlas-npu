@@ -1,15 +1,23 @@
 // ============================================================================
-// VMEM.scala — Vector Memory Scratchpad with TileLink slave port.
+// Vmem.scala — 8-bank interleaved vector scratchpad with masked writes.
 //
-// Single-ported SyncReadMem storing full lines (256 bits = 32 bytes each).
-// Three clients — LSU, DMA, and TileLink (system bus) — share the single
-// read port and single write port through priority arbitration:
+// Storage: numBanks × SyncReadMem(linesPerBank, Vec(lineBytes, UInt(8.W)))
+//          Each bank: 1 read port, 1 write port (1R1W SRAM).
+//          Byte-granularity masking via SyncReadMem native mask.
 //
-//   Read priority:  LSU > DMA > TL
-//   Write priority: LSU > DMA > TL
+// Clients (all present pre-decomposed bankIdx + bankAddr):
+//   LSU scalar:  scalar loads (read) and scalar stores (masked write).
+//   LSU vector:  VLOAD (read) and VSTORE (full-line write).
+//   DMA:         DRAM→VMEM loads (full-line write) and VMEM→DRAM stores (read).
+//   TileLink:    Saturn / SBUS host access (byte-masked read/write).
 //
-// The TL port allows the host to directly read/write VMEM over the system
-// bus.  It is lowest priority so it never blocks accelerator datapath.
+// Software guarantees LSU scalar and LSU vector never target the same
+// bank's read port (or write port) simultaneously.  Hardware asserts.
+// Combined LSU has unconditional priority over DMA and TileLink.
+//
+// Per-bank per-port priority:
+//   Read:  LSU (scalar | vector) > DMA > TileLink
+//   Write: LSU (scalar | vector) > DMA > TileLink
 // ============================================================================
 
 package atlas.vmem
@@ -17,131 +25,241 @@ package atlas.vmem
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
-import atlas.common.{VmemParams, VmemLineReadPort, VmemLineWritePort}
+import atlas.common._
 
-/** On-chip vector scratchpad memory.
-  *
-  * @param p       VMEM geometry parameters (line width, capacity, addressing).
-  * @param bundle  TileLink bundle parameters for the slave port.
-  */
-class VMEM(p: VmemParams, bundle: TLBundleParameters) extends Module {
+class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
 
   val io = IO(new Bundle {
-    // ── TileLink slave port ──
     val tl = Flipped(new TLBundle(bundle))
 
-    // ── DMA access ports ──
-    /** DMA line-read request. */
-    val dmaRead     = Flipped(Valid(new VmemLineReadPort(p)))
-    /** DMA line-read response (valid one cycle after request). */
-    val dmaReadData = Valid(UInt(p.lineWidthBits.W))
-    /** DMA line-write request (full-line, no masking). */
-    val dmaWrite    = Flipped(Valid(new VmemLineWritePort(p)))
+    // ── LSU scalar (always granted — deterministic latency) ──
+    val lsuScalarRead     = Flipped(Valid(new VmemLineReadPort(p)))
+    val lsuScalarReadData = Valid(UInt(p.lineWidthBits.W))
+    val lsuScalarWrite    = Flipped(Valid(new MaskedVmemLineWritePort(p)))
 
-    // ── LSU access ports ──
-    /** LSU line-read request (higher priority than DMA). */
-    val lsuRead     = Flipped(Valid(new VmemLineReadPort(p)))
-    /** LSU line-read response (valid one cycle after request). */
-    val lsuReadData = Valid(UInt(p.lineWidthBits.W))
-    /** LSU line-write request (higher priority than DMA). */
-    val lsuWrite    = Flipped(Valid(new VmemLineWritePort(p)))
+    // ── LSU vector (always granted — deterministic latency) ──
+    val lsuVecRead     = Flipped(Valid(new VmemLineReadPort(p)))
+    val lsuVecReadData = Valid(UInt(p.lineWidthBits.W))
+    val lsuVecWrite    = Flipped(Valid(new VmemLineWritePort(p)))
+
+    // ── DMA (grant-based backpressure) ──
+    val dmaRead      = Flipped(Valid(new VmemLineReadPort(p)))
+    val dmaReadGrant = Output(Bool())
+    val dmaReadData  = Valid(UInt(p.lineWidthBits.W))
+    val dmaWrite      = Flipped(Valid(new VmemLineWritePort(p)))
+    val dmaWriteGrant = Output(Bool())
   })
 
   // ==========================================================================
-  // Storage
+  // Bank storage
   // ==========================================================================
 
-  val mem = SyncReadMem(p.numLines, UInt(p.lineWidthBits.W))
-
-  val tl = io.tl
-
-  // ==========================================================================
-  // TileLink backpressure — accept A only when no LSU/DMA access
-  // ==========================================================================
-
-  tl.a.ready := !io.lsuRead.valid && !io.lsuWrite.valid &&
-                !io.dmaRead.valid && !io.dmaWrite.valid
-
-  // ==========================================================================
-  // TL address conversion
-  // ==========================================================================
-
-  val tlAddr = tl.a.bits.address(p.byteAddrBits - 1, log2Ceil(p.lineBytes))
-
-  // ==========================================================================
-  // Read arbitration (LSU > DMA > TL)
-  // ==========================================================================
-  //
-  // Only one read can be serviced per cycle.
-
-  val readAddr = Wire(UInt(p.lineAddrBits.W))
-  val readEn   = Wire(Bool())
-  val readSel  = Wire(UInt(2.W))  // 0=None, 1=LSU, 2=DMA, 3=TL
-
-  val tlReadValid = tl.a.valid && tl.a.bits.opcode === TLMessages.Get && tl.a.ready
-
-  when(io.lsuRead.valid) {
-    readAddr := io.lsuRead.bits.addr
-    readEn   := true.B
-    readSel  := 1.U
-  }.elsewhen(io.dmaRead.valid) {
-    readAddr := io.dmaRead.bits.addr
-    readEn   := true.B
-    readSel  := 2.U
-  }.elsewhen(tlReadValid) {
-    readAddr := tlAddr
-    readEn   := true.B
-    readSel  := 3.U
-  }.otherwise {
-    readAddr := 0.U
-    readEn   := false.B
-    readSel  := 0.U
+  val banks = Seq.fill(p.numBanks) {
+    SyncReadMem(p.linesPerBank, Vec(p.lineBytes, UInt(8.W)))
   }
 
-  // SyncReadMem read — data available on the next cycle.
-  val rdData       = mem.read(readAddr, readEn)
-  val r1_readSel   = RegNext(readSel)
-  val r1_readEn    = RegNext(readEn, false.B)
-  val r1_tlRdValid = RegNext(tlReadValid && readSel === 3.U, false.B)
+  // ==========================================================================
+  // TileLink decoding
+  // ==========================================================================
+
+  val tl = io.tl
+  val tlByteAddr = tl.a.bits.address(p.byteAddrBits - 1, 0)
+  val tlLineAddr = tlByteAddr(p.byteAddrBits - 1, p.lineOffBits)
+  val tlBankIdx  = p.getBankIdx(tlLineAddr)
+  val tlBankAddr = p.getBankAddr(tlLineAddr)
+  val tlIsGet    = tl.a.bits.opcode === TLMessages.Get
+  val tlIsPut    = tl.a.bits.opcode === TLMessages.PutFullData ||
+                   tl.a.bits.opcode === TLMessages.PutPartialData
+
+  // ==========================================================================
+  // Software-scheduling assertions
+  // ==========================================================================
+
+  assert(!(io.lsuScalarRead.valid && io.lsuVecRead.valid &&
+           io.lsuScalarRead.bits.bankIdx === io.lsuVecRead.bits.bankIdx),
+    "ASSERT FAIL: LSU scalar read and LSU vector read target same VMEM bank")
+
+  assert(!(io.lsuScalarWrite.valid && io.lsuVecWrite.valid &&
+           io.lsuScalarWrite.bits.bankIdx === io.lsuVecWrite.bits.bankIdx),
+    "ASSERT FAIL: LSU scalar write and LSU vector write target same VMEM bank")
+
+  // ==========================================================================
+  // Client IDs for read-response routing
+  // ==========================================================================
+
+  val CLIENT_NONE       = 0.U(3.W)
+  val CLIENT_LSU_SCALAR = 1.U(3.W)
+  val CLIENT_LSU_VEC    = 2.U(3.W)
+  val CLIENT_DMA        = 3.U(3.W)
+  val CLIENT_TL         = 4.U(3.W)
+
+  val r1_bankReadClient = Reg(Vec(p.numBanks, UInt(3.W)))
+  val r1_bankReadValid  = RegInit(VecInit(Seq.fill(p.numBanks)(false.B)))
+  val r1_bankReadData   = Wire(Vec(p.numBanks, Vec(p.lineBytes, UInt(8.W))))
 
   val r1_tlSource = RegNext(tl.a.bits.source)
   val r1_tlSize   = RegNext(tl.a.bits.size)
+  val r1_tlRead   = RegInit(false.B)
+  val r1_tlWrite  = RegInit(false.B)
 
-  // Route the response to the correct client.
-  io.lsuReadData.valid := r1_readEn && r1_readSel === 1.U
-  io.lsuReadData.bits  := rdData
-
-  io.dmaReadData.valid := r1_readEn && r1_readSel === 2.U
-  io.dmaReadData.bits  := rdData
+  val dmaReadGranted  = WireDefault(false.B)
+  val dmaWriteGranted = WireDefault(false.B)
+  val tlAccepted      = WireDefault(false.B)
 
   // ==========================================================================
-  // Write arbitration (LSU > DMA > TL)
+  // Per-bank arbitration
   // ==========================================================================
 
-  val tlWriteValid = tl.a.valid && tl.a.ready &&
-    (tl.a.bits.opcode === TLMessages.PutFullData ||
-     tl.a.bits.opcode === TLMessages.PutPartialData)
-  val r1_tlWrValid = RegNext(tlWriteValid, false.B)
+  for (b <- 0 until p.numBanks) {
+    val bank = banks(b)
 
-  when(io.lsuWrite.valid) {
-    mem.write(io.lsuWrite.bits.addr, io.lsuWrite.bits.data)
-  }.elsewhen(io.dmaWrite.valid) {
-    mem.write(io.dmaWrite.bits.addr, io.dmaWrite.bits.data)
-  }.elsewhen(tlWriteValid) {
-    mem.write(tlAddr, tl.a.bits.data)
+    // ── Read port ──────────────────────────────────────────────
+    val lsuScalarWantsRead = io.lsuScalarRead.valid && io.lsuScalarRead.bits.bankIdx === b.U
+    val lsuVecWantsRead    = io.lsuVecRead.valid    && io.lsuVecRead.bits.bankIdx === b.U
+    val dmaWantsRead       = io.dmaRead.valid       && io.dmaRead.bits.bankIdx === b.U
+    val tlWantsRead        = tl.a.valid && tlIsGet   && tlBankIdx === b.U
+
+    // LSU scalar and vec are mutually exclusive per bank (asserted above).
+    val lsuWantsRead = lsuScalarWantsRead || lsuVecWantsRead
+
+    val readAddr   = Wire(UInt(p.bankLineAddrBits.W))
+    val readEn     = Wire(Bool())
+    val readClient = Wire(UInt(3.W))
+
+    when(lsuScalarWantsRead) {
+      readAddr   := io.lsuScalarRead.bits.bankAddr
+      readEn     := true.B
+      readClient := CLIENT_LSU_SCALAR
+    }.elsewhen(lsuVecWantsRead) {
+      readAddr   := io.lsuVecRead.bits.bankAddr
+      readEn     := true.B
+      readClient := CLIENT_LSU_VEC
+    }.elsewhen(dmaWantsRead && !lsuWantsRead) {
+      readAddr   := io.dmaRead.bits.bankAddr
+      readEn     := true.B
+      readClient := CLIENT_DMA
+    }.elsewhen(tlWantsRead && !lsuWantsRead && !dmaWantsRead) {
+      readAddr   := tlBankAddr
+      readEn     := true.B
+      readClient := CLIENT_TL
+    }.otherwise {
+      readAddr   := 0.U
+      readEn     := false.B
+      readClient := CLIENT_NONE
+    }
+
+    when(readEn && readClient === CLIENT_DMA) { dmaReadGranted := true.B }
+    when(readEn && readClient === CLIENT_TL)  { tlAccepted     := true.B }
+
+    r1_bankReadData(b)   := bank.read(readAddr, readEn)
+    r1_bankReadClient(b) := Mux(readEn, readClient, CLIENT_NONE)
+    r1_bankReadValid(b)  := readEn
+
+    // ── Write port ─────────────────────────────────────────────
+    val lsuScalarWantsWrite = io.lsuScalarWrite.valid && io.lsuScalarWrite.bits.bankIdx === b.U
+    val lsuVecWantsWrite    = io.lsuVecWrite.valid    && io.lsuVecWrite.bits.bankIdx === b.U
+    val dmaWantsWrite       = io.dmaWrite.valid       && io.dmaWrite.bits.bankIdx === b.U
+    val tlWantsWrite        = tl.a.valid && tlIsPut    && tlBankIdx === b.U
+
+    val lsuWantsWrite = lsuScalarWantsWrite || lsuVecWantsWrite
+
+    // 1. Create a single set of multiplexed write signals
+    val writeEn   = WireDefault(false.B)
+    val writeAddr = WireDefault(0.U(p.bankLineAddrBits.W))
+    val writeData = WireDefault(VecInit(Seq.fill(p.lineBytes)(0.U(8.W))))
+    val writeMask = WireDefault(VecInit(Seq.fill(p.lineBytes)(false.B)))
+
+    when(lsuScalarWantsWrite) {
+      // ── LSU scalar: per-byte masked write ──
+      writeEn   := true.B
+      writeAddr := io.lsuScalarWrite.bits.bankAddr
+      writeMask := io.lsuScalarWrite.bits.mask
+      for (i <- 0 until p.lineBytes) {
+        writeData(i) := io.lsuScalarWrite.bits.data(i * 8 + 7, i * 8)
+      }
+
+    }.elsewhen(lsuVecWantsWrite) {
+      // ── LSU vector: full-line write ──
+      writeEn   := true.B
+      writeAddr := io.lsuVecWrite.bits.bankAddr
+      for (i <- 0 until p.lineBytes) {
+        writeData(i) := io.lsuVecWrite.bits.data(i * 8 + 7, i * 8)
+        writeMask(i) := true.B
+      }
+
+    }.elsewhen(dmaWantsWrite && !lsuWantsWrite) {
+      // ── DMA: full-line write ──
+      writeEn   := true.B
+      writeAddr := io.dmaWrite.bits.bankAddr
+      for (i <- 0 until p.lineBytes) {
+        writeData(i) := io.dmaWrite.bits.data(i * 8 + 7, i * 8)
+        writeMask(i) := true.B
+      }
+      dmaWriteGranted := true.B
+
+    }.elsewhen(tlWantsWrite && !lsuWantsWrite && !dmaWantsWrite) {
+      // ── TileLink: byte-masked write ──
+      writeEn   := true.B
+      writeAddr := tlBankAddr
+      for (i <- 0 until p.lineBytes) {
+        writeData(i) := tl.a.bits.data(i * 8 + 7, i * 8)
+        writeMask(i) := tl.a.bits.mask(i)
+      }
+      tlAccepted := true.B
+    }
+
+    // 2. Execute the write using a SINGLE hardware port
+    when(writeEn) {
+      bank.write(writeAddr, writeData, writeMask)
+    }
   }
 
   // ==========================================================================
-  // TileLink D channel response
+  // Read-response routing
   // ==========================================================================
 
-  tl.d.valid        := r1_tlRdValid || r1_tlWrValid
-  tl.d.bits.opcode  := Mux(r1_tlRdValid, TLMessages.AccessAckData, TLMessages.AccessAck)
+  def flattenBankData(bdata: Vec[UInt]): UInt = Cat(bdata.reverse)
+
+  val lsuScalarRespHot = VecInit((0 until p.numBanks).map(b =>
+    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_LSU_SCALAR))
+  io.lsuScalarReadData.valid := lsuScalarRespHot.asUInt.orR
+  io.lsuScalarReadData.bits  := Mux1H(lsuScalarRespHot, r1_bankReadData.map(flattenBankData))
+
+  val lsuVecRespHot = VecInit((0 until p.numBanks).map(b =>
+    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_LSU_VEC))
+  io.lsuVecReadData.valid := lsuVecRespHot.asUInt.orR
+  io.lsuVecReadData.bits  := Mux1H(lsuVecRespHot, r1_bankReadData.map(flattenBankData))
+
+  val dmaRespHot = VecInit((0 until p.numBanks).map(b =>
+    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_DMA))
+  io.dmaReadData.valid := dmaRespHot.asUInt.orR
+  io.dmaReadData.bits  := Mux1H(dmaRespHot, r1_bankReadData.map(flattenBankData))
+
+  // ==========================================================================
+  // Grants
+  // ==========================================================================
+
+  io.dmaReadGrant  := dmaReadGranted
+  io.dmaWriteGrant := dmaWriteGranted
+
+  // ==========================================================================
+  // TileLink D-channel
+  // ==========================================================================
+
+  tl.a.ready := tlAccepted
+  r1_tlRead  := tl.a.fire && tlIsGet
+  r1_tlWrite := tl.a.fire && tlIsPut
+
+  val tlRespHot = VecInit((0 until p.numBanks).map(b =>
+    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_TL))
+
+  tl.d.valid        := r1_tlRead || r1_tlWrite
+  tl.d.bits.opcode  := Mux(r1_tlRead, TLMessages.AccessAckData, TLMessages.AccessAck)
   tl.d.bits.param   := 0.U
   tl.d.bits.size    := r1_tlSize
   tl.d.bits.source  := r1_tlSource
   tl.d.bits.sink    := 0.U
   tl.d.bits.denied  := false.B
-  tl.d.bits.data    := Mux(r1_tlRdValid, rdData, 0.U)
+  tl.d.bits.data    := Mux(r1_tlRead, Mux1H(tlRespHot, r1_bankReadData.map(flattenBankData)), 0.U)
   tl.d.bits.corrupt := false.B
 }

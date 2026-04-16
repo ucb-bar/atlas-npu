@@ -128,6 +128,8 @@ object IDecode {
     VRECIP_BF16  -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RCP,       XLU_X, MEM_X, LSU_X),
     VEXP         -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_EXP,       XLU_X, MEM_X, LSU_X),
     VEXP2        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_EXP2,      XLU_X, MEM_X, LSU_X),
+    VSQUARE_BF16 -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_SQUARE,    XLU_X, MEM_X, LSU_X),
+    VCUBE_BF16   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_CUBE,      XLU_X, MEM_X, LSU_X),
     VFP8PACK     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_FP8PACK,   XLU_X, MEM_X, LSU_X),
     VFP8UNPACK   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_FP8UNPACK, XLU_X, MEM_X, LSU_X),
     VRELU        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_RELU,      XLU_X, MEM_X, LSU_X),

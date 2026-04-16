@@ -4,10 +4,10 @@
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_row_reduce.py
 #
-# Row reductions reduce over columns for each row:
-#   vredsum.row.bf16: m[vd][i,j] = sum(m[vs1][i,:])
-#   vredmin.row.bf16: m[vd][i,j] = min(m[vs1][i,:])
-#   vredmax.row.bf16: m[vd][i,j] = max(m[vs1][i,:])
+# Row reductions reduce over the full BF16 tensor-register pair for each row:
+#   vredsum.row.bf16: m[vd][i,j] = sum(m[vs1][i,:] ++ m[vs1+1][i,:])
+#   vredmin.row.bf16: m[vd][i,j] = min(m[vs1][i,:] ++ m[vs1+1][i,:])
+#   vredmax.row.bf16: m[vd][i,j] = max(m[vs1][i,:] ++ m[vs1+1][i,:])
 #
 # Result is a tensor where every column in a given row has the same
 # reduction value from that row.
