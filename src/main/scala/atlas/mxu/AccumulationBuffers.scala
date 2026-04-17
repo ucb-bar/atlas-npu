@@ -22,6 +22,13 @@
 //      for optional BF16→FP8 quantization (quant lives in sequencer).
 //
 // All (de)quantization happens in the sequencer, not here.
+//
+// Port inference:
+//   Each buffer is backed by a single SyncReadMem with exactly one read site
+//   and one write site, so it maps to a 1R1W SRAM macro. Mutual exclusion
+//   between the two write sources (compute / load) and the two read sources
+//   (compute / store) is enforced by assertions below; the write- and
+//   read-mux stages rely on those assertions to be safe.
 // ============================================================================
 
 package atlas.mxu
@@ -66,7 +73,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   })
 
   // ==========================================================================
-  // Storage — one synchronous-read memory per buffer
+  // Storage — one synchronous-read memory per buffer (1R1W)
   // ==========================================================================
 
   val buffer0 = SyncReadMem(p.accumBufferRows, Vec(numCols, UInt(colWidth.W)))
@@ -74,6 +81,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
 
   // ==========================================================================
   // Safety: compute-write and load must not target the same buffer
+  // so each buffer only needs a single write port
   // ==========================================================================
 
   assert(!(io.computeWriteReq.valid && io.loadReq.valid &&
@@ -90,41 +98,35 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     "AccumulationBuffers: compute read and store read target the same buffer")
 
   // ==========================================================================
-  // Helper: select write target by accSel
+  // Unified write selection — one write request per buffer per cycle
+  // Priority within a buffer: compute write over load
+  // (same-buffer overlap is already forbidden by assertion)
   // ==========================================================================
 
-  /** Write to whichever buffer `sel` indicates. */
-  private def writeBuffer(sel: Bool, row: UInt, data: Vec[UInt]): Unit = {
-    when(sel) {
-      buffer1.write(row, data)
-    }.otherwise {
-      buffer0.write(row, data)
-    }
-  }
+  val write0IsCompute = io.computeWriteReq.valid && !io.computeWriteReq.bits.accSel
+  val write0IsLoad    = io.loadReq.valid         && !io.loadReq.bits.accSel
+  val write1IsCompute = io.computeWriteReq.valid &&  io.computeWriteReq.bits.accSel
+  val write1IsLoad    = io.loadReq.valid         &&  io.loadReq.bits.accSel
 
-  // ==========================================================================
-  // Compute pipeline write (result row writeback)
-  // ==========================================================================
+  val write0En = write0IsCompute || write0IsLoad
+  val write1En = write1IsCompute || write1IsLoad
 
-  when(io.computeWriteReq.valid) {
-    writeBuffer(
-      io.computeWriteReq.bits.accSel,
-      io.computeWriteReq.bits.rowIdx,
-      io.computeWriteReq.bits.data
-    )
-  }
+  val write0Addr = Mux(write0IsCompute,
+                       io.computeWriteReq.bits.rowIdx,
+                       io.loadReq.bits.rowIdx)
+  val write1Addr = Mux(write1IsCompute,
+                       io.computeWriteReq.bits.rowIdx,
+                       io.loadReq.bits.rowIdx)
 
-  // ==========================================================================
-  // Load path (sequencer push — BF16 data into buffer)
-  // ==========================================================================
+  val write0Data = Mux(write0IsCompute,
+                       io.computeWriteReq.bits.data,
+                       io.loadReq.bits.data)
+  val write1Data = Mux(write1IsCompute,
+                       io.computeWriteReq.bits.data,
+                       io.loadReq.bits.data)
 
-  when(io.loadReq.valid) {
-    writeBuffer(
-      io.loadReq.bits.accSel,
-      io.loadReq.bits.rowIdx,
-      io.loadReq.bits.data
-    )
-  }
+  when(write0En) { buffer0.write(write0Addr, write0Data) }
+  when(write1En) { buffer1.write(write1Addr, write1Data) }
 
   // ==========================================================================
   // Unified read selection — one read request per buffer per cycle
@@ -147,8 +149,8 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   read1IsCompute := io.computeReadEn &&  io.computeReadAddr.accSel
   read1IsStore   := io.storeReadEn   &&  io.storeAddr.accSel
 
-  read0En   := read0IsCompute || read0IsStore
-  read1En   := read1IsCompute || read1IsStore
+  read0En := read0IsCompute || read0IsStore
+  read1En := read1IsCompute || read1IsStore
 
   read0Addr := Mux(read0IsCompute, io.computeReadAddr.rowIdx, io.storeAddr.rowIdx)
   read1Addr := Mux(read1IsCompute, io.computeReadAddr.rowIdx, io.storeAddr.rowIdx)
