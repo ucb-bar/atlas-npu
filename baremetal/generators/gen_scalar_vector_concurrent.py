@@ -4,7 +4,7 @@ gen_scalar_vector_concurrent.py
 
 Generate test vectors for scalar_vector_concurrent.S.
 
-Models the interleaved-bank-safe schedule used by the assembly:
+Models the block-bank-safe schedule used by the assembly:
     Phase 1: VLOAD + scalar stores only
     Phase 2: VSTORE + scalar loads only
     Phase 3: VLOAD + scalar stores from Phase 2 readback

@@ -466,7 +466,7 @@ class SystolicArrayTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     }
   }
 
-  "SystolicArray (HardFloatFMA)" should "pass all checks" in {
+  "SystolicArray (CustomFMA)" should "pass all checks" in {
     runAllChecks(SystolicArrayParams())
   }
 }

@@ -95,9 +95,10 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val dma_busy      = Input(Vec(8, Bool()))
   val vpu_status    = Input(new VpuStatus)
 
-  // Split LSU busy: scalar path (load pending) and vector path (vload/vstore active).
+  // Split LSU busy: scalar load path plus independent VLOAD / VSTORE engines.
   val lsu_scalar_busy = Input(Bool())
-  val lsu_vec_busy    = Input(Bool())
+  val lsu_vload_busy  = Input(Bool())
+  val lsu_vstore_busy = Input(Bool())
 
   val mregReadBusy   = Input(UInt(64.W))
   val mregWriteBusy  = Input(UInt(64.W))

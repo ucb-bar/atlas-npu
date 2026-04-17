@@ -72,7 +72,7 @@ object PEArchitecture {
   */
 case class SystolicArrayParams(
   mxu:    MxuParams      = MxuParams(),
-  peArch: PEArchitecture = PEArchitecture.HardFloatFMA,
+  peArch: PEArchitecture = PEArchitecture.CustomFMA,
 ) {
   require(mxu.arrayRows > 1, s"Systolic array must have >1 rows, got ${mxu.arrayRows}")
   require(mxu.arrayCols > 1, s"Systolic array must have >1 cols, got ${mxu.arrayCols}")

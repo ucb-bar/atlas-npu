@@ -1,5 +1,5 @@
 // ============================================================================
-// Vmem.scala — 8-bank interleaved vector scratchpad with masked writes.
+// Vmem.scala — 8-bank block-banked vector scratchpad with masked writes.
 //
 // Storage: numBanks × SyncReadMem(linesPerBank, Vec(lineBytes, UInt(8.W)))
 //          Each bank: 1 read port, 1 write port (1R1W SRAM).
@@ -12,7 +12,7 @@
 //   TileLink:    Saturn / SBUS host access (byte-masked read/write).
 //
 // Software guarantees LSU scalar and LSU vector never target the same
-// bank's read port (or write port) simultaneously.  Hardware asserts.
+// block bank on the same VMEM port simultaneously.  Hardware asserts.
 // Combined LSU has unconditional priority over DMA and TileLink.
 //
 // Per-bank per-port priority:
@@ -77,11 +77,11 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
 
   assert(!(io.lsuScalarRead.valid && io.lsuVecRead.valid &&
            io.lsuScalarRead.bits.bankIdx === io.lsuVecRead.bits.bankIdx),
-    "ASSERT FAIL: LSU scalar read and LSU vector read target same VMEM bank")
+    "ASSERT FAIL: scalar load and VLOAD target same VMEM bank")
 
   assert(!(io.lsuScalarWrite.valid && io.lsuVecWrite.valid &&
            io.lsuScalarWrite.bits.bankIdx === io.lsuVecWrite.bits.bankIdx),
-    "ASSERT FAIL: LSU scalar write and LSU vector write target same VMEM bank")
+    "ASSERT FAIL: scalar store and VSTORE target same VMEM bank")
 
   // ==========================================================================
   // Client IDs for read-response routing
@@ -119,7 +119,7 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     val dmaWantsRead       = io.dmaRead.valid       && io.dmaRead.bits.bankIdx === b.U
     val tlWantsRead        = tl.a.valid && tlIsGet   && tlBankIdx === b.U
 
-    // LSU scalar and vec are mutually exclusive per bank (asserted above).
+    // Scalar loads and VLOAD are mutually exclusive per bank (asserted above).
     val lsuWantsRead = lsuScalarWantsRead || lsuVecWantsRead
 
     val readAddr   = Wire(UInt(p.bankLineAddrBits.W))

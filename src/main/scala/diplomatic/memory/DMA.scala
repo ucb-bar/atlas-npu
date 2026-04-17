@@ -1,8 +1,10 @@
 // ============================================================================
-// DMA.scala — Multi-channel DMA engine (banked VMEM architecture).
+// DMA.scala — Multi-channel DMA engine (block-banked VMEM architecture).
 //
 // VMEM ports use pre-decomposed bankIdx/bankAddr via VmemParams helpers.
-// Grant signals provide backpressure when LSU holds priority on a bank.
+// With 32 KiB VMEM banks, an aligned 1 KiB tensor transfer stays within one
+// bank for all 32 beats. Grant signals provide backpressure when LSU holds
+// priority on that bank.
 // ============================================================================
 
 package atlas.dma

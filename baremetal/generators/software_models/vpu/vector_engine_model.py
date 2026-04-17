@@ -318,10 +318,17 @@ class VectorEngineModel:
             )
 
         if op == "rsum":
-            acc = _FP32_PLUS_ZERO
-            for lane in lo + hi:
-                acc = fp.fp32_bits_add(acc, fp.fp32_bits_from_bf16(lane))
-            scalar = fp.bf16_upper_half_of_fp32_bits(acc)
+            # Mirror ReduSumRec in VectorEngine.scala / SumRedu.scala:
+            # widen all 32 BF16 lanes to FP32, reduce them with the
+            # staged binary tree over adjacent pairs, then round the
+            # final FP32 sum back to BF16 with a real RNE narrowing.
+            current = [fp.fp32_bits_from_bf16(lane) for lane in lo + hi]
+            while len(current) > 1:
+                current = [
+                    fp.fp32_bits_add(current[i], current[i + 1])
+                    for i in range(0, len(current), 2)
+                ]
+            scalar = fp.f32_to_bf16_bits_rne(fp.u32_to_float(current[0]))
             return [scalar] * n
         if op == "rmax":
             lo_max = self.row_max.compute_now(RowMaxReq(aVec=lo)).result[0]

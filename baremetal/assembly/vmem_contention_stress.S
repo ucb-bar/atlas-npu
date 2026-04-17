@@ -11,11 +11,11 @@
 #           new data DMA-loaded and VLOAD-ed during contention,
 #           then re-computed on MXU0 → end-to-end pipeline
 #
-# VMEM bank conflict analysis (8 banks, bankIdx = lineAddr % 8):
-#   Every 1024-byte tile (256 VMEM words = 32 lines) cycles through
-#   all 8 banks. So ANY two concurrent tile accesses on the SAME port
-#   type WILL collide on every bank at some point during their 32-cycle
-#   traversal, causing the lower-priority client to stall.
+# VMEM bank conflict analysis (8 banks, 32 KiB block banking):
+#   Each aligned 1024-byte tile occupies one tensor slot inside a single bank.
+#   In this test, the contending VMEM regions are intentionally packed into
+#   bank 0, so same-port overlaps hold on that bank for the full 32-cycle
+#   transfer and force the lower-priority client to stall.
 #
 # TRF bank map (all 16 used):
 #   m0    activations for MXU0 (reloaded: X0, then X2)
@@ -219,9 +219,9 @@
 #   VSTORE runs for 33 cycles.  During overlap, both try to write
 #   VMEM.  VSTORE wins (LSU priority), DMA stalls via vmemWriteGrant.
 #
-#   DMA writes to VMEM[0..255] and VMEM[256..511] (all 8 banks).
-#   VSTORE writes to VMEM[512..767] and VMEM[768..1023] (all 8 banks).
-#   Bank indices collide on every bank → maximum backpressure.
+#   DMA writes to VMEM[0..255] and VMEM[256..511] in bank 0.
+#   VSTORE writes to VMEM[512..767] and VMEM[768..1023] in bank 0.
+#   All writes target the same bank-0 write port → maximum backpressure.
 # ═══════════════════════════════════════════════════════════════
 
     # Enqueue DMA loads (start TileLink traffic immediately)
@@ -279,9 +279,9 @@
 #   the read port — VLOAD wins (LSU priority), DMA read sequencer
 #   stalls via vmemReadGrant denial.
 #
-#   DMA reads VMEM[1024..1279] (lines 128-159, all 8 banks).
-#   VLOAD reads VMEM[0..255] (lines 0-31, all 8 banks).
-#   Bank indices collide → DMA read sequencer stalls.
+#   DMA reads VMEM[1024..1279] in bank 0.
+#   VLOAD reads VMEM[0..255] in bank 0.
+#   Both target the same bank-0 read port → DMA read sequencer stalls.
 # ═══════════════════════════════════════════════════════════════
 
     # Issue DMA.STORE first — DMA starts reading VMEM immediately

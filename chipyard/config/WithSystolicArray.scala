@@ -8,7 +8,7 @@ import atlas.mxu.MxuParams
 class WithSystolicArray(
   rows: Int = 32,
   cols: Int = 32,
-  peArch: PEArchitecture = PEArchitecture.HardFloatFMA
+  peArch: PEArchitecture = PEArchitecture.CustomFMA
 ) extends Config((site, here, up) => {
   case SystolicArrayKey => Some(
     SystolicArrayParams(

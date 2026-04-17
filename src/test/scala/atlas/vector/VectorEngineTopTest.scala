@@ -152,6 +152,7 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   val BF16_1   = 0x3F80  // 1.0
   val BF16_2   = 0x4000  // 2.0
   val BF16_3   = 0x4040  // 3.0
+  val BF16_4   = 0x4080  // 4.0
   val BF16_48  = 0x4240  // 48.0
 
   // ── MREG bank assignments ──
@@ -305,6 +306,32 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe BF16_48)
       readBF16Results(dut, p, DEST1_BANK + 1, row = 0).foreach(_ shouldBe BF16_48)
+
+      def runAliasedBinaryOp(
+        label: String,
+        op: VPUOp.Type,
+        expectedLo: Int,
+        expectedHi: Int
+      ): Unit = {
+        println(s"  $label")
+        idle(dut)
+        loadUniformVector(dut, p, SRC1_BANK, row = 0, BF16_1)
+        loadUniformVector(dut, p, SRC1_BANK + 1, row = 0, BF16_2)
+
+        sendVpuCmd(dut, op = op, src1Bank = SRC1_BANK, src2Bank = SRC1_BANK, destBank = DEST1_BANK)
+
+        waitVpuIdle(dut)
+        dut.clock.step(2)
+
+        readBF16Results(dut, p, DEST1_BANK, row = 0).foreach(_ shouldBe expectedLo)
+        readBF16Results(dut, p, DEST1_BANK + 1, row = 0).foreach(_ shouldBe expectedHi)
+      }
+
+      runAliasedBinaryOp("Test 4: Vector add with aliased source pair", VPUOp.add, BF16_2, BF16_4)
+      runAliasedBinaryOp("Test 5: Vector sub with aliased source pair", VPUOp.sub, BF16_0, BF16_0)
+      runAliasedBinaryOp("Test 6: Vector mul with aliased source pair", VPUOp.mul, BF16_1, BF16_4)
+      runAliasedBinaryOp("Test 7: Vector min with aliased source pair", VPUOp.pairmin, BF16_1, BF16_2)
+      runAliasedBinaryOp("Test 8: Vector max with aliased source pair", VPUOp.pairmax, BF16_1, BF16_2)
     }
   }
 

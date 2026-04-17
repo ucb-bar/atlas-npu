@@ -91,6 +91,12 @@ class VectorEngineTop(
   core.io.inst.valid := io.cmd.valid
   core.io.inst.bits  := vecInput
 
+  val sameReadBank = core.io.read1.valid && core.io.read2.valid &&
+    (core.io.read1.bits.bank === core.io.read2.bits.bank)
+  val mirroredReadReq = sameReadBank &&
+    (core.io.read1.bits.row === core.io.read2.bits.row)
+  val mirroredReadReq_d = RegNext(mirroredReadReq, init = false.B)
+
   // ==========================================================================
   // Mreg read port 0 ↔ VectorEngine read1
   // ==========================================================================
@@ -106,12 +112,12 @@ class VectorEngineTop(
   // Mreg read port 1 ↔ VectorEngine read2
   // ==========================================================================
 
-  io.mregReadReq1.valid       := core.io.read2.valid
+  io.mregReadReq1.valid       := core.io.read2.valid && !mirroredReadReq
   io.mregReadReq1.bits.mregId := core.io.read2.bits.bank
   io.mregReadReq1.bits.row    := core.io.read2.bits.row
 
-  core.io.data2.valid     := io.mregReadResp1.valid
-  core.io.data2.bits.data := io.mregReadResp1.bits
+  core.io.data2.valid     := Mux(mirroredReadReq_d, io.mregReadResp0.valid, io.mregReadResp1.valid)
+  core.io.data2.bits.data := Mux(mirroredReadReq_d, io.mregReadResp0.bits, io.mregReadResp1.bits)
 
   // ==========================================================================
   // Mreg write port 0 ↔ VectorEngine write1
@@ -145,6 +151,11 @@ class VectorEngineTop(
   val cmdIssueBusy = core.io.issueBusy(io.cmd.bits.op)
   assert(!(io.cmd.valid && cmdIssueBusy),
     "VPU: command issued while selected VPU resources are busy (software-scheduling contract violated)")
+
+  assert(!(sameReadBank && !mirroredReadReq),
+    "VPU: concurrent reads to the same MREG bank must target the same row")
+  assert(!(mirroredReadReq_d && io.mregReadResp1.valid),
+    "VPU: mirrored VPU operand reads must not receive a second MREG response")
 
   val isTwoInput = (cmdOp === VPUOp.add || cmdOp === VPUOp.sub ||
                     cmdOp === VPUOp.mul || cmdOp === VPUOp.pairmax ||
