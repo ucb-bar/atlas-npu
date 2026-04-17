@@ -42,7 +42,7 @@ object PersistentVcsRcpLUTSimulator extends Simulator[VcsBackend] with PeekPokeA
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -57,6 +57,19 @@ object PersistentVcsRcpLUTSimulator extends Simulator[VcsBackend] with PeekPokeA
 }
 
 class RcpLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("RcpLUTTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("RcpLUTTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Print values of RcpLUT ranging from 0.5 to 1.0" in {
     val rawExp = 128
     val isOddExp = (((rawExp - 127) & 1) === 1)

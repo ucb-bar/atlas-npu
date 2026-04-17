@@ -43,7 +43,7 @@ object PersistentVcsRowMaxSimulator extends Simulator[VcsBackend] with PeekPokeA
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -58,6 +58,19 @@ object PersistentVcsRowMaxSimulator extends Simulator[VcsBackend] with PeekPokeA
 }
 
 class RowMaxTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("RowMaxTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("RowMaxTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Verify function of RowMax" in {
     PersistentVcsRowMaxSimulator.simulate(new RowMax(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped

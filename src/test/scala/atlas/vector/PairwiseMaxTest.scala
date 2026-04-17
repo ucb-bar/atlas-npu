@@ -43,7 +43,7 @@ object PersistentVcsPairwiseMaxSimulator extends Simulator[VcsBackend] with Peek
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -58,6 +58,19 @@ object PersistentVcsPairwiseMaxSimulator extends Simulator[VcsBackend] with Peek
 }
 
 class PairwiseMaxTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("PairwiseMaxTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("PairwiseMaxTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Verify function of PairwiseMax" in {
     PersistentVcsPairwiseMaxSimulator.simulate(new PairWiseMax(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped

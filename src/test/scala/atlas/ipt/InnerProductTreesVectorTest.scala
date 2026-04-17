@@ -33,18 +33,20 @@ import java.io.PrintWriter
 // VCS simulator — persistent workspace with coverage
 // ============================================================================
 
-object PersistentVcsVectorSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+object PersistentVcsInnerProductTreesVectorTestSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val test_name = "InnerProductTreesVectorTest"
 
   private val runDir: Path = {
     val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
     val baseDir = Paths.get(rootDirStr)
-    val p = baseDir.resolve("tmp").resolve("InnerProductTreesVectorTest")
+    val p = baseDir.resolve("tmp").resolve(test_name)
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
   override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String           = "InnerProductTreesVectorTest"
+  override val tag: String           = test_name
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
@@ -55,7 +57,7 @@ object PersistentVcsVectorSimulator extends Simulator[VcsBackend] with PeekPokeA
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -63,7 +65,7 @@ object PersistentVcsVectorSimulator extends Simulator[VcsBackend] with PeekPokeA
       simulationSettings = Backend.SimulationSettings(
         coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName      = Some(Backend.CoverageName("InnerProductTreesVectorTest_coverage"))
+        coverageName      = Some(Backend.CoverageName(s"${test_name}_coverage"))
       )
     )
   }
@@ -284,7 +286,7 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
     )
 
     try {
-      PersistentVcsVectorSimulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
+      PersistentVcsInnerProductTreesVectorTestSimulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
         val dut = module.wrapped
 
         // Reset sequence
