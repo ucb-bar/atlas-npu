@@ -43,7 +43,7 @@ object PersistentVcsRowMinSimulator extends Simulator[VcsBackend] with PeekPokeA
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -58,6 +58,19 @@ object PersistentVcsRowMinSimulator extends Simulator[VcsBackend] with PeekPokeA
 }
 
 class RowMinTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("RowMinTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("RowMinTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Verify function of RowMin" in {
     PersistentVcsRowMinSimulator.simulate(new RowMin(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped

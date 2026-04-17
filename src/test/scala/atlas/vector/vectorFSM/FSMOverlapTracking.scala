@@ -6,6 +6,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import atlas.common.VpuParams
 
+import org.scalatest.Outcome 
+
 import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
 import svsim.vcs.Backend
@@ -50,6 +52,19 @@ object PersistentVcsFSMOverlapTrackingSimulator extends Simulator[VcsBackend] wi
 }
 
 class FSMOverlapTracking extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("FSMOverlapTracking=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("FSMOverlapTracking=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   private val p = VpuParams()
 
   private def driveDefaults(dut: VectorFSM): Unit = {

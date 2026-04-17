@@ -20,6 +20,7 @@ import java.nio.file.{Files, Path, Paths}
 // ============================================================================
 
 object PersistentVcsSqrtSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+  
 
   private val test_name = "SqrtTest"
 
@@ -58,6 +59,19 @@ object PersistentVcsSqrtSimulator extends Simulator[VcsBackend] with PeekPokeAPI
 }
 
 class SqrtTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("SqrtTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("SqrtTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Print values of SqrtLUT ranging from 0.5 to 1.0" in {
     PersistentVcsSqrtSimulator.simulate(new Sqrt(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped

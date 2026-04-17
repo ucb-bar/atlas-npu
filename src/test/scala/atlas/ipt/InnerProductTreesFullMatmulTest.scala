@@ -26,22 +26,23 @@ import scala.util.Try
 import java.io.PrintWriter
 
 // ============================================================================
-// VCS simulator for full-matmul tests — persistent workspace under
-// test_run_dir/InnerProductTreesFullMatmulTest with full code-coverage collection.
+// VCS simulator — persistent workspace with coverage
 // ============================================================================
 
-object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+object PersistentVcsInnerProductTreesFullMatmulTestSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+
+  private val test_name = "InnerProductTreesFullMatmulTest"
 
   private val runDir: Path = {
     val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
     val baseDir = Paths.get(rootDirStr)
-    val p = baseDir.resolve("tmp").resolve("InnerProductTreesFullMatmulTest")
+    val p = baseDir.resolve("tmp").resolve(test_name)
     Files.createDirectories(p)
     p.toAbsolutePath
   }
 
-  override val backend: VcsBackend = VcsBackend.initializeFromProcessEnvironment()
-  override val tag: String         = "InnerProductTreesFullMatmulTest"
+  override val backend: VcsBackend   = VcsBackend.initializeFromProcessEnvironment()
+  override val tag: String           = test_name
   override val workspacePath: String = runDir.toString
 
   override val commonCompilationSettings: CommonCompilationSettings =
@@ -52,7 +53,7 @@ object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekP
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -60,7 +61,7 @@ object PersistentVcsFullMatmulSimulator extends Simulator[VcsBackend] with PeekP
       simulationSettings = Backend.SimulationSettings(
         coverageSettings  = cov,
         coverageDirectory = Some(Backend.CoverageDirectory("coverage.vdb")),
-        coverageName      = Some(Backend.CoverageName("InnerProductTreesFullMatmulTest_coverage"))
+        coverageName      = Some(Backend.CoverageName(s"${test_name}_coverage"))
       )
     )
   }
@@ -316,7 +317,7 @@ class InnerProductTreesFullMatmulTest extends AnyFlatSpec with Matchers with Pee
     )
 
     try {
-      PersistentVcsFullMatmulSimulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
+      PersistentVcsInnerProductTreesFullMatmulTestSimulator.simulate(new InnerProductTreesUnitHarness(p, mregP)) { module =>
         val dut = module.wrapped
 
         // Reset sequence

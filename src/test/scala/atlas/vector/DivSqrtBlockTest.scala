@@ -23,6 +23,9 @@ import svsim.vcs.Backend
 import atlas.common._
 import java.nio.file.{Files, Path, Paths}
 
+
+
+
 // ============================================================================
 // VCS simulator factory — fresh persistent workspace per test_name (each
 // `it should` block gets its own workdir so multi-test files don't trip on
@@ -50,7 +53,7 @@ class DivSqrtBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         )
       override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
         val cov = Backend.CoverageSettings(
-          line = true, cond = true, branch = true, fsm = true, tgl = true
+          line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
         )
         Backend.CompilationSettings(
           coverageSettings  = cov,

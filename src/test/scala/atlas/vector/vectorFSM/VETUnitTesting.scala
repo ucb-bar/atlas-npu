@@ -12,6 +12,7 @@ import scala.math._
 import scala.util.Random
 import VectorTestUtils._
 import scala.collection.immutable.LazyList.cons
+import org.scalatest.Outcome 
 
 import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
@@ -46,7 +47,7 @@ object PersistentVcsVETUnitTestingSimulator extends Simulator[VcsBackend] with P
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -61,6 +62,19 @@ object PersistentVcsVETUnitTestingSimulator extends Simulator[VcsBackend] with P
 }
 
 class VETUnitTesting extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+    //----------- CI/CD INCLUDE --------------
+    override def withFixture(test: NoArgTest): Outcome = {
+        val outcome = super.withFixture(test)
+        if (outcome.isFailed) {
+        println("VETUnitTesting=FAILED")
+        } else if (outcome.isSucceeded) {
+        println("VETUnitTesting=PASSED")
+        }
+        outcome
+    }
+    //----------- CI/CD INCLUDE --------------
+
     val p = VpuParams()
 
     behavior of s"VET Testing"

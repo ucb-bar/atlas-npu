@@ -42,7 +42,7 @@ object PersistentVcsSqrtLUTSimulator extends Simulator[VcsBackend] with PeekPoke
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -57,6 +57,19 @@ object PersistentVcsSqrtLUTSimulator extends Simulator[VcsBackend] with PeekPoke
 }
 
 class SqrtLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPokeAPI {
+
+  //----------- CI/CD INCLUDE --------------
+  override def withFixture(test: NoArgTest): Outcome = {
+    val outcome = super.withFixture(test)
+    if (outcome.isFailed) {
+      println("SqrtLUTTest=FAILED")
+    } else if (outcome.isSucceeded) {
+      println("SqrtLUTTest=PASSED")
+    }
+    outcome
+  }
+  //----------- CI/CD INCLUDE --------------
+
   it should "Print values of SqrtLUT ranging from 1.0 to 2.0" in {
     val rawExp = 140
     val isOddExp = (((rawExp - 127) & 1) === 1)

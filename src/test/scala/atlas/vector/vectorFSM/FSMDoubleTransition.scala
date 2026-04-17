@@ -9,6 +9,8 @@ import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
 
+import org.scalatest.Outcome 
+
 import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
 import svsim.vcs.Backend
@@ -42,7 +44,7 @@ object PersistentVcsFSMDoubleTransitionSimulator extends Simulator[VcsBackend] w
 
   override val backendSpecificCompilationSettings: Backend.CompilationSettings = {
     val cov = Backend.CoverageSettings(
-      line = true, cond = true, branch = true, fsm = true, tgl = true
+      line = true, cond = true, branch = true, fsm = true, tgl = true, assert = true
     )
     Backend.CompilationSettings(
       coverageSettings  = cov,
@@ -57,6 +59,19 @@ object PersistentVcsFSMDoubleTransitionSimulator extends Simulator[VcsBackend] w
 }
 
 class FSMDoubleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
+
+    //----------- CI/CD INCLUDE --------------
+    override def withFixture(test: NoArgTest): Outcome = {
+        val outcome = super.withFixture(test)
+        if (outcome.isFailed) {
+        println("FSMDoubleTransition=FAILED")
+        } else if (outcome.isSucceeded) {
+        println("FSMDoubleTransition=PASSED")
+        }
+        outcome
+    }
+    //----------- CI/CD INCLUDE --------------
+
     val p = VpuParams()
 
     def vpuOpName(value: BigInt): String = {
