@@ -81,16 +81,17 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     "AccumulationBuffers: compute write and load target the same buffer")
 
   // ==========================================================================
-  // Helper: select buffer by accSel for reads
+  // Safety: compute-read and store-read must not target the same buffer
+  // so each buffer only needs a single read port
   // ==========================================================================
 
-  /** Synchronous read from whichever buffer `sel` indicates. */
-  private def readBuffer(sel: Bool, row: UInt, en: Bool): Vec[UInt] = {
-    val readSel = RegEnable(sel, en)
-    val data0   = buffer0.read(row, en && !sel)
-    val data1   = buffer1.read(row, en && sel)
-    Mux(readSel, data1, data0)
-  }
+  assert(!(io.computeReadEn && io.storeReadEn &&
+           io.computeReadAddr.accSel === io.storeAddr.accSel),
+    "AccumulationBuffers: compute read and store read target the same buffer")
+
+  // ==========================================================================
+  // Helper: select write target by accSel
+  // ==========================================================================
 
   /** Write to whichever buffer `sel` indicates. */
   private def writeBuffer(sel: Bool, row: UInt, data: Vec[UInt]): Unit = {
@@ -114,16 +115,6 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   }
 
   // ==========================================================================
-  // Compute pipeline read (partial-sum fetch)
-  // ==========================================================================
-
-  io.computeReadData := readBuffer(
-    io.computeReadAddr.accSel,
-    io.computeReadAddr.rowIdx,
-    io.computeReadEn
-  )
-
-  // ==========================================================================
   // Load path (sequencer push — BF16 data into buffer)
   // ==========================================================================
 
@@ -136,12 +127,63 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   }
 
   // ==========================================================================
-  // Store path (sequencer pop — raw BF16 data out of buffer)
+  // Unified read selection — one read request per buffer per cycle
+  // Priority within a buffer: compute read over store read
+  // (same-buffer overlap is already forbidden by assertion)
   // ==========================================================================
 
-  io.storeData := readBuffer(
-    io.storeAddr.accSel,
-    io.storeAddr.rowIdx,
-    io.storeReadEn
-  )
+  val read0En   = Wire(Bool())
+  val read0Addr = Wire(UInt(log2Ceil(p.accumBufferRows).W))
+  val read1En   = Wire(Bool())
+  val read1Addr = Wire(UInt(log2Ceil(p.accumBufferRows).W))
+
+  val read0IsCompute = Wire(Bool())
+  val read0IsStore   = Wire(Bool())
+  val read1IsCompute = Wire(Bool())
+  val read1IsStore   = Wire(Bool())
+
+  read0IsCompute := io.computeReadEn && !io.computeReadAddr.accSel
+  read0IsStore   := io.storeReadEn   && !io.storeAddr.accSel
+  read1IsCompute := io.computeReadEn &&  io.computeReadAddr.accSel
+  read1IsStore   := io.storeReadEn   &&  io.storeAddr.accSel
+
+  read0En   := read0IsCompute || read0IsStore
+  read1En   := read1IsCompute || read1IsStore
+
+  read0Addr := Mux(read0IsCompute, io.computeReadAddr.rowIdx, io.storeAddr.rowIdx)
+  read1Addr := Mux(read1IsCompute, io.computeReadAddr.rowIdx, io.storeAddr.rowIdx)
+
+  // Latch which kind of read each buffer served in the previous cycle.
+  // Use RegNext so the tag clears back to false when that buffer is idle;
+  // RegEnable would leave a stale "was store/compute" tag behind and could
+  // mis-route a later response from the other buffer.
+  val read0WasCompute = RegNext(read0IsCompute, false.B)
+  val read0WasStore   = RegNext(read0IsStore,   false.B)
+  val read1WasCompute = RegNext(read1IsCompute, false.B)
+  val read1WasStore   = RegNext(read1IsStore,   false.B)
+
+  val data0 = buffer0.read(read0Addr, read0En)
+  val data1 = buffer1.read(read1Addr, read1En)
+
+  // ==========================================================================
+  // Read response routing
+  // ==========================================================================
+
+  val zeroRow = Wire(Vec(numCols, UInt(colWidth.W)))
+  zeroRow := VecInit(Seq.fill(numCols)(0.U(colWidth.W)))
+
+  io.computeReadData := zeroRow
+  io.storeData       := zeroRow
+
+  when(read0WasCompute) {
+    io.computeReadData := data0
+  }.elsewhen(read1WasCompute) {
+    io.computeReadData := data1
+  }
+
+  when(read0WasStore) {
+    io.storeData := data0
+  }.elsewhen(read1WasStore) {
+    io.storeData := data1
+  }
 }

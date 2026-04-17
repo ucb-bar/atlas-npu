@@ -23,8 +23,8 @@ Software-scheduled hazard model:
 Scalar stores are single-cycle masked writes (no RMW).
 Scalar loads have fixed 2-cycle latency.
 VLOAD/VSTORE have fixed mregRows+1 cycle latency.
-Scalar and vector LSU paths operate concurrently; software must
-ensure no VMEM bank conflicts (asserted in Vmem).
+Scalar, VLOAD, and VSTORE LSU paths operate concurrently; software must
+ensure no same-port VMEM block-bank conflicts (asserted in Vmem).
 */
 
 package atlas.scalar
@@ -284,9 +284,13 @@ class ScalarCore(spP: VmemParams) extends Module {
   assert(!(s1_fire && vpuWritesPair(dec.vpu_cmd) && dec.vd(0)),
     "ASSERT FAIL: VPU pair-write destination bank must be even")
 
-  // Vector path: VLOAD/VSTORE must not be issued while another is active.
-  assert(!(s1_fire && dec.is_lsu && io.lsu_vec_busy),
-    "ASSERT FAIL: LSU vector command issued while vector path is busy")
+  val issueVload  = s1_fire && dec.is_lsu && dec.lsu_cmd === LSU_VLOAD
+  val issueVstore = s1_fire && dec.is_lsu && dec.lsu_cmd === LSU_VSTORE
+
+  assert(!(issueVload && io.lsu_vload_busy),
+    "ASSERT FAIL: VLOAD issued while VLOAD path is busy")
+  assert(!(issueVstore && io.lsu_vstore_busy),
+    "ASSERT FAIL: VSTORE issued while VSTORE path is busy")
 
   // Scalar load: must not be issued while a prior load is pending.
   assert(!(s1_fire && dec.is_mem_load && memLoadPending),
@@ -295,7 +299,7 @@ class ScalarCore(spP: VmemParams) extends Module {
     "ASSERT FAIL: scalar load issued while LSU scalar path is busy")
 
   // Scalar stores are single-cycle masked writes — no busy check needed.
-  // VMEM bank conflicts between scalar store and active VLOAD/VSTORE
+  // VMEM bank conflicts between scalar store and active VSTORE
   // are asserted in Vmem.
 
   // ==============================================================

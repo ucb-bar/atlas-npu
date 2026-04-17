@@ -83,10 +83,15 @@ def bf16_tile_to_bank_rows(tile: torch.Tensor) -> tuple[list[list[int]], list[li
     return low, high
 
 
-def packed_rows_to_fp8_matrix(packed_rows: list[list[int]]) -> torch.Tensor:
-    """Reassemble VFP8PACK output (32 rows × 16 UInt16 slots) into a
-    (32, 32) FP8 tensor. Slot j holds byte 2j in bits[7:0] and byte
-    2j+1 in bits[15:8] (matches FP8Pack.scala:122-125)."""
+def packed_rows_to_fp8_bytes(packed_rows: list[list[int]]) -> torch.Tensor:
+    """Reassemble VFP8PACK output (32 rows × 16 UInt16 slots) into raw
+    (32, 32) FP8 E4M3 bytes.
+
+    Feed these bytes directly to SARTLLinearFunction so the golden
+    uses the same already-quantized activations that hardware feeds
+    into the second matmul, instead of going through the float32
+    quantization shim again.
+    """
     if len(packed_rows) != TILE:
         raise ValueError(f"expected {TILE} packed rows, got {len(packed_rows)}")
     bytes_u8 = np.zeros((TILE, TILE), dtype=np.uint8)
@@ -99,8 +104,7 @@ def packed_rows_to_fp8_matrix(packed_rows: list[list[int]]) -> torch.Tensor:
             slot = int(row[j]) & 0xFFFF
             bytes_u8[i, 2 * j]     = slot & 0xFF
             bytes_u8[i, 2 * j + 1] = (slot >> 8) & 0xFF
-    int8_view = bytes_u8.view(np.int8).copy()
-    return torch.from_numpy(int8_view).view(torch.float8_e4m3fn)
+    return torch.from_numpy(bytes_u8.copy())
 
 
 def main():
@@ -119,12 +123,13 @@ def main():
     q_f32 = Q.to(torch.float32).numpy()
     k_f32 = K.to(torch.float32).numpy()
     v_f32 = V.to(torch.float32).numpy()
+    q_u8 = Q.view(torch.uint8)
+    k_u8_t = K.view(torch.uint8).T.contiguous()
+    v_u8_t = V.view(torch.uint8).T.contiguous()
 
     # scores = Q @ K.  Atlas MXU does A @ W^T, so push K^T as weight:
     # sa_bf16(Q, K.T) computes Q @ K.
-    q_t = torch.from_numpy(q_f32)
-    k_t_t = torch.from_numpy(k_f32.T.copy())
-    scores_bf16 = sa_bf16(q_t, k_t_t, scale_exp=0).to(torch.bfloat16)
+    scores_bf16 = sa_bf16(q_u8, k_u8_t, scale_exp=0).to(torch.bfloat16)
 
     scores_low, scores_high = bf16_tile_to_bank_rows(scores_bf16)
     scale_low, scale_high = bf16_tile_to_bank_rows(scale_tile)
@@ -146,12 +151,10 @@ def main():
         probs_rows[ROWS_PER_REGISTER:],
         SCALE_E8M0_UNIT,
     )
-    packed_fp8 = packed_rows_to_fp8_matrix(packed_rows)
-    packed_f32 = packed_fp8.to(torch.float32)
+    packed_u8 = packed_rows_to_fp8_bytes(packed_rows)
 
     # out = packed @ V.  Again push V^T so MXU computes packed @ V.
-    v_t_t = torch.from_numpy(v_f32.T.copy())
-    out_bf16 = sa_bf16(packed_f32, v_t_t, scale_exp=0).to(torch.bfloat16)
+    out_bf16 = sa_bf16(packed_u8, v_u8_t, scale_exp=0).to(torch.bfloat16)
 
     out_low, out_high = bf16_tile_to_bank_rows(out_bf16)
 

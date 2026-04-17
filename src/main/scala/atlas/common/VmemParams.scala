@@ -1,9 +1,12 @@
 // ============================================================================
 // VmemParams.scala — VMEM parameters and port bundles (architecture).
 //
-// 8-bank interleaved VMEM.  Banking on low bits of line address:
-//   lineAddr[bankIdBits-1 : 0]             → bank index
-//   lineAddr[lineAddrBits-1 : bankIdBits]  → line within bank
+// 8-bank block-banked VMEM. Each bank owns one contiguous 32 KiB address
+// range, so an aligned 1 KiB tensor slot lives entirely inside a single bank.
+//
+// Banking on high bits of line address:
+//   lineAddr[lineAddrBits-1 : bankLineAddrBits]  → bank index
+//   lineAddr[bankLineAddrBits-1 : 0]             → line within bank
 // ============================================================================
 
 package atlas.common
@@ -30,6 +33,7 @@ case class VmemParams(
 
   // ── Banking ──
   val bankIdBits: Int       = log2Ceil(numBanks)              // 3
+  val bankBytes: Int        = capacityBytes / numBanks        // 32 KiB
   val linesPerBank: Int     = numLines / numBanks             // 1024
   val bankLineAddrBits: Int = log2Ceil(linesPerBank)          // 10
   val lineOffBits: Int      = log2Ceil(lineBytes)             // 5
@@ -41,9 +45,9 @@ case class VmemParams(
   require(numLines % numBanks == 0)
 
   /** Extract bank index from a line address. */
-  def getBankIdx(lineAddr: UInt): UInt = lineAddr(bankIdBits - 1, 0)
+  def getBankIdx(lineAddr: UInt): UInt = lineAddr(lineAddrBits - 1, bankLineAddrBits)
   /** Extract bank-local line address from a line address. */
-  def getBankAddr(lineAddr: UInt): UInt = lineAddr(lineAddrBits - 1, bankIdBits)
+  def getBankAddr(lineAddr: UInt): UInt = lineAddr(bankLineAddrBits - 1, 0)
 }
 
 // ============================================================================

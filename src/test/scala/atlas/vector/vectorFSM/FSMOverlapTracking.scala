@@ -192,4 +192,32 @@ class FSMOverlapTracking extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut.io.out.activeWrites(3).valid.expect(false.B)
     }
   }
+
+  it should "collapse duplicate active reads for aliased two-input ops" in {
+    PersistentVcsFSMOverlapTrackingSimulator.simulate(new VectorFSM(p)) { module =>
+      val dut = module.wrapped
+      dut.reset.poke(true.B)
+      dut.clock.step(1)
+      dut.reset.poke(false.B)
+      dut.clock.step(1)
+      driveDefaults(dut)
+
+      dut.io.in.instFire.poke(true.B)
+      dut.io.in.instType.poke(VPUOp.add)
+      dut.io.in.instReadBank1.poke(16.U)
+      dut.io.in.instReadBank2.poke(16.U)
+      dut.io.in.instWriteBank.poke(24.U)
+      dut.clock.step(1)
+
+      driveDefaults(dut)
+      dut.io.out.VEReady.expect(false.B)
+
+      dut.io.out.activeReads(0).valid.expect(true.B)
+      dut.io.out.activeReads(0).bits.expect(16.U)
+      dut.io.out.activeReads(1).valid.expect(true.B)
+      dut.io.out.activeReads(1).bits.expect(17.U)
+      dut.io.out.activeReads(2).valid.expect(false.B)
+      dut.io.out.activeReads(3).valid.expect(false.B)
+    }
+  }
 }

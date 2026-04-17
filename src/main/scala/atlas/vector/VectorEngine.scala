@@ -35,6 +35,11 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
       val busy   = Output(Bool())
   })
 
+  private def opUsesDoubleRead(op: VPUOp.Type): Bool =
+    (op === VPUOp.add) || (op === VPUOp.sub) || (op === VPUOp.mul) ||
+    (op === VPUOp.pairmax) || (op === VPUOp.pairmin) ||
+    (op === VPUOp.rsum) || (op === VPUOp.rmax) || (op === VPUOp.rmin)
+
   // Internal Interface Signals
   val dataInFire1  = WireDefault(false.B)
   val dataInFire2  = WireDefault(false.B)
@@ -491,6 +496,9 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   // sequencer is ready.
   assert(!io.inst.valid || fsm.io.out.VEReady,
     "VPU: command issued while sequencer is busy (software-scheduling contract violated)")
+  assert(!(fsm.io.out.state === 2.U && opUsesDoubleRead(fsm.io.out.inst1) &&
+           (io.data1.valid =/= io.data2.valid)),
+    "VPU: dual-read instructions must receive both source rows in the same cycle")
 
   // Outputs
   io.read1.valid      := fsm.io.out.readValid1

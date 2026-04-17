@@ -448,18 +448,24 @@ class VectorFSM(val p: VpuParams) extends Module {
     val slot1WriteActive = slot1Active && !writeDone1
     val slot2ReadActiveSingle = (state === single) && slot2Active && !readDone2 && !opIsVli(inst2)
     val slot2ReadActiveDouble = (state === double) && slot2Active && !readDone2
+    val mirroredDoubleRead = slot2ReadActiveDouble && opReadsSecondaryPair(inst1) && (readBank1 === readBank2)
     val slot2WriteActive =
         ((state === single) && slot2Active && !writeDone2) ||
         ((state === double) && doubleUsesDualWritePorts && slot2Active && !writeDone2)
+
+    assert(!(mirroredDoubleRead && (readCounter1 =/= readCounter2)),
+        "VPU FSM: aliased two-input operand reads must keep both counters aligned")
+    assert(!(mirroredDoubleRead && (readDone1 =/= readDone2)),
+        "VPU FSM: aliased two-input operand reads must complete together")
 
     activeReads(0).valid := slot1ReadActive
     activeReads(0).bits  := readBank1
     activeReads(1).valid := slot1ReadActive && opReadsPrimaryPair(inst1) && !((state === double) && doubleIsRowReduce)
     activeReads(1).bits  := readBank1 + 1.U
-    activeReads(2).valid := slot2ReadActiveSingle || slot2ReadActiveDouble
+    activeReads(2).valid := slot2ReadActiveSingle || (slot2ReadActiveDouble && !mirroredDoubleRead)
     activeReads(2).bits  := readBank2
     activeReads(3).valid := Mux(state === double,
-        slot2ReadActiveDouble && opReadsSecondaryPair(inst1),
+        slot2ReadActiveDouble && opReadsSecondaryPair(inst1) && !mirroredDoubleRead,
         slot2ReadActiveSingle && opReadsPrimaryPair(inst2)
     )
     activeReads(3).bits := readBank2 + 1.U

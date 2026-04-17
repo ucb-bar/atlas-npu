@@ -28,6 +28,7 @@ from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     _E4M3_FLOAT_LUT,
 )
+from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
 # ── Build pool of valid E4M3 (byte, float) pairs from the model's own LUT ──
@@ -122,33 +123,8 @@ def generate_vectors(path, model, args):
 
 # ── convert exp lines to E4M3 with scaling ─────────────────────────────────
 
-def decode_e4m3(b: int) -> float:
-    b &= 0xFF
-    sign = -1.0 if (b & 0x80) else 1.0
-    exp = (b >> 3) & 0xF
-    mant = b & 0x7
-    if exp == 0:
-        return (sign * (mant / 8.0) * (2.0 ** -6)) if mant else (-0.0 if sign < 0 else 0.0)
-    if exp == 0xF and mant == 0x7:
-        return float("nan")
-    return sign * (1.0 + mant / 8.0) * (2.0 ** (exp - 7))
-
-FINITE = [(b, decode_e4m3(b)) for b in range(256) if not math.isnan(decode_e4m3(b))]
-
-def encode_e4m3_nearest(x: float) -> int:
-    if math.isnan(x):
-        return 0x7F
-    if x == 0.0:
-        return 0x80 if math.copysign(1.0, x) < 0 else 0x00
-    best_b, best_err = 0, float("inf")
-    for b, v in FINITE:
-        err = abs(v - x)
-        if err < best_err:
-            best_err = err
-            best_b = b
-        elif err == best_err and (b & 1) == 0 and (best_b & 1) != 0:
-            best_b = b
-    return best_b
+def decode_e4m3_hw(b: int) -> float:
+    return float(_E4M3_FLOAT_LUT[b & 0xFF].item())
 
 def choose_dequant_scale(vals):
     mx = max(abs(v) for v in vals) if vals else 0.0
@@ -171,10 +147,12 @@ def convert_file(inp: str, outp: str):
         ds = choose_dequant_scale(vals)
         qs = 1.0 / ds
         se = int(round(math.log2(qs)))
-        qb = [encode_e4m3_nearest(v * qs) for v in vals]
+        # Match the hardware pop path exactly: BF16 -> scaled E4M3 with
+        # underflow flushed to zero and no E4M3 subnormal outputs.
+        qb = [bf16_scale_to_e4m3(float_to_bf16_bits(v), se) for v in vals]
         out.append(f"scale_exp {(se & 0xFF):02x}    # {se:+d}  (quant_scale={qs:.9g}, dequant_scale={ds:.9g})\n")
         out.append("exp_e4m3 " + " ".join(f"{b:02x}" for b in qb) + "\n")
-        recon = [decode_e4m3(b) * ds for b in qb]
+        recon = [decode_e4m3_hw(b) * ds for b in qb]
         out.append("recon_bf16 " + " ".join(f"{float_to_bf16_bits(x):04x}" for x in recon) + "\n")
     with open(outp, "w") as f:
         f.writelines(out)

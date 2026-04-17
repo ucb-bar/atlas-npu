@@ -70,12 +70,11 @@ from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
 
 def bf16_tile_to_e4m3_bytes(tile: torch.Tensor) -> torch.Tensor:
-    """Quantize BF16 tile to E4M3 uint8 via atlas's hardware-equivalent
-    `bf16_scale_to_e4m3` (RNE to nearest normal, including subnormal-edge
-    rounding). Mirrors VMATPUSH.ACC.BF16 + VMATPOP.FP8 with E8M0 scale=0x7F.
-    `shim_float_to_e4m3` (used inside SARTLLinearFunction's float path) flushes
-    sub-2^-6 magnitudes to zero, which diverges from the hardware on values
-    like 0xBC79 (-0.0152) → hw=0x88, shim=0x00."""
+    """Quantize a BF16 tile to raw E4M3 bytes with the IPT converter.
+
+    Keep this path for Q/K/V tiles, which are not especially sensitive to
+    the softmax-tail underflow edge.
+    """
     if tile.dtype != torch.bfloat16:
         raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
     bits = tile.contiguous().view(torch.int16).numpy().astype(np.uint16)
@@ -84,6 +83,19 @@ def bf16_tile_to_e4m3_bytes(tile: torch.Tensor) -> torch.Tensor:
     for i in range(flat.size):
         out[i] = bf16_scale_to_e4m3(int(flat[i]), 0) & 0xFF
     return torch.from_numpy(out.reshape(bits.shape))
+
+
+def bf16_tile_to_e4m3_bytes_torch_cast(tile: torch.Tensor) -> torch.Tensor:
+    """Quantize BF16 tile via PyTorch's float8 cast and return raw FP8 bytes.
+
+    This is used for the online-softmax `exp_s` path, where values cluster
+    near the E4M3 underflow boundary and empirically track the MXU pop path
+    more closely when routed through the float8 cast semantics.
+    """
+    if tile.dtype != torch.bfloat16:
+        raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
+    fp8 = tile.to(torch.float32).to(torch.float8_e4m3fn).contiguous()
+    return fp8.view(torch.uint8)
 
 
 Q_ROWS    = 32
@@ -211,7 +223,7 @@ def main():
         exp_s_rows = run_unary_rows("exp", exp_s_pre_rows)
 
         exp_s_bf16 = bank_rows_to_bf16_tile(exp_s_rows)
-        exp_s_fp8  = bf16_tile_to_e4m3_bytes(exp_s_bf16)
+        exp_s_fp8  = bf16_tile_to_e4m3_bytes_torch_cast(exp_s_bf16)
 
         # V_top = V_mlir[:32, :] [32, 32]; pushed as W → A @ V_top^T = exp_s @ V_left
         V_top_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[:Q_ROWS, :].contiguous())

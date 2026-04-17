@@ -147,7 +147,8 @@ class AtlasCore(
   lsu.io.cmd              := scalar.io.lsuCmd
 
   scalar.io.lsu_scalar_busy := lsu.io.scalarBusy
-  scalar.io.lsu_vec_busy    := lsu.io.vecBusy
+  scalar.io.lsu_vload_busy  := lsu.io.vloadBusy
+  scalar.io.lsu_vstore_busy := lsu.io.vstoreBusy
 
   // ==========================================================================
   // Utility
