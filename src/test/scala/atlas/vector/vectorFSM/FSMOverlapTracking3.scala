@@ -13,9 +13,9 @@ import svsim.vcs.{Backend => VcsBackend}
 import svsim.vcs.Backend
 import java.nio.file.{Files, Path, Paths}
 
-object PersistentVcsFSMOverlapTrackingSimulator extends Simulator[VcsBackend] with PeekPokeAPI {
+object PersistentVcsFSMOverlapTracking3Simulator extends Simulator[VcsBackend] with PeekPokeAPI {
 
-  private val testName = "FSMOverlapTracking"
+  private val testName = "FSMOverlapTracking3"
 
   private val runDir: Path = {
     val rootDirStr = sys.env.getOrElse("MILL_WORKSPACE_ROOT", "/tmp")
@@ -51,15 +51,15 @@ object PersistentVcsFSMOverlapTrackingSimulator extends Simulator[VcsBackend] wi
   }
 }
 
-class FSMOverlapTracking extends AnyFlatSpec with Matchers with PeekPokeAPI {
+class FSMOverlapTracking3 extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   //----------- CI/CD INCLUDE --------------
   override def withFixture(test: NoArgTest): Outcome = {
     val outcome = super.withFixture(test)
     if (outcome.isFailed) {
-      println("FSMOverlapTracking=FAILED")
+      println("FSMOverlapTracking3=FAILED")
     } else if (outcome.isSucceeded) {
-      println("FSMOverlapTracking=PASSED")
+      println("FSMOverlapTracking3=PASSED")
     }
     outcome
   }
@@ -85,33 +85,9 @@ class FSMOverlapTracking extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   behavior of "VectorFSM overlap + tracking"
 
-  it should "block overlap for commands that share a functional unit" in {
-    PersistentVcsFSMOverlapTrackingSimulator.simulate(new VectorFSM(p)) { module =>
-      val dut = module.wrapped
-      dut.reset.poke(true.B)
-      dut.clock.step(1)
-      dut.reset.poke(false.B)
-      dut.clock.step(1)
-      driveDefaults(dut)
-
-      dut.io.in.instFire.poke(true.B)
-      dut.io.in.instType.poke(VPUOp.add)
-      dut.io.in.instReadBank1.poke(0.U)
-      dut.io.in.instReadBank2.poke(4.U)
-      dut.io.in.instWriteBank.poke(8.U)
-      dut.clock.step(1)
-
-      driveDefaults(dut)
-      dut.io.in.instType.poke(VPUOp.rsum)
-      dut.io.out.VEReady.expect(false.B)
-
-      dut.io.in.instType.poke(VPUOp.tanh)
-      dut.io.out.VEReady.expect(true.B)
-    }
-  }
 
   it should "track both commands' live banks when independent ops overlap" in {
-    PersistentVcsFSMOverlapTrackingSimulator.simulate(new VectorFSM(p)) { module =>
+    PersistentVcsFSMOverlapTracking3Simulator.simulate(new VectorFSM(p)) { module =>
       val dut = module.wrapped
       dut.reset.poke(true.B)
       dut.clock.step(1)
@@ -155,69 +131,6 @@ class FSMOverlapTracking extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut.io.out.activeWrites(2).bits.expect(6.U)
       dut.io.out.activeWrites(3).valid.expect(true.B)
       dut.io.out.activeWrites(3).bits.expect(7.U)
-    }
-  }
-
-  it should "use both physical banks in lockstep for BF16 row reductions" in {
-    PersistentVcsFSMOverlapTrackingSimulator.simulate(new VectorFSM(p)) { module =>
-      val dut = module.wrapped
-      dut.reset.poke(true.B)
-      dut.clock.step(1)
-      dut.reset.poke(false.B)
-      dut.clock.step(1)
-      driveDefaults(dut)
-
-      dut.io.in.instFire.poke(true.B)
-      dut.io.in.instType.poke(VPUOp.rmax)
-      dut.io.in.instReadBank1.poke(8.U)
-      dut.io.in.instReadBank2.poke(24.U)
-      dut.io.in.instWriteBank.poke(12.U)
-      dut.clock.step(1)
-
-      driveDefaults(dut)
-      dut.io.out.VEReady.expect(false.B)
-
-      dut.io.out.activeReads(0).valid.expect(true.B)
-      dut.io.out.activeReads(0).bits.expect(8.U)
-      dut.io.out.activeReads(1).valid.expect(false.B)
-      dut.io.out.activeReads(2).valid.expect(true.B)
-      dut.io.out.activeReads(2).bits.expect(9.U)
-      dut.io.out.activeReads(3).valid.expect(false.B)
-
-      dut.io.out.activeWrites(0).valid.expect(true.B)
-      dut.io.out.activeWrites(0).bits.expect(12.U)
-      dut.io.out.activeWrites(1).valid.expect(false.B)
-      dut.io.out.activeWrites(2).valid.expect(true.B)
-      dut.io.out.activeWrites(2).bits.expect(13.U)
-      dut.io.out.activeWrites(3).valid.expect(false.B)
-    }
-  }
-
-  it should "collapse duplicate active reads for aliased two-input ops" in {
-    PersistentVcsFSMOverlapTrackingSimulator.simulate(new VectorFSM(p)) { module =>
-      val dut = module.wrapped
-      dut.reset.poke(true.B)
-      dut.clock.step(1)
-      dut.reset.poke(false.B)
-      dut.clock.step(1)
-      driveDefaults(dut)
-
-      dut.io.in.instFire.poke(true.B)
-      dut.io.in.instType.poke(VPUOp.add)
-      dut.io.in.instReadBank1.poke(16.U)
-      dut.io.in.instReadBank2.poke(16.U)
-      dut.io.in.instWriteBank.poke(24.U)
-      dut.clock.step(1)
-
-      driveDefaults(dut)
-      dut.io.out.VEReady.expect(false.B)
-
-      dut.io.out.activeReads(0).valid.expect(true.B)
-      dut.io.out.activeReads(0).bits.expect(16.U)
-      dut.io.out.activeReads(1).valid.expect(true.B)
-      dut.io.out.activeReads(1).bits.expect(17.U)
-      dut.io.out.activeReads(2).valid.expect(false.B)
-      dut.io.out.activeReads(3).valid.expect(false.B)
     }
   }
 }
