@@ -735,8 +735,8 @@ int main(void)
     uint32_t status   = mmio_read32(CSR_STATUS);
 
     printf("  DBG0    = %u\\n", dbg0);
-    printf("  cycles  = %u\\n", cycles);
-    printf("  instcnt = %u\\n", instcnt);
+    printf("  mcycles = %u\\n", cycles);
+    printf("  minstret = %u\\n", instcnt);
     printf("  status  = 0x%08x\\n", status);
 
     if (dbg0 == 0) {{
