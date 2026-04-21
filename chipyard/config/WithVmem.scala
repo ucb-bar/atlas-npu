@@ -6,11 +6,12 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.TLBusWrapperTopology
 import freechips.rocketchip.diplomacy.{BufferParams, AddressSet}
 import atlas.common.VmemParams
+import atlas.scalar.AtlasMemMap
 
 class WithVmem(
     lineWidthBits: Int    = 256,
-    capacityBytes: Int    = 256 * 1024,
-    base:          BigInt = 0x2000_0000L,
+    capacityBytes: Int    = AtlasMemMap.VMEM_SIZE,
+    base:          BigInt = BigInt(AtlasMemMap.VMEM_BASE),
     beatBytes:     Int    = 32,
     busWhere:      TLBusWrapperLocation = SBUS
 ) extends Config((site, here, up) => {

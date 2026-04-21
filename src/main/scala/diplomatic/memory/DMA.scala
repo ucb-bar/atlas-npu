@@ -2,9 +2,18 @@
 // DMA.scala — Multi-channel DMA engine (block-banked VMEM architecture).
 //
 // VMEM ports use pre-decomposed bankIdx/bankAddr via VmemParams helpers.
-// With 32 KiB VMEM banks, an aligned 1 KiB tensor transfer stays within one
-// bank for all 32 beats. Grant signals provide backpressure when LSU holds
-// priority on that bank.
+// The default Atlas map gives each VMEM bank enough space for an aligned
+// 1 KiB tensor transfer to stay within one bank for all 32 beats. Grant
+// signals provide backpressure when LSU holds priority on that bank.
+//
+// Out-of-order safety:
+//   - Per-source-ID metadata (direction, destination slot, VMEM line addr,
+//     last-beat flag) is captured at A-fire time and consulted at D-fire.
+//     This lets responses arrive in any order without cross-talk between
+//     commands of differing direction.
+//   - Per-slot outstanding-beat counters gate channelBusy deassertion;
+//     a command is only marked complete when every one of its beats has
+//     been retired, regardless of interleaving with later commands.
 // ============================================================================
 
 package atlas.dma
@@ -44,15 +53,10 @@ class TileLinkAdapter(
   })
 
   // ── Per-ID in-flight bitmap ──────────────────────────────────
-  //
-  // Tracks exactly which source IDs are outstanding.  A request is
-  // only issued when its tag is not already in flight, preventing
-  // reuse regardless of response ordering.
   val idInFlight = RegInit(0.U(numIds.W))
 
   val tagIsFree = !idInFlight(io.request.bits.tag)
 
-  // Update bitmap: set bit on A-fire, clear bit on D-fire.
   val setMask   = Mux(io.tl.a.fire, 1.U(numIds.W) << io.tl.a.bits.source, 0.U)
   val clearMask = Mux(io.tl.d.fire, 1.U(numIds.W) << io.tl.d.bits.source, 0.U)
   idInFlight := (idInFlight | setMask) & ~clearMask
@@ -66,8 +70,6 @@ class TileLinkAdapter(
   io.inFlightCount := inFlightReg
 
   // ── Channel A (requests) ─────────────────────────────────────
-  // Gate on tagIsFree: even if the DMA's counter wraps, we won't
-  // reuse a source ID that hasn't been freed yet.
   io.request.ready := io.tl.a.ready && tagIsFree
   io.tl.a.valid    := io.request.valid && tagIsFree
 
@@ -109,13 +111,22 @@ class DmaEngine(
 
   private val dmaP  = params.dma
   private val vmemP = params.vmem
-  private val tagBits   = dmaP.tagBits
-  private val beatBytes = dmaP.beatBytes
-  private val beatBits  = beatBytes * 8
+  private val tagBits        = dmaP.tagBits
+  private val numIds         = 1 << tagBits
+  private val beatBytes      = dmaP.beatBytes
+  private val beatBits       = beatBytes * 8
+  private val numChannels    = dmaP.numChannels
+  private val maxBeatsPerCmd = (1 << dmaP.transferSizeBits) / beatBytes
+  private val beatCountBits  = log2Ceil(maxBeatsPerCmd + 1)
+
+  require(
+    dmaP.maxInFlight <= numIds,
+    s"maxInFlight (${dmaP.maxInFlight}) must not exceed 2^tagBits ($numIds)"
+  )
 
   val io = IO(new Bundle {
     val command     = Flipped(Valid(new DmaCommand(vmemP, dmaP)))
-    val channelBusy = Output(Vec(dmaP.numChannels, Bool()))
+    val channelBusy = Output(Vec(numChannels, Bool()))
 
     val vmemRead      = Valid(new VmemLineReadPort(vmemP))
     val vmemReadGrant = Input(Bool())
@@ -130,32 +141,53 @@ class DmaEngine(
   val tlAdapter = Module(new TileLinkAdapter(beatBytes, tagBits, tlBundleParams))
   io.tl <> tlAdapter.io.tl
 
-  val commandQueue = Reg(Vec(dmaP.numChannels, new DmaCommand(vmemP, dmaP)))
-  val slotActive   = RegInit(VecInit(Seq.fill(dmaP.numChannels)(false.B)))
-  val channelBusy  = RegInit(VecInit(Seq.fill(dmaP.numChannels)(false.B)))
+  // ==========================================================================
+  // Command slots
+  // ==========================================================================
+
+  val commandQueue = Reg(Vec(numChannels, new DmaCommand(vmemP, dmaP)))
+  val slotActive   = RegInit(VecInit(Seq.fill(numChannels)(false.B)))
+  val channelBusy  = RegInit(VecInit(Seq.fill(numChannels)(false.B)))
   io.channelBusy := channelBusy
 
-  val enqueueIdx  = RegInit(0.U(dmaP.channelIdBits.W))
-  val requestIdx  = RegInit(0.U(dmaP.channelIdBits.W))
-  val responseIdx = RegInit(0.U(dmaP.channelIdBits.W))
+  // Per-slot outstanding-beat counter: incremented on A-fire for that slot,
+  // decremented on D-fire for any source ID whose metadata points at it.
+  // The slot is only retired when this count returns to zero AND all beats
+  // have been issued (i.e., the command has been fully dispatched on A).
+  val slotOutstanding = RegInit(VecInit(Seq.fill(numChannels)(0.U(beatCountBits.W))))
+  val slotDispatched  = RegInit(VecInit(Seq.fill(numChannels)(false.B)))
 
-  val requestBeatCount  = RegInit(0.U((vmemP.lineAddrBits + 1).W))
-  val responseBeatCount = RegInit(0.U((vmemP.lineAddrBits + 1).W))
+  val enqueueIdx = RegInit(0.U(dmaP.channelIdBits.W))
+  val requestIdx = RegInit(0.U(dmaP.channelIdBits.W))
 
+  val requestBeatCount    = RegInit(0.U(beatCountBits.W))
   val requestBeatsNeeded  = commandQueue(requestIdx).transferSize >> log2Ceil(beatBytes).U
-  val responseBeatsNeeded = commandQueue(responseIdx).transferSize >> log2Ceil(beatBytes).U
 
   val nextSourceId    = RegInit(0.U(tagBits.W))
   val currentInFlight = tlAdapter.io.inFlightCount
   val currentCmdIsStore = commandQueue(requestIdx).opType === StoreFromVmem
 
-  val sourceIdTable = Reg(Vec(dmaP.maxInFlight, UInt(vmemP.lineAddrBits.W)))
+  // ==========================================================================
+  // Per-source-ID metadata — the heart of OOO correctness.
+  //
+  // Captured at A-fire. On D-fire we consult this table (indexed by the
+  // returning source ID) to decide: direction, destination slot, VMEM
+  // line address, and whether this beat was the last for its command.
+  // ==========================================================================
+
+  class SourceMeta extends Bundle {
+    val isLoad   = Bool()
+    val slotIdx  = UInt(dmaP.channelIdBits.W)
+    val lineAddr = UInt(vmemP.lineAddrBits.W)
+    val isLast   = Bool()
+  }
+  val sourceMeta = Reg(Vec(numIds, new SourceMeta))
 
   // ==========================================================================
   // VMEM read sequencer (STORE path) — stalls on bank denial
   // ==========================================================================
 
-  val vmemReadBeatCount = RegInit(0.U(vmemP.lineAddrBits.W))
+  val vmemReadBeatCount = RegInit(0.U(beatCountBits.W))
   val vmemReadComplete  = RegInit(false.B)
   val vmemReadLineAddr  = commandQueue(requestIdx).vmemLineAddr + vmemReadBeatCount
 
@@ -180,8 +212,9 @@ class DmaEngine(
   // ==========================================================================
 
   when(io.command.valid) {
-    commandQueue(enqueueIdx) := io.command.bits
-    slotActive(enqueueIdx)   := true.B
+    commandQueue(enqueueIdx)               := io.command.bits
+    slotActive(enqueueIdx)                 := true.B
+    slotDispatched(enqueueIdx)             := false.B
     channelBusy(io.command.bits.channelId) := true.B
     enqueueIdx := enqueueIdx +% 1.U
   }
@@ -190,8 +223,10 @@ class DmaEngine(
   // TileLink request issue
   // ==========================================================================
 
+  val isLastBeat = requestBeatCount === (requestBeatsNeeded - 1.U)
+
   tlAdapter.io.request.valid :=
-    slotActive(requestIdx) &&
+    slotActive(requestIdx) && !slotDispatched(requestIdx) &&
     (currentInFlight < dmaP.maxInFlight.U) &&
     Mux(currentCmdIsStore, storeDataQueue.io.deq.valid, true.B)
 
@@ -201,15 +236,31 @@ class DmaEngine(
   tlAdapter.io.request.bits.data    := storeDataQueue.io.deq.bits
   tlAdapter.io.request.bits.mask    := Fill(beatBytes, 1.U(1.W))
 
+  // Track per-slot A-fire / D-fire deltas so we can retire correctly even
+  // when A and D happen in the same cycle against the same slot.
+  val slotAFireOH = Wire(Vec(numChannels, Bool()))
+  val slotDFireOH = Wire(Vec(numChannels, Bool()))
+  slotAFireOH.foreach(_ := false.B)
+  slotDFireOH.foreach(_ := false.B)
+
   when(tlAdapter.io.request.fire) {
-    sourceIdTable(nextSourceId) := commandQueue(requestIdx).vmemLineAddr + requestBeatCount
+    // Capture metadata for this source ID.
+    sourceMeta(nextSourceId).isLoad   := !currentCmdIsStore
+    sourceMeta(nextSourceId).slotIdx  := requestIdx
+    sourceMeta(nextSourceId).lineAddr := commandQueue(requestIdx).vmemLineAddr + requestBeatCount
+    sourceMeta(nextSourceId).isLast   := isLastBeat
+
+    slotAFireOH(requestIdx) := true.B
+
     requestBeatCount := requestBeatCount + 1.U
     nextSourceId     := nextSourceId +% 1.U
-    when(requestBeatCount === (requestBeatsNeeded - 1.U)) {
+
+    when(isLastBeat) {
       requestBeatCount  := 0.U
       vmemReadBeatCount := 0.U
       vmemReadComplete  := false.B
-      requestIdx        := requestIdx +% 1.U
+      slotDispatched(requestIdx) := true.B
+      requestIdx := requestIdx +% 1.U
     }
   }
 
@@ -217,24 +268,46 @@ class DmaEngine(
   // Response handling — backpressure on VMEM write denial
   // ==========================================================================
 
-  val responseTag       = tlAdapter.io.response.bits.tag
-  val respIsLoad        = commandQueue(responseIdx).opType === LoadToVmem
-  val vmemWriteLineAddr = sourceIdTable(responseTag)
+  val responseTag  = tlAdapter.io.response.bits.tag
+  val respMeta     = sourceMeta(responseTag)
+  val respIsLoad   = respMeta.isLoad
+  val respSlotIdx  = respMeta.slotIdx
+  val respLineAddr = respMeta.lineAddr
 
   io.vmemWrite.valid          := respIsLoad && tlAdapter.io.response.valid
-  io.vmemWrite.bits.bankIdx   := vmemP.getBankIdx(vmemWriteLineAddr)
-  io.vmemWrite.bits.bankAddr  := vmemP.getBankAddr(vmemWriteLineAddr)
+  io.vmemWrite.bits.bankIdx   := vmemP.getBankIdx(respLineAddr)
+  io.vmemWrite.bits.bankAddr  := vmemP.getBankAddr(respLineAddr)
   io.vmemWrite.bits.data      := tlAdapter.io.response.bits.data
 
+  // Loads need a VMEM write grant; stores (PutFullData ACKs) have no VMEM
+  // side-effect so they retire unconditionally.
   tlAdapter.io.response.ready := Mux(respIsLoad, io.vmemWriteGrant, true.B)
 
   when(tlAdapter.io.response.fire) {
-    responseBeatCount := responseBeatCount + 1.U
-    when(responseBeatCount === (responseBeatsNeeded - 1.U)) {
-      channelBusy(commandQueue(responseIdx).channelId) := false.B
-      slotActive(responseIdx) := false.B
-      responseBeatCount       := 0.U
-      responseIdx             := responseIdx +% 1.U
+    slotDFireOH(respSlotIdx) := true.B
+  }
+
+  // Per-slot outstanding counter update (+1 on A-fire, −1 on D-fire).
+  for (i <- 0 until numChannels) {
+    val inc = slotAFireOH(i)
+    val dec = slotDFireOH(i)
+    when(inc && !dec) {
+      slotOutstanding(i) := slotOutstanding(i) + 1.U
+    }.elsewhen(!inc && dec) {
+      slotOutstanding(i) := slotOutstanding(i) - 1.U
+    }
+
+    // Retirement: command fully dispatched, and no beats outstanding.
+    // When dec fires and the counter is transitioning to zero, we also
+    // retire in that same cycle.
+    val willBeZero = Mux(inc && !dec, false.B,
+                     Mux(!inc && dec, slotOutstanding(i) === 1.U,
+                                      slotOutstanding(i) === 0.U))
+
+    when(slotActive(i) && slotDispatched(i) && willBeZero) {
+      slotActive(i)                              := false.B
+      slotDispatched(i)                          := false.B
+      channelBusy(commandQueue(i).channelId)     := false.B
     }
   }
 
