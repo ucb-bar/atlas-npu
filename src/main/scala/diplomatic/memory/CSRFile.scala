@@ -4,7 +4,7 @@ CSRFile.scala — TileLink-accessible CSR register file.
 Host reads/writes via TileLink.  Scalar core reads/writes via internal port.
 Scale registers are NOT here — see ScaleRegFile.
 
-TileLink byte-address map (offsets from CSR_BASE):
+TileLink byte-address map within the first 0x20 bytes of the CSR window:
   0x00  cycle counter      (RW)
   0x04  instruction counter(RW)
   0x08  status             (RO — bit 0: halted, bits [2:1]: halt_reason)
@@ -132,7 +132,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     respValid  := true.B
     respSource := tl.a.bits.source
     respSize   := tl.a.bits.size
-    val wordIdx = tl.a.bits.address(4, 2) // bits [4:2] select word
+    val wordIdx = tl.a.bits.address(AtlasMemMap.CSR_ADDR_BITS - 1, 2)
 
     when(tl.a.bits.opcode === TLMessages.Get) {
       respOpcode := TLMessages.AccessAckData
@@ -161,7 +161,8 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   val csrTlPuts = tl.a.bits.opcode === TLMessages.PutFullData ||
     tl.a.bits.opcode === TLMessages.PutPartialData
   val csrTlWritesExec =
-    tl.a.fire && csrTlPuts && tl.a.bits.address(4, 2) === 6.U
+    tl.a.fire && csrTlPuts &&
+      tl.a.bits.address(AtlasMemMap.CSR_ADDR_BITS - 1, 2) === 6.U
   when(io.csr.halted && !csrTlWritesExec) {
     reg_execRun := false.B
   }

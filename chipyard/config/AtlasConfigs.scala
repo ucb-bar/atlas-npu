@@ -24,13 +24,11 @@ class SystolicArrayDefaultConfig extends Config(
 // )
 
 class AtlasDefaultConfig extends Config(
-  new WithInnerProductTrees ++
+  new WithInnerProductTrees() ++
+  new WithSystolicArray() ++
   new WithDma() ++
-  new WithVmem(base=0x20000000L, capacityBytes = (256 * 1024)) ++ 
+  new WithVmem() ++
   new WithAtlasTile()
-  // ++ new WithSystolicArray
-  // ++ new WithVectorUnit
-  // ++ new WithController
 )
 
 class AtlasPlainRocketConfig extends Config(

@@ -1,8 +1,9 @@
 // ============================================================================
 // VmemParams.scala — VMEM parameters and port bundles (architecture).
 //
-// 8-bank block-banked VMEM. Each bank owns one contiguous 32 KiB address
-// range, so an aligned 1 KiB tensor slot lives entirely inside a single bank.
+// Atlas uses a block-banked VMEM. Each bank owns one contiguous `bankBytes`
+// range, and the default Atlas memory map places this window at
+// `AtlasMemMap.VMEM_BASE` with size `AtlasMemMap.VMEM_SIZE`.
 //
 // Banking on high bits of line address:
 //   lineAddr[lineAddrBits-1 : bankLineAddrBits]  → bank index
@@ -13,30 +14,31 @@ package atlas.common
 
 import chisel3._
 import chisel3.util._
+import atlas.scalar.AtlasMemMap
 
 case class VmemParams(
   lineWidthBits: Int    = 256,
-  capacityBytes: Int    = 256 * 1024,
-  base:          BigInt = 0x2000_0000L,
+  capacityBytes: Int    = AtlasMemMap.VMEM_SIZE,
+  base:          BigInt = BigInt(AtlasMemMap.VMEM_BASE),
   beatBytes:     Int    = 32,
   numBanks:      Int    = 8
 ) {
-  val lineBytes: Int        = lineWidthBits / 8               // 32
-  val numLines: Int         = capacityBytes / lineBytes       // 8192
-  val lineAddrBits: Int     = log2Ceil(numLines)              // 13
+  val lineBytes: Int        = lineWidthBits / 8
+  val numLines: Int         = capacityBytes / lineBytes
+  val lineAddrBits: Int     = log2Ceil(numLines)
   val wordWidth: Int        = 32
-  val wordsPerLine: Int     = lineWidthBits / wordWidth       // 8
-  val wordOffBits: Int      = log2Ceil(wordsPerLine)          // 3
-  val numWords: Int         = numLines * wordsPerLine         // 65536
-  val wordAddrBits: Int     = log2Ceil(numWords)              // 16
-  val byteAddrBits: Int     = log2Ceil(capacityBytes)         // 18
+  val wordsPerLine: Int     = lineWidthBits / wordWidth
+  val wordOffBits: Int      = log2Ceil(wordsPerLine)
+  val numWords: Int         = numLines * wordsPerLine
+  val wordAddrBits: Int     = log2Ceil(numWords)
+  val byteAddrBits: Int     = log2Ceil(capacityBytes)
 
   // ── Banking ──
-  val bankIdBits: Int       = log2Ceil(numBanks)              // 3
-  val bankBytes: Int        = capacityBytes / numBanks        // 32 KiB
-  val linesPerBank: Int     = numLines / numBanks             // 1024
-  val bankLineAddrBits: Int = log2Ceil(linesPerBank)          // 10
-  val lineOffBits: Int      = log2Ceil(lineBytes)             // 5
+  val bankIdBits: Int       = log2Ceil(numBanks)
+  val bankBytes: Int        = capacityBytes / numBanks
+  val linesPerBank: Int     = numLines / numBanks
+  val bankLineAddrBits: Int = log2Ceil(linesPerBank)
+  val lineOffBits: Int      = log2Ceil(lineBytes)
 
   // ── Aliases ──
   def lineWidth: Int = lineWidthBits

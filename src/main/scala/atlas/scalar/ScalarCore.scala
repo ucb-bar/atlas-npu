@@ -37,12 +37,18 @@ import atlas.lsu.LsuScalarCmd
 
 object AtlasMemMap {
   val IMEM_BASE      = 0x0002_0000L
-  val IMEM_SIZE      = 0x10000
+  val IMEM_SIZE      = 0x0002_0000  // 128 KiB
   val IMEM_WORDS     = IMEM_SIZE / 4
   val IMEM_ADDR_BITS = log2Ceil(IMEM_WORDS)
-  val CSR_BASE       = 0x0003_0000L
-  val CSR_SIZE       = 0x20
+
+  val CSR_BASE        = 0x0004_0000L
+  val CSR_SIZE        = 0x20    // Total size of the actual CSR registers we’ve implemented
+  val CSR_WINDOW_SIZE = 0x1000  // Size of the address range reserved for CSRs on the bus (4 KiB page). Only the first CSR_SIZE bytes are used; the rest is unused space
+  val CSR_ADDR_BITS   = log2Ceil(CSR_WINDOW_SIZE)
+
   val VMEM_BASE      = 0x2000_0000L
+  val VMEM_SIZE      = 0x0004_0000  // 256 KiB
+
   val DRAM_BASE      = 0x8000_0000L
 }
 

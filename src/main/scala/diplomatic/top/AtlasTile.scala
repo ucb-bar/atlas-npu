@@ -61,7 +61,8 @@ class AtlasTile(
     */
   val csrNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address            = Seq(AddressSet(AtlasMemMap.CSR_BASE, 0xFFF)),
+      address            = Seq(AddressSet(AtlasMemMap.CSR_BASE,
+                                          AtlasMemMap.CSR_WINDOW_SIZE - 1)),
       regionType         = RegionType.IDEMPOTENT,
       supportsGet        = TransferSizes(1, 4),
       supportsPutFull    = TransferSizes(1, 4),
@@ -172,6 +173,7 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
 
     val atlasDomain = bus.generateSynchronousDomain(s"atlas_domain_$si")
     val atlasTile = atlasDomain { LazyModule(new AtlasTile(params.atlasParams)) }
+    val csrMaxTransferBytes = math.min(pbus.blockBytes, AtlasMemMap.CSR_WINDOW_SIZE)
 
     // connect DMA, IMEM, CSR, and VMEM to SBUS
     def connect(): Unit = {
@@ -188,7 +190,7 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
 
       pbus.coupleTo(s"${params.name}-$si-csr") {
         atlasTile.csrNode :=
-          TLFragmenter(4, pbus.blockBytes) :=
+          TLFragmenter(4, csrMaxTransferBytes) :=
           TLWidthWidget(pbus.beatBytes) :=
           TLBuffer() := _
       }

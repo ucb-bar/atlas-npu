@@ -1,6 +1,7 @@
 /*
 InstrMem.scala — SRAM-based instruction memory.
-Single-bank, 32-bit wide, 16384 deep (64 KB).
+Single-bank, 32-bit wide, sized by `AtlasMemMap.IMEM_WORDS`
+(default Atlas map: 32768 words = 128 KiB).
 TileLink manager port for program loading. Fetch port for pipeline.
 
 Read-port arbitration: the SRAM has one read and one write port (1R1W).
@@ -14,7 +15,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
 
-/** SRAM-backed instruction memory with TileLink load and scalar fetch ports.
+/** SRAM-backed instruction memory for the IMEM address window
+  * `[AtlasMemMap.IMEM_BASE, AtlasMemMap.IMEM_BASE + AtlasMemMap.IMEM_SIZE)`,
+  * with TileLink load and scalar fetch ports.
   *
   * @param tlBundleParams  TileLink bundle parameters for the program-load port.
   */

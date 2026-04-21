@@ -639,7 +639,7 @@ static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t 
 
 /* Atlas memory map */
 #define ATLAS_IMEM_BASE   0x00020000UL
-#define ATLAS_CSR_BASE    0x00030000UL
+#define ATLAS_CSR_BASE    0x00040000UL
 
 #define CSR_CYCLE         (ATLAS_CSR_BASE + 0x00)
 #define CSR_INSTCNT       (ATLAS_CSR_BASE + 0x04)
