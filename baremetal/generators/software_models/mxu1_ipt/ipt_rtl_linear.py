@@ -198,6 +198,10 @@ class IPTLinearRTLFunction:
 
         prepared = {
             "key": key,
+            # Keep cached tensors alive so data_ptr-based cache keys cannot
+            # collide with a later temporary that reuses freed storage.
+            "w_ref": w_q,
+            "b_ref": b_q,
             "b_e4m3_list": b_e4m3_list,
             "prepared_weight_tiles": prepared_weight_tiles,
             "wbuf_np_tiles": wbuf_np_tiles,

@@ -2,7 +2,7 @@
 // Vmem.scala — 8-bank block-banked vector scratchpad with masked writes.
 //
 // Storage: numBanks × SyncReadMem(linesPerBank, Vec(lineBytes, UInt(8.W)))
-//          Each bank: 1 read port, 1 write port (1R1W SRAM).
+//          Each bank: 1 shared read/write port (1RW SRAM).
 //          Byte-granularity masking via SyncReadMem native mask.
 //
 // Clients (all present pre-decomposed bankIdx + bankAddr):
@@ -11,13 +11,14 @@
 //   DMA:         DRAM→VMEM loads (full-line write) and VMEM→DRAM stores (read).
 //   TileLink:    Saturn / SBUS host access (byte-masked read/write).
 //
-// Software guarantees LSU scalar and LSU vector never target the same
-// block bank on the same VMEM port simultaneously.  Hardware asserts.
+// Software guarantees LSU scalar and LSU vector never target the same block
+// bank simultaneously, whether the requests are reads or writes. Hardware
+// asserts.
 // Combined LSU has unconditional priority over DMA and TileLink.
 //
-// Per-bank per-port priority:
-//   Read:  LSU (scalar | vector) > DMA > TileLink
-//   Write: LSU (scalar | vector) > DMA > TileLink
+// Per-bank access priority:
+//   scalar store > VSTORE > scalar load > VLOAD > DMA write > DMA read
+//   > TileLink write > TileLink read
 // ============================================================================
 
 package atlas.vmem
@@ -83,6 +84,22 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
            io.lsuScalarWrite.bits.bankIdx === io.lsuVecWrite.bits.bankIdx),
     "ASSERT FAIL: scalar store and VSTORE target same VMEM bank")
 
+  assert(!(io.lsuScalarRead.valid && io.lsuScalarWrite.valid &&
+           io.lsuScalarRead.bits.bankIdx === io.lsuScalarWrite.bits.bankIdx),
+    "ASSERT FAIL: scalar load and scalar store target same VMEM bank")
+
+  assert(!(io.lsuScalarRead.valid && io.lsuVecWrite.valid &&
+           io.lsuScalarRead.bits.bankIdx === io.lsuVecWrite.bits.bankIdx),
+    "ASSERT FAIL: scalar load and VSTORE target same VMEM bank")
+
+  assert(!(io.lsuScalarWrite.valid && io.lsuVecRead.valid &&
+           io.lsuScalarWrite.bits.bankIdx === io.lsuVecRead.bits.bankIdx),
+    "ASSERT FAIL: scalar store and VLOAD target same VMEM bank")
+
+  assert(!(io.lsuVecRead.valid && io.lsuVecWrite.valid &&
+           io.lsuVecRead.bits.bankIdx === io.lsuVecWrite.bits.bankIdx),
+    "ASSERT FAIL: VLOAD and VSTORE target same VMEM bank")
+
   // ==========================================================================
   // Client IDs for read-response routing
   // ==========================================================================
@@ -110,108 +127,88 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   // Per-bank arbitration
   // ==========================================================================
 
+  def splitLine(data: UInt): Vec[UInt] =
+    VecInit((0 until p.lineBytes).map(i => data(i * 8 + 7, i * 8)))
+
   for (b <- 0 until p.numBanks) {
     val bank = banks(b)
 
-    // ── Read port ──────────────────────────────────────────────
+    // ── Request decode ─────────────────────────────────────────
     val lsuScalarWantsRead = io.lsuScalarRead.valid && io.lsuScalarRead.bits.bankIdx === b.U
     val lsuVecWantsRead    = io.lsuVecRead.valid    && io.lsuVecRead.bits.bankIdx === b.U
     val dmaWantsRead       = io.dmaRead.valid       && io.dmaRead.bits.bankIdx === b.U
     val tlWantsRead        = tl.a.valid && tlIsGet   && tlBankIdx === b.U
 
-    // Scalar loads and VLOAD are mutually exclusive per bank (asserted above).
-    val lsuWantsRead = lsuScalarWantsRead || lsuVecWantsRead
-
-    val readAddr   = Wire(UInt(p.bankLineAddrBits.W))
-    val readEn     = Wire(Bool())
-    val readClient = Wire(UInt(3.W))
-
-    when(lsuScalarWantsRead) {
-      readAddr   := io.lsuScalarRead.bits.bankAddr
-      readEn     := true.B
-      readClient := CLIENT_LSU_SCALAR
-    }.elsewhen(lsuVecWantsRead) {
-      readAddr   := io.lsuVecRead.bits.bankAddr
-      readEn     := true.B
-      readClient := CLIENT_LSU_VEC
-    }.elsewhen(dmaWantsRead && !lsuWantsRead) {
-      readAddr   := io.dmaRead.bits.bankAddr
-      readEn     := true.B
-      readClient := CLIENT_DMA
-    }.elsewhen(tlWantsRead && !lsuWantsRead && !dmaWantsRead) {
-      readAddr   := tlBankAddr
-      readEn     := true.B
-      readClient := CLIENT_TL
-    }.otherwise {
-      readAddr   := 0.U
-      readEn     := false.B
-      readClient := CLIENT_NONE
-    }
-
-    when(readEn && readClient === CLIENT_DMA) { dmaReadGranted := true.B }
-    when(readEn && readClient === CLIENT_TL)  { tlAccepted     := true.B }
-
-    r1_bankReadData(b)   := bank.read(readAddr, readEn)
-    r1_bankReadClient(b) := Mux(readEn, readClient, CLIENT_NONE)
-    r1_bankReadValid(b)  := readEn
-
-    // ── Write port ─────────────────────────────────────────────
     val lsuScalarWantsWrite = io.lsuScalarWrite.valid && io.lsuScalarWrite.bits.bankIdx === b.U
     val lsuVecWantsWrite    = io.lsuVecWrite.valid    && io.lsuVecWrite.bits.bankIdx === b.U
     val dmaWantsWrite       = io.dmaWrite.valid       && io.dmaWrite.bits.bankIdx === b.U
     val tlWantsWrite        = tl.a.valid && tlIsPut    && tlBankIdx === b.U
 
-    val lsuWantsWrite = lsuScalarWantsWrite || lsuVecWantsWrite
-
-    // 1. Create a single set of multiplexed write signals
-    val writeEn   = WireDefault(false.B)
-    val writeAddr = WireDefault(0.U(p.bankLineAddrBits.W))
+    // ── Shared 1RW access port ─────────────────────────────────
+    val accessEn      = WireDefault(false.B)
+    val accessIsWrite = WireDefault(false.B)
+    val accessAddr    = WireDefault(0.U(p.bankLineAddrBits.W))
+    val readClient    = WireDefault(CLIENT_NONE)
     val writeData = WireDefault(VecInit(Seq.fill(p.lineBytes)(0.U(8.W))))
     val writeMask = WireDefault(VecInit(Seq.fill(p.lineBytes)(false.B)))
+    val fullMask  = VecInit(Seq.fill(p.lineBytes)(true.B))
 
     when(lsuScalarWantsWrite) {
-      // ── LSU scalar: per-byte masked write ──
-      writeEn   := true.B
-      writeAddr := io.lsuScalarWrite.bits.bankAddr
-      writeMask := io.lsuScalarWrite.bits.mask
-      for (i <- 0 until p.lineBytes) {
-        writeData(i) := io.lsuScalarWrite.bits.data(i * 8 + 7, i * 8)
-      }
+      accessEn      := true.B
+      accessIsWrite := true.B
+      accessAddr    := io.lsuScalarWrite.bits.bankAddr
+      writeData     := splitLine(io.lsuScalarWrite.bits.data)
+      writeMask     := io.lsuScalarWrite.bits.mask
 
     }.elsewhen(lsuVecWantsWrite) {
-      // ── LSU vector: full-line write ──
-      writeEn   := true.B
-      writeAddr := io.lsuVecWrite.bits.bankAddr
-      for (i <- 0 until p.lineBytes) {
-        writeData(i) := io.lsuVecWrite.bits.data(i * 8 + 7, i * 8)
-        writeMask(i) := true.B
-      }
+      accessEn      := true.B
+      accessIsWrite := true.B
+      accessAddr    := io.lsuVecWrite.bits.bankAddr
+      writeData     := splitLine(io.lsuVecWrite.bits.data)
+      writeMask     := fullMask
 
-    }.elsewhen(dmaWantsWrite && !lsuWantsWrite) {
-      // ── DMA: full-line write ──
-      writeEn   := true.B
-      writeAddr := io.dmaWrite.bits.bankAddr
-      for (i <- 0 until p.lineBytes) {
-        writeData(i) := io.dmaWrite.bits.data(i * 8 + 7, i * 8)
-        writeMask(i) := true.B
-      }
+    }.elsewhen(lsuScalarWantsRead) {
+      accessEn   := true.B
+      accessAddr := io.lsuScalarRead.bits.bankAddr
+      readClient := CLIENT_LSU_SCALAR
+
+    }.elsewhen(lsuVecWantsRead) {
+      accessEn   := true.B
+      accessAddr := io.lsuVecRead.bits.bankAddr
+      readClient := CLIENT_LSU_VEC
+
+    }.elsewhen(dmaWantsWrite) {
+      accessEn      := true.B
+      accessIsWrite := true.B
+      accessAddr    := io.dmaWrite.bits.bankAddr
+      writeData     := splitLine(io.dmaWrite.bits.data)
+      writeMask     := fullMask
       dmaWriteGranted := true.B
 
-    }.elsewhen(tlWantsWrite && !lsuWantsWrite && !dmaWantsWrite) {
-      // ── TileLink: byte-masked write ──
-      writeEn   := true.B
-      writeAddr := tlBankAddr
-      for (i <- 0 until p.lineBytes) {
-        writeData(i) := tl.a.bits.data(i * 8 + 7, i * 8)
-        writeMask(i) := tl.a.bits.mask(i)
-      }
+    }.elsewhen(dmaWantsRead) {
+      accessEn   := true.B
+      accessAddr := io.dmaRead.bits.bankAddr
+      readClient := CLIENT_DMA
+      dmaReadGranted := true.B
+
+    }.elsewhen(tlWantsWrite) {
+      accessEn      := true.B
+      accessIsWrite := true.B
+      accessAddr    := tlBankAddr
+      writeData     := splitLine(tl.a.bits.data)
+      writeMask     := VecInit((0 until p.lineBytes).map(i => tl.a.bits.mask(i)))
+      tlAccepted := true.B
+
+    }.elsewhen(tlWantsRead) {
+      accessEn   := true.B
+      accessAddr := tlBankAddr
+      readClient := CLIENT_TL
       tlAccepted := true.B
     }
 
-    // 2. Execute the write using a SINGLE hardware port
-    when(writeEn) {
-      bank.write(writeAddr, writeData, writeMask)
-    }
+    r1_bankReadData(b)   := bank.readWrite(accessAddr, writeData, writeMask, accessEn, accessIsWrite)
+    r1_bankReadClient(b) := Mux(accessEn && !accessIsWrite, readClient, CLIENT_NONE)
+    r1_bankReadValid(b)  := accessEn && !accessIsWrite
   }
 
   // ==========================================================================

@@ -17,10 +17,10 @@
 //     VSTORE (mreg → VMEM): Streams mregRows rows.
 //                    Fixed mregRows + 1 cycle latency.
 //
-// Software guarantees no same-port VMEM bank conflicts between scalar and
-// vector paths. Under block banking, aligned VLOAD/VSTORE operations stay in
-// one bank for their entire 32-line transfer. Vmem asserts on violations. All
-// LSU operations have deterministic latency — no stalls.
+// Software guarantees no same-bank VMEM conflicts between scalar and vector
+// paths, including read/write pairs. Under block banking, aligned VLOAD/VSTORE
+// operations stay in one bank for their entire 32-line transfer. Vmem asserts
+// on violations. All LSU operations have deterministic latency — no stalls.
 //
 // Busy signals:
 //   scalarBusy — true while a scalar load response is pending.
@@ -62,7 +62,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val io = IO(new Bundle {
     val scalarCmd  = Flipped(Valid(new LsuScalarCmd(vmemP)))
     val scalarResp = Valid(UInt(32.W))
-    val cmd        = Flipped(Valid(new atlas.scalar.LsuCmd))
+    val cmd        = Flipped(Valid(new atlas.scalar.LsuCmd(vmemP)))
 
     // ── VMEM scalar ports (deterministic — always granted) ──
     val vmemScalarRead     = Valid(new VmemLineReadPort(vmemP))
@@ -282,4 +282,28 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   io.vmemVecWrite.bits.bankIdx  := vmemP.getBankIdx(vstoreRespLineAddr)
   io.vmemVecWrite.bits.bankAddr := vmemP.getBankAddr(vstoreRespLineAddr)
   io.vmemVecWrite.bits.data     := io.mregReadResp.bits
+
+  assert(!(io.vmemScalarRead.valid && io.vmemScalarWrite.valid &&
+           io.vmemScalarRead.bits.bankIdx === io.vmemScalarWrite.bits.bankIdx),
+    "ASSERT FAIL: scalar load and scalar store target same VMEM bank")
+
+  assert(!(io.vmemScalarRead.valid && io.vmemVecRead.valid &&
+           io.vmemScalarRead.bits.bankIdx === io.vmemVecRead.bits.bankIdx),
+    "ASSERT FAIL: scalar load and VLOAD target same VMEM bank")
+
+  assert(!(io.vmemScalarRead.valid && io.vmemVecWrite.valid &&
+           io.vmemScalarRead.bits.bankIdx === io.vmemVecWrite.bits.bankIdx),
+    "ASSERT FAIL: scalar load and VSTORE target same VMEM bank")
+
+  assert(!(io.vmemScalarWrite.valid && io.vmemVecRead.valid &&
+           io.vmemScalarWrite.bits.bankIdx === io.vmemVecRead.bits.bankIdx),
+    "ASSERT FAIL: scalar store and VLOAD target same VMEM bank")
+
+  assert(!(io.vmemScalarWrite.valid && io.vmemVecWrite.valid &&
+           io.vmemScalarWrite.bits.bankIdx === io.vmemVecWrite.bits.bankIdx),
+    "ASSERT FAIL: scalar store and VSTORE target same VMEM bank")
+
+  assert(!(io.vmemVecRead.valid && io.vmemVecWrite.valid &&
+           io.vmemVecRead.bits.bankIdx === io.vmemVecWrite.bits.bankIdx),
+    "ASSERT FAIL: VLOAD and VSTORE target same VMEM bank")
 }

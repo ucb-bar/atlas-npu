@@ -4,7 +4,8 @@
 // VMEM ports use pre-decomposed bankIdx/bankAddr via VmemParams helpers.
 // The default Atlas map gives each VMEM bank enough space for an aligned
 // 1 KiB tensor transfer to stay within one bank for all 32 beats. Grant
-// signals provide backpressure when LSU holds priority on that bank.
+// signals provide backpressure when LSU, another DMA side, or TileLink holds
+// the selected access on that 1RW bank.
 //
 // Out-of-order safety:
 //   - Per-source-ID metadata (direction, destination slot, VMEM line addr,

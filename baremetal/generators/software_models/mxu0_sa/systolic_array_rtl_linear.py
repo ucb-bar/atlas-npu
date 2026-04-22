@@ -186,6 +186,8 @@ class SARTLLinearFunction:
         self._b_cache_key: Optional[tuple] = None
         self._w_np: Optional[np.ndarray] = None
         self._b_np: Optional[np.ndarray] = None
+        self._w_ref: Optional[torch.Tensor] = None
+        self._b_ref: Optional[torch.Tensor] = None
 
         _get_lib()
 
@@ -206,6 +208,11 @@ class SARTLLinearFunction:
             )
             self._w_cache_key = w_key
             self._b_cache_key = b_key
+            # Keep the cached tensors alive. PyTorch may otherwise recycle a
+            # freed temporary's data_ptr for a different tensor, causing a
+            # false cache hit and stale quantized weights.
+            self._w_ref = w_q
+            self._b_ref = b_q
 
         return self._w_np, self._b_np
 

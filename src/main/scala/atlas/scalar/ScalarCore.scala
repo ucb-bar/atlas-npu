@@ -24,7 +24,7 @@ Scalar stores are single-cycle masked writes (no RMW).
 Scalar loads have fixed 2-cycle latency.
 VLOAD/VSTORE have fixed mregRows+1 cycle latency.
 Scalar, VLOAD, and VSTORE LSU paths operate concurrently; software must
-ensure no same-port VMEM block-bank conflicts (asserted in Vmem).
+ensure no same-bank VMEM conflicts (asserted in Vmem).
 */
 
 package atlas.scalar
@@ -47,7 +47,7 @@ object AtlasMemMap {
   val CSR_ADDR_BITS   = log2Ceil(CSR_WINDOW_SIZE)
 
   val VMEM_BASE      = 0x2000_0000L
-  val VMEM_SIZE      = 0x0004_0000  // 256 KiB
+  val VMEM_SIZE      = 0x0010_0000  // 1 MiB
 
   val DRAM_BASE      = 0x8000_0000L
 }

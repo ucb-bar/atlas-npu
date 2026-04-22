@@ -44,7 +44,14 @@ case class VmemParams(
   def lineWidth: Int = lineWidthBits
   def sizeBytes: Int = capacityBytes
 
+  private def isPowerOfTwo(x: Int): Boolean = x > 0 && (x & (x - 1)) == 0
+
+  require(lineWidthBits % 8 == 0)
+  require(capacityBytes % lineBytes == 0)
+  require(isPowerOfTwo(capacityBytes))
+  require(isPowerOfTwo(numBanks))
   require(numLines % numBanks == 0)
+  require(lineAddrBits == bankLineAddrBits + bankIdBits)
 
   /** Extract bank index from a line address. */
   def getBankIdx(lineAddr: UInt): UInt = lineAddr(lineAddrBits - 1, bankLineAddrBits)
