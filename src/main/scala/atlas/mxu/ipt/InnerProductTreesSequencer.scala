@@ -350,6 +350,8 @@ class InnerProductTreesSequencer(
   val compRowsIssued  = Reg(UInt(rowCountW.W))
   val compRowsSent    = Reg(UInt(rowCountW.W))
   val compRowsWritten = Reg(UInt(rowCountW.W))
+  val overlapStartCompute =
+    (slotAState === aCompDrain) && acceptCompute && !isDraining
 
   val isAccumulate = (slotACmd.op === MxuOp.MatmulAcc)
 
@@ -580,7 +582,9 @@ class InnerProductTreesSequencer(
     io.accComputeWrite.bits.rowIdx := writeRow
     io.accComputeWrite.bits.data   := io.coreOut.bits
 
-    when(drainPending > 0.U) {
+    when(overlapStartCompute) {
+      drainPending := tileRows.U - compRowsWritten - 1.U
+    }.elsewhen(drainPending > 0.U) {
       drainPending := drainPending - 1.U
     }.otherwise {
       compRowsWritten := compRowsWritten + 1.U
