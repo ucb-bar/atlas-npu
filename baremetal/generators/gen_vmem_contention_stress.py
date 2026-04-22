@@ -155,17 +155,25 @@ B_vpu_b1_rows = float_matrix_to_bf16_rows(B_vpu[:, 16:])
 
 # ── Reference: C0 = X0 @ W0 (MXU0 SA) ──
 
+# Keep weight tensors alive across calls; the C-backed model caches by tensor
+# identity, and freed temporary storage can be reused by a later weight.
+X0_t = torch.from_numpy(X0)
+W0_t = torch.from_numpy(W0.T.copy())
+
 C0 = sa_bf16(
-    torch.from_numpy(X0),
-    torch.from_numpy(W0.T.copy()),  # F.linear convention: y = x @ w^T
+    X0_t,
+    W0_t,  # F.linear convention: y = x @ w^T
     b_q=b0_t, scale_exp=0,
 ).numpy().astype(np.float32)
 
 # ── Reference: C1 = X1 @ W1 (MXU1 IPT) ──
 
+X1_t = torch.from_numpy(X1)
+W1_t = torch.from_numpy(W1.T.copy())
+
 C1 = ipt_bf16(
-    torch.from_numpy(X1),
-    torch.from_numpy(W1.T.copy()),
+    X1_t,
+    W1_t,
     scale_exp=0,
 ).numpy().astype(np.float32)
 
@@ -181,9 +189,12 @@ add_b1_rows = run_binary_rows("add", A_vpu_b1_rows, B_vpu_b1_rows)
 
 # ── Reference: C2 = X2 @ W2 (MXU0 SA, post-contention) ──
 
+X2_t = torch.from_numpy(X2)
+W2_t = torch.from_numpy(W2.T.copy())
+
 C2 = sa_bf16(
-    torch.from_numpy(X2),
-    torch.from_numpy(W2.T.copy()),
+    X2_t,
+    W2_t,
     b_q=b0_t, scale_exp=0,
 ).numpy().astype(np.float32)
 
@@ -208,13 +219,13 @@ emit_bf16_rows_preload(preloads, B_VPU_B1_BASE, B_vpu_b1_rows)
 
 checks = []
 
-# C0 (MXU0 result, stored via VMEM→DMA in Phase 7 under read-port backpressure)
+# C0 (MXU0 result, stored via VMEM→DMA in Phase 7 under shared-port backpressure)
 emit_bf16_split_check(checks, C0_LO_BASE, C0_HI_BASE, C0)
 
 # C1 (MXU1 result)
 emit_bf16_split_check(checks, C1_LO_BASE, C1_HI_BASE, C1)
 
-# VPU add (stored via VMEM→DMA after write-port contention phase)
+# VPU add (stored via VMEM→DMA after shared-port contention phases)
 emit_bf16_rows_check(checks, ADD_B0_BASE, ADD_B1_BASE, add_b0_rows, add_b1_rows)
 
 # C2 (MXU0 second compute, data loaded during contention)

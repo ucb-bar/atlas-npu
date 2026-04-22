@@ -8,8 +8,8 @@
 #   MXU0 result BF16 -> m12/m13 -> VMEM 4096/4352 -> DRAM 0x2000/0x2400
 #
 # Iteration 1:
-#   A1 fp8 at DRAM 0x0800 -> VMEM 8192   -> m16
-#   B1 raw fp8 at DRAM 0x0C00 -> VMEM 8448 -> m20 -> XLU m24 -> VSTORE -> DRAM 0x2800
+#   A1 fp8 at DRAM 0x0800 -> VMEM 32768   -> m16
+#   B1 raw fp8 at DRAM 0x0C00 -> VMEM 33024 -> m20 -> XLU m24 -> VMEM 36864 -> DRAM 0x2800
 #
 # This keeps DMA serialized and uses distinct VMEM/MREG placements per phase.
 
@@ -57,14 +57,14 @@
 
     # -------- Iteration 1: transpose -> VMEM/DMA consumer --------
     LI    x10, 0x0800       # A1 src, loaded only to vary bank occupancy
-    LI    x11, 8192
+    LI    x11, 32768
     DMA.LOAD x11, x10, x14, 0
     DMA.WAIT 0
     VLOAD 16, x11, 0
     DELAY 40
 
     LI    x10, 0x0C00       # B1 src
-    LI    x11, 8448
+    LI    x11, 33024
     DMA.LOAD x11, x10, x14, 1
     DMA.WAIT 1
     VLOAD 20, x11, 0
@@ -73,7 +73,7 @@
     VTRPOSE.XLU 24, 20
     DELAY 80
 
-    LI    x11, 12288
+    LI    x11, 36864
     VSTORE 24, x11, 0
     DELAY 40
     LI    x10, 0x2800

@@ -19,19 +19,19 @@
 # Prefill VMEM banks 4..7. These become the source tiles for mixed-burst stores.
 # ============================================================================
 
-    LI    x6, 32768
+    LI    x6, 131072
     ADDI  x10, x0, 0
     DMA.LOAD  x6, x10, x12, 0
 
-    LI    x6, 40960
+    LI    x6, 163840
     LI    x10, 0x0400
     DMA.LOAD  x6, x10, x12, 1
 
-    LI    x6, 49152
+    LI    x6, 196608
     LI    x10, 0x0800
     DMA.LOAD  x6, x10, x12, 2
 
-    LI    x6, 57344
+    LI    x6, 229376
     LI    x10, 0x0c00
     DMA.LOAD  x6, x10, x12, 3
 
@@ -43,13 +43,13 @@
 # Scalar scratch byte addresses. Each one is in the same bank as a DMA region
 # but outside the 1024-byte DMA tile being checked.
     LI    x20, 0x00800       # bank 0 scratch
-    LI    x21, 0x08800       # bank 1 scratch
-    LI    x22, 0x10800       # bank 2 scratch
-    LI    x23, 0x18800       # bank 3 scratch
-    LI    x24, 0x20800       # bank 4 scratch
-    LI    x25, 0x28800       # bank 5 scratch
-    LI    x26, 0x30800       # bank 6 scratch
-    LI    x27, 0x38800       # bank 7 scratch
+    LI    x21, 0x20800       # bank 1 scratch
+    LI    x22, 0x40800       # bank 2 scratch
+    LI    x23, 0x60800       # bank 3 scratch
+    LI    x24, 0x80800       # bank 4 scratch
+    LI    x25, 0xA0800       # bank 5 scratch
+    LI    x26, 0xC0800       # bank 6 scratch
+    LI    x27, 0xE0800       # bank 7 scratch
     LI    x13, 0xCAFED00D
     LI    x18, 24
 
@@ -61,31 +61,31 @@
     LI    x10, 0x1000
     DMA.LOAD  x6, x10, x12, 0
 
-    LI    x6, 32768
+    LI    x6, 131072
     LI    x10, 0x3000
     DMA.STORE x10, x6, x12, 1
 
-    LI    x6, 8192
+    LI    x6, 32768
     LI    x10, 0x1400
     DMA.LOAD  x6, x10, x12, 2
 
-    LI    x6, 40960
+    LI    x6, 163840
     LI    x10, 0x3400
     DMA.STORE x10, x6, x12, 3
 
-    LI    x6, 16384
+    LI    x6, 65536
     LI    x10, 0x1800
     DMA.LOAD  x6, x10, x12, 4
 
-    LI    x6, 49152
+    LI    x6, 196608
     LI    x10, 0x3800
     DMA.STORE x10, x6, x12, 5
 
-    LI    x6, 24576
+    LI    x6, 98304
     LI    x10, 0x1c00
     DMA.LOAD  x6, x10, x12, 6
 
-    LI    x6, 57344
+    LI    x6, 229376
     LI    x10, 0x3c00
     DMA.STORE x10, x6, x12, 7
 
@@ -129,15 +129,15 @@ lsu_stall_loop:
     LI    x10, 0x4000
     DMA.STORE x10, x6, x12, 0
 
-    LI    x6, 8192
+    LI    x6, 32768
     LI    x10, 0x4400
     DMA.STORE x10, x6, x12, 1
 
-    LI    x6, 16384
+    LI    x6, 65536
     LI    x10, 0x4800
     DMA.STORE x10, x6, x12, 2
 
-    LI    x6, 24576
+    LI    x6, 98304
     LI    x10, 0x4c00
     DMA.STORE x10, x6, x12, 3
 

@@ -540,6 +540,8 @@ class CIPTLinearRTLFunction:
         self._b_cache_key: Optional[tuple] = None
         self._w_np: Optional[np.ndarray] = None
         self._b_np: Optional[np.ndarray] = None
+        self._w_ref: Optional[torch.Tensor] = None
+        self._b_ref: Optional[torch.Tensor] = None
 
         _get_lib()
 
@@ -563,6 +565,10 @@ class CIPTLinearRTLFunction:
             self._b_np = _quant(_tensor_to_f32_numpy(b_q)) if b_q is not None else None
             self._w_cache_key = w_key
             self._b_cache_key = b_key
+            # Keep cached tensors alive so data_ptr-based cache keys cannot
+            # collide with a later temporary that reuses freed storage.
+            self._w_ref = w_q
+            self._b_ref = b_q
 
         return self._w_np, self._b_np
 

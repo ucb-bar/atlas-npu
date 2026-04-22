@@ -3,19 +3,22 @@
 # @PYTHON_GEN gen_vmem_contention_stress.py 42
 #
 # Exercises every VMEM contention path:
-#   [WR-BP] DMA.LOAD responses + VSTORE → write-port backpressure
-#   [RD-BP] DMA.STORE pre-reads + VLOAD → read-port backpressure
+#   [WW-BP] DMA.LOAD responses + VSTORE → shared 1RW port backpressure
+#   [RW-BP] DMA.STORE pre-reads + VSTORE → shared 1RW port backpressure
+#   [RR-BP] DMA.STORE pre-reads + VLOAD → shared 1RW port backpressure
 #   [PIPE]  4 DMA channels queued back-to-back before any WAIT
 #   [3WAY]  MXU0 + MXU1 + VPU compute during DMA quiescence
 #   [CHAIN] MXU0 result popped, stored to VMEM, DMA-stored to DRAM,
 #           new data DMA-loaded and VLOAD-ed during contention,
 #           then re-computed on MXU0 → end-to-end pipeline
 #
-# VMEM bank conflict analysis (8 banks, 32 KiB block banking):
+# VMEM bank conflict analysis (8 banks, 128 KiB block banking):
 #   Each aligned 1024-byte tile occupies one tensor slot inside a single bank.
 #   In this test, the contending VMEM regions are intentionally packed into
-#   bank 0, so same-port overlaps hold on that bank for the full 32-cycle
-#   transfer and force the lower-priority client to stall.
+#   bank 0.  The low VMEM slots below are all < 32768 words, which is the
+#   word span of one bank in the 1 MiB / 8-bank configuration.  Same-bank
+#   overlaps therefore contend for the single 1RW port and force the
+#   lower-priority DMA client to stall.
 #
 # TRF bank map (all 16 used):
 #   m0    activations for MXU0 (reloaded: X0, then X2)
@@ -210,18 +213,18 @@
     DELAY 40
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 5: WRITE-PORT BACKPRESSURE [WR-BP]
+# PHASE 5: WRITE/WRITE SHARED-PORT BACKPRESSURE [WW-BP]
 #
 #   Issue DMA.LOAD for X2 and W2 (writes to VMEM on response path),
 #   then IMMEDIATELY start VSTORE of VPU result (also writes to VMEM).
 #
 #   DMA.LOAD responses arrive after TileLink round-trip (~10-20 cyc).
-#   VSTORE runs for 33 cycles.  During overlap, both try to write
-#   VMEM.  VSTORE wins (LSU priority), DMA stalls via vmemWriteGrant.
+#   VSTORE runs for 33 cycles.  During overlap, both need the same 1RW
+#   bank port.  VSTORE wins (LSU priority), DMA stalls via vmemWriteGrant.
 #
 #   DMA writes to VMEM[0..255] and VMEM[256..511] in bank 0.
 #   VSTORE writes to VMEM[512..767] and VMEM[768..1023] in bank 0.
-#   All writes target the same bank-0 write port → maximum backpressure.
+#   All writes target the same bank-0 1RW port → maximum backpressure.
 # ═══════════════════════════════════════════════════════════════
 
     # Enqueue DMA loads (start TileLink traffic immediately)
@@ -246,19 +249,25 @@
     DMA.WAIT  1
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 6: Store VPU add result → DRAM (from VMEM[512], VMEM[768])
-#          Also store C0 to VMEM for later DMA.STORE + VLOAD overlap.
+# PHASE 6: READ/WRITE SHARED-PORT BACKPRESSURE [RW-BP]
+#
+#          Store VPU add result → DRAM (DMA reads VMEM[512], VMEM[768]),
+#          then immediately store C0 to VMEM[1024], VMEM[1280].
+#
+#          DMA.STORE pre-reads and VSTORE writes hit different addresses in
+#          the same bank.  Under 1RW banking they still contend for the one
+#          bank port, so VSTORE wins and DMA stalls via vmemReadGrant.
+#          The C0 stores also set up the next DMA.STORE + VLOAD overlap.
 # ═══════════════════════════════════════════════════════════════
 
-    # DMA.STORE add result: VMEM[512] → DRAM, VMEM[768] → DRAM
+    # DMA.STORE add result: VMEM[512] → DRAM, VMEM[768] → DRAM.
+    # Do not wait yet; overlap the DMA pre-reads with the C0 VSTOREs below.
     LI    x8, 512
     LI    x10, 0x3C00
     DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[add_b0]
     LI    x9, 768
     LI    x10, 0x4000
     DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[add_b1]
-    DMA.WAIT  0
-    DMA.WAIT  1
 
     # Store C0 (m4,m5) to VMEM[1024], VMEM[1280] for next phase
     LI    x8, 1024
@@ -268,20 +277,24 @@
     VSTORE 5, x9, 0               # m5 (C0 hi) → VMEM[1280]
     DELAY 40
 
+    # DMA stores may have been stretched by the C0 VSTOREs.
+    DMA.WAIT  0
+    DMA.WAIT  1
+
 # ═══════════════════════════════════════════════════════════════
-# PHASE 7: READ-PORT BACKPRESSURE [RD-BP]
+# PHASE 7: READ/READ SHARED-PORT BACKPRESSURE [RR-BP]
 #
 #   Issue DMA.STORE (reads VMEM → DRAM) for C0, then IMMEDIATELY
 #   start VLOAD (reads VMEM → TRF) for X2.
 #
 #   DMA.STORE pre-reads VMEM lines into storeDataQueue before
 #   issuing TileLink puts.  VLOAD also reads VMEM.  Both hit
-#   the read port — VLOAD wins (LSU priority), DMA read sequencer
+#   the same 1RW bank port.  VLOAD wins (LSU priority), DMA read sequencer
 #   stalls via vmemReadGrant denial.
 #
 #   DMA reads VMEM[1024..1279] in bank 0.
 #   VLOAD reads VMEM[0..255] in bank 0.
-#   Both target the same bank-0 read port → DMA read sequencer stalls.
+#   Both target the same bank-0 1RW port → DMA read sequencer stalls.
 # ═══════════════════════════════════════════════════════════════
 
     # Issue DMA.STORE first — DMA starts reading VMEM immediately
@@ -303,7 +316,7 @@
     VLOAD 1, x7, 0                 # m1 ← W2 (raw) from VMEM[256]
     DELAY 40
 
-    # Wait for DMA stores (may be delayed by read-port backpressure)
+    # Wait for DMA stores (may be delayed by shared-port backpressure)
     DMA.WAIT  2
     DMA.WAIT  3
 
@@ -326,7 +339,7 @@
 
     # MXU0 compute C2 = X2 @ W2
     VMATMUL.MXU0      0, 0, 0
-    DELAY 120
+    DELAY 200
 
     # Pop C2 → m4,m5
     VMATPOP.BF16.MXU0  4, 0

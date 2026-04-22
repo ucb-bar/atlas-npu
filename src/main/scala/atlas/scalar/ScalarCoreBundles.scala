@@ -74,10 +74,10 @@ class XluCmd extends Bundle {
   val srcBank = UInt(6.W)
 }
 
-class LsuCmd extends Bundle {
+class LsuCmd(vmemP: VmemParams) extends Bundle {
   val op           = UInt(2.W)
   val mregBank     = UInt(6.W)
-  val vmemLineAddr = UInt(13.W)
+  val vmemLineAddr = UInt(vmemP.lineAddrBits.W)
 }
 
 class ScalarCoreIO(spP: VmemParams) extends Bundle {
@@ -87,7 +87,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val mxu1Cmd       = Valid(new MxuCmd)
   val vpuCmd        = Valid(new VpuCmd)
   val xluCmd        = Valid(new XluCmd)
-  val lsuCmd        = Valid(new LsuCmd)
+  val lsuCmd        = Valid(new LsuCmd(spP))
 
   val scalarMemCmd  = Valid(new LsuScalarCmd(spP))
   val scalarMemResp = Flipped(Valid(UInt(32.W)))
