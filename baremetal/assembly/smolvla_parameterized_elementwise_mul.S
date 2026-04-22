@@ -1,0 +1,119 @@
+# smolvla_parameterized_elementwise_mul.S — tiled C = A * B for 64x64 BF16
+# Port of jrmills20 parameterized_elementwise_mul.py, but using Atlas bank-split
+# tile layout (matching stock smolvla_elementwise_mul) and a scalar tile loop.
+# @TIMEOUT 1000000
+# @DRAM_BASE 0x90000000
+# @PYTHON_GEN gen_smolvla_parameterized_elementwise_mul.py
+#
+# Shape: M=128, N=128 → M_tiles=4, N_tiles=4, total_tiles=16. Tile-major order.
+# Each 32x32 bf16 tile is laid out bank-split internally (matches stock):
+#   [tile_base + 0x0000 .. tile_base + 0x03FF]  bank 0 (cols 0..15)
+#   [tile_base + 0x0400 .. tile_base + 0x07FF]  bank 1 (cols 16..31)
+#
+# DRAM layout (set by gen_smolvla_parameterized_elementwise_mul.py):
+#   [0x00000..0x07FFF]  A (16 tiles x 2048B = 32KB)
+#   [0x08000..0x0FFFF]  B (16 tiles x 2048B)
+#   [0x10000..0x17FFF]  C (16 tiles x 2048B)
+#
+# VMEM staging (reused every iteration):
+#   [0..255]     A bank 0 (32 beats x 32B)
+#   [256..511]   A bank 1
+#   [512..767]   B bank 0
+#   [768..1023]  B bank 1
+#   [1024..1279] out bank 0
+#   [1280..1535] out bank 1
+#
+# Register map:
+#   x2   = bank size in bytes (1024)
+#   x5   = DRAM base (0x90000000)
+#   x10  = tile_idx counter (0..total_tiles)
+#   x11  = total_tiles (4)
+#   x20  = tile_idx * 2048 (per-tile DRAM stride)
+#   x21  = B DRAM base offset (0x2000)
+#   x22  = C DRAM base offset (0x4000)
+#   x28  = fail exit code
+#   x1, x3, x6, x7, x8 = DMA offset / VMEM addr scratch
+
+    ADDI  x28, x0, 1
+
+    LI    x5, 0x90000000
+    DMA.CONFIG x5, 0
+    LI    x2, 1024
+    LI    x21, 0x8000
+    LI    x22, 0x10000
+    ADDI  x11, x0, 16
+
+    ADDI  x10, x0, 0           # tile_idx = 0
+
+tile_loop:
+    SLLI  x20, x10, 11         # x20 = tile_idx * 2048
+
+    # ── Load A tile: [0x0000 + x20, +0x0400, +0x07FF] ──
+    ADDI  x1, x20, 0           # A bank 0 DRAM offset
+    ADDI  x6, x0, 0            # VMEM[0]
+    DMA.LOAD  x6, x1, x2, 0
+    DMA.WAIT  0
+    ADDI  x1, x20, 1024        # A bank 1 DRAM offset
+    LI    x6, 256              # VMEM[256]
+    DMA.LOAD  x6, x1, x2, 0
+    DMA.WAIT  0
+
+    # VLOAD A -> (m0, m1)
+    ADDI  x6, x0, 0
+    VLOAD 0, x6, 0
+    DELAY 40
+    VLOAD 1, x6, 8
+    DELAY 40
+
+    # ── Load B tile: [0x2000 + x20, +0x2400, +0x27FF] ──
+    ADD   x1, x21, x20         # B bank 0 DRAM offset = 0x2000 + x20
+    LI    x7, 512              # VMEM[512]
+    DMA.LOAD  x7, x1, x2, 0
+    DMA.WAIT  0
+    ADDI  x1, x1, 1024         # B bank 1
+    LI    x7, 768              # VMEM[768]
+    DMA.LOAD  x7, x1, x2, 0
+    DMA.WAIT  0
+
+    # VLOAD B -> (m2, m3)
+    LI    x7, 512
+    VLOAD 2, x7, 0
+    DELAY 40
+    VLOAD 3, x7, 8
+    DELAY 40
+
+    # ── Compute: (m4, m5) = (m0, m1) * (m2, m3) ──
+    VMUL.BF16 4, 0, 2
+    DELAY 150
+
+    # VSTORE out -> VMEM[1024..1279]
+    LI    x8, 1024
+    VSTORE 4, x8, 0
+    DELAY 40
+    VSTORE 5, x8, 8
+    DELAY 40
+
+    # ── DMA out: VMEM[1024..1279] → DRAM[0x4000 + x20, +0x4400, +0x47FF] ──
+    ADD   x3, x22, x20         # C bank 0 DRAM offset = 0x4000 + x20
+    LI    x8, 1024
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+    ADDI  x3, x3, 1024
+    LI    x8, 1280
+    DMA.STORE x3, x8, x2, 1
+    DMA.WAIT  1
+
+    # ── Advance ──
+    ADDI  x10, x10, 1
+    BNE   x10, x11, tile_loop
+    NOP                        # delay slot 1 (always executes)
+    NOP                        # delay slot 2 (always executes)
+
+pass:
+    ADDI  x1, x0, 1
+    CSRRW x0, 0xC10, x1
+    ECALL
+
+fail:
+    CSRRW x0, 0xC10, x28
+    ECALL

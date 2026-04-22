@@ -98,21 +98,39 @@ def run_unary_rows(op: str, rows: Sequence[Sequence[int]]) -> list[list[int]]:
 
 
 def run_row_reduce_tensor(op: str, rows: Sequence[Sequence[int]]) -> list[list[int]]:
-    if len(rows) != ROWS_PER_TENSOR:
+    """Row-reduce `rows` treated as a concatenation of bank-split tile pairs.
+
+    Each tile pair is `ROWS_PER_TENSOR` rows: the first `ROWS_PER_REGISTER`
+    are bank 0 and the next `ROWS_PER_REGISTER` are bank 1. The reduction is
+    *local* to each tile pair — no cross-tile semantics — so arbitrary
+    multiples of `ROWS_PER_TENSOR` are supported by reducing each chunk
+    independently and concatenating the results.
+
+    For a single 64-row input this reproduces the original single-tile
+    contract exactly (back-compat for stock smolvla_reduction_sum).
+    """
+    if len(rows) == 0 or len(rows) % ROWS_PER_TENSOR != 0:
         raise ValueError(
-            f"{op}: expected {ROWS_PER_TENSOR} rows for a BF16 tensor pair, got {len(rows)}"
+            f"{op}: expected a positive multiple of {ROWS_PER_TENSOR} rows "
+            f"(one full bank-split tile pair per chunk), got {len(rows)}"
         )
-    out_rows: list[list[int]] = []
-    for row_idx in range(ROWS_PER_REGISTER):
-        reduced = list(
-            MODEL.execute(
-                op,
-                a_vec=list(rows[row_idx]),
-                b_vec=list(rows[row_idx + ROWS_PER_REGISTER]),
+    out_all: list[list[int]] = []
+    for chunk_start in range(0, len(rows), ROWS_PER_TENSOR):
+        chunk = rows[chunk_start:chunk_start + ROWS_PER_TENSOR]
+        chunk_out: list[list[int]] = []
+        for row_idx in range(ROWS_PER_REGISTER):
+            reduced = list(
+                MODEL.execute(
+                    op,
+                    a_vec=list(chunk[row_idx]),
+                    b_vec=list(chunk[row_idx + ROWS_PER_REGISTER]),
+                )
             )
-        )
-        out_rows.append(list(reduced))
-    return out_rows + [list(row) for row in out_rows]
+            chunk_out.append(list(reduced))
+        # VREDSUM.ROW.BF16 broadcasts the scalar back to both banks → H0 == H1.
+        out_all.extend(chunk_out)
+        out_all.extend([list(r) for r in chunk_out])
+    return out_all
 
 
 def run_binary_rows(
