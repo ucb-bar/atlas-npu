@@ -1,13 +1,9 @@
 """lane_boxes/exp.py — funct model of `ExpLane.scala`.
 
-`Exp` is the BF16 vector exp / exp2 lane box. The `exp(x)` path is now
-bit-exact with the RTL by delegating to the standalone FPEX BF16 model
-under `dependencies/fpex/model/bf16_exp_model.py`, which already
-captures the RawFloat → Q(m,n) → LUT → HardFloat-round-trip exactly.
-
-`exp2(x)` is still routed through a Python-math fallback for now; the
-current failing overlap suites only exercise the natural-exponential
-path, and matching that path exactly is the critical correctness fix.
+`Exp` is the BF16 vector exp / exp2 lane box. Both paths are bit-exact
+with the RTL by delegating to the standalone FPEX BF16 model under
+`dependencies/fpex/model/bf16_exp_model.py`, which captures the
+RawFloat → Q(m,n) → LUT → HardFloat-round-trip exactly.
 
 Visible latency assumption: 1 cycle (`ExpLane.scala:77` says
 `numIntermediateStages = 1`, no extra LUT-output register downstream
@@ -20,9 +16,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import importlib.util
-import math
 from pathlib import Path
-import struct
 import sys
 from typing import Optional
 
@@ -58,36 +52,17 @@ def _load_exact_exp_bf16_bits():
     module = importlib.util.module_from_spec(spec)
     sys.modules.setdefault(spec.name, module)
     spec.loader.exec_module(module)
-    return module.exp_bf16_bits
+    return module.exp_bf16_bits, module.exp2_bf16_bits
 
 
-_EXACT_EXP_BF16_BITS = _load_exact_exp_bf16_bits()
-
-
-def _bf16_bits_to_f32(bits: int) -> float:
-    return struct.unpack(">f", struct.pack(">I", (bits & 0xFFFF) << 16))[0]
-
-
-def _f32_to_bf16_bits_rne(x: float) -> int:
-    if math.isnan(x):
-        return 0x7FC0
-    if x == float("inf"):
-        return 0x7F80
-    if x == float("-inf"):
-        return 0xFF80
-    fp32_int = struct.unpack(">I", struct.pack(">f", x))[0]
-    lower_16 = fp32_int & 0xFFFF
-    bit_16 = (fp32_int >> 16) & 1
-    if lower_16 > 0x8000 or (lower_16 == 0x8000 and bit_16 == 1):
-        fp32_int = (fp32_int + 0x8000) & 0xFFFFFFFF
-    return (fp32_int >> 16) & 0xFFFF
+_EXACT_EXP_BF16_BITS, _EXACT_EXP2_BF16_BITS = _load_exact_exp_bf16_bits()
 
 
 class Exp:
     """Mirror of `class Exp` in `ExpLane.scala`.
 
-    The natural-exponential path is exact. Base-2 exponential is kept as
-    a temporary math fallback until the RTL-faithful port lands.
+    Mirrors the shared LUT-assisted RTL datapath for natural and base-2
+    exponentiation.
     """
 
     LATENCIES: dict[str, int] = {"exp": 1, "exp2": 1}
@@ -116,14 +91,7 @@ class Exp:
 
             bits = req.xVec[i] & 0xFFFF
             if req.isBase2:
-                x = _bf16_bits_to_f32(bits)
-                try:
-                    y = 2.0 ** x
-                except OverflowError:
-                    y = float("inf") if x > 0 else 0.0
-                except ValueError:
-                    y = float("nan")
-                out.append(_f32_to_bf16_bits_rne(y))
+                out.append(_EXACT_EXP2_BF16_BITS(bits))
             else:
                 out.append(_EXACT_EXP_BF16_BITS(bits))
         return FPEXResp(result=out)

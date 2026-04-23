@@ -143,12 +143,36 @@ for test_name in "${TEST_NAMES[@]}"; do
   BUILD_STATUS+=("$rc")
 done
 
-# ── Phase 2: CMake configure + build (once, serial) ────────────────────
+# ── Phase 2: CMake configure + build ───────────────────────────────────
+# Build only the atlas_<name> targets the user asked for (default `all`
+# globs every assembly/*.S — 85+ binaries + objdump dumps — which is
+# ~85× wasted work when the user only wants one test). With --all we
+# still build everything. Parallelism follows the user's -jN cap when
+# given, otherwise nproc — so -jN means "at most N concurrent in both
+# build and sim."
 echo "============================================================"
 echo "CMake configure + build (shared)"
 echo "============================================================"
 cmake -S "$TESTS_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Debug || exit 1
-cmake --build "$BUILD_DIR" || exit 1
+
+if [[ ${MAX_JOBS:-0} -gt 0 ]]; then
+  BUILD_PAR="$MAX_JOBS"
+else
+  BUILD_PAR="$(nproc)"
+fi
+
+if [[ $RUN_ALL -eq 1 ]]; then
+  cmake --build "$BUILD_DIR" -j"$BUILD_PAR" || exit 1
+else
+  build_targets=()
+  for i in "${!TEST_NAMES[@]}"; do
+    [[ "${BUILD_STATUS[$i]}" -eq 0 ]] || continue
+    build_targets+=("atlas_${TEST_NAMES[$i]}")
+  done
+  if [[ ${#build_targets[@]} -gt 0 ]]; then
+    cmake --build "$BUILD_DIR" --target "${build_targets[@]}" -j"$BUILD_PAR" || exit 1
+  fi
+fi
 
 # Verify binaries exist for each successfully-prepped test.
 for i in "${!TEST_NAMES[@]}"; do
@@ -228,7 +252,7 @@ for i in "${!TEST_NAMES[@]}"; do
     SIM_EXIT+=("0")   # overwritten after wait
     running_pids+=("$pid")
   else
-    echo "  [serial] $tn"
+    echo "  [serial] $tn → $log"
     sim_one_test "$tn" "$log"
     SIM_PID+=("0")
     SIM_EXIT+=("$?")
