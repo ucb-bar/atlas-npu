@@ -1,0 +1,124 @@
+# branch_accel_delay_slots_dma_vpu_xlu.S
+# @TIMEOUT 400000
+# @DRAM_BASE 0x90000000
+# @PYTHON_GEN gen_branch_accel_delay_slots_dma_vpu_xlu.py
+#
+# Coverage intent:
+#   - Control-flow with architecturally visible accelerator side effects in delay slots.
+#   - DMA side effects from branch delay slots (launch + wait on a taken BEQ).
+#   - VLI + XLU side effects from not-taken BNE delay slots.
+#   - VSTORE side effect from a JAL delay slot, proving delay slots execute before transfer.
+#   - End-to-end dataflow closed through DMA load/store and exact generator comparison.
+#
+# DRAM byte layout (generator-backed):
+#   [0x0000 .. 0x03FF]  FP8 input tile for BEQ-delay-slot DMA load     (1024 B)
+#   [0x0400 .. 0x07FF]  DRAM result of JAL-delay-slot VSTORE           (1024 B)
+#   [0x0800 .. 0x0BFF]  DRAM result of BNE-delay-slot XLU transpose    (1024 B)
+#
+# VMEM layout:
+#   word 0    / byte    0  : FP8 staging tile loaded by BEQ delay slots
+#   word 256  / byte 1024  : JAL-delay-slot VSTORE output
+#   word 512  / byte 2048  : BNE-delay-slot XLU-transpose output
+#
+# MREG allocation:
+#   m20  = FP8 tile loaded by DMA in BEQ delay slots
+#   m24  = VLI.COL-written source bank for XLU
+#   m25  = XLU transpose destination
+#
+# Key scheduling fix vs. prior failing version:
+#   - VLI.COL writes m24. The immediately-following VTRPOSE.XLU 25,24 in the second
+#     branch delay slot read m24 while its write was still pending, tripping the
+#     ScalarCore MREG RAW hazard assertion. Keep VLI.COL in the BNE delay slot, then
+#     issue VTRPOSE.XLU only after a conservative VPU completion delay in fallthrough.
+#
+    ADDI  x28, x0, 1
+
+    LI    x5, 0x90000000
+    DMA.CONFIG x5, 0
+
+    LI    x8, 1024          # common 1 KiB transfer size
+
+    # VMEM word-address constants
+    LI    x6, 0             # VMEM word 0     -> byte 0
+    LI    x9, 256           # VMEM word 256   -> byte 1024
+    LI    x10, 512          # VMEM word 512   -> byte 2048
+
+    # DRAM byte-offset constants
+    LI    x7, 0             # input tile
+    LI    x11, 1024         # output tile 0
+    LI    x12, 2048         # output tile 1
+
+# ----------------------------------------------------------------------
+# Case 1: taken BEQ; both delay slots must execute before redirect.
+# Delay slot 1 launches DMA.LOAD, delay slot 2 waits for completion.
+# ----------------------------------------------------------------------
+    BEQ   x0, x0, beq_target
+    DMA.LOAD x6, x7, x8, 0
+    DMA.WAIT 0
+
+    ADDI  x28, x0, 101
+    JAL   x0, fail
+    NOP
+    NOP
+
+beq_target:
+    VLOAD 20, x6, 0         # m20 <- loaded FP8 tile
+    DELAY 40
+
+# ----------------------------------------------------------------------
+# Case 2: not-taken BNE; both delay slots still execute.
+# Delay slot 1 writes m24 with a column-immediate pattern.
+# Delay slot 2 is an independent NOP to preserve legal delay-slot behavior.
+# Fallthrough then waits for VLI completion before issuing XLU transpose.
+# ----------------------------------------------------------------------
+    BNE   x0, x0, bne_unreached
+    VLI.COL 24, 0x3F80
+    NOP
+
+    DELAY 150
+    VTRPOSE.XLU 25, 24
+    DELAY 80
+    VSTORE 25, x10, 0       # store XLU output to VMEM[2048..3071]
+    DELAY 40
+    DMA.STORE x12, x10, x8, 1
+    DMA.WAIT 1
+    JAL   x0, after_bne_case
+    NOP
+    NOP
+
+bne_unreached:
+    ADDI  x28, x0, 102
+    JAL   x0, fail
+    NOP
+    NOP
+
+after_bne_case:
+# ----------------------------------------------------------------------
+# Case 3: JAL helper; delay slots execute before control enters helper.
+# Delay slot 1 VSTOREs m20 to VMEM word 256, which helper then DMA.STOREs.
+# Delay slot 2 provides the conservative VSTORE completion wait before helper reads VMEM.
+# ----------------------------------------------------------------------
+    JAL   x1, helper_store
+    VSTORE 20, x9, 0
+    DELAY 40
+
+    JAL   x0, pass
+    NOP
+    NOP
+
+helper_store:
+helper_body:
+    DMA.STORE x11, x9, x8, 2
+    DMA.WAIT 2
+    JALR  x0, x1, 0
+    NOP
+    NOP
+
+pass:
+    ADDI  x1, x0, 1
+    CSRRW x0, 0xC10, x1
+    ECALL
+
+fail:
+    CSRRW x0, 0xC10, x28
+    ECALL

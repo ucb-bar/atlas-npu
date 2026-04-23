@@ -1,0 +1,115 @@
+{
+  "analysis": {
+    "goal": "Analyze the current Atlas baremetal suite once and produce a coverage map that directly guides the single coverage-driven planning loop.",
+    "instructions": [
+      "Inventory the suite by subsystem, instruction family, and major integration pattern rather than only by filename.",
+      "Distinguish instruction presence from meaningful behavioral coverage; a subsystem is not well covered just because one opcode appears once.",
+      "Use the measured RTL coverage report to identify which modules and behaviors are empirically under-covered.",
+      "Call out the highest-value missing interactions, especially places where data movement, compute, and control flow should meet.",
+      "Prioritize brand-new test ideas that close real measured gaps while staying debuggable and regression-worthy.",
+      "Note when a proposed idea likely needs a golden generator and explain why."
+    ],
+    "output_requirements": [
+      "Use structured Markdown with clear sections so a planner can consume it directly.",
+      "Include a subsystem inventory, per-subsystem coverage assessment, integration-gap analysis, and a ranked list of concrete next test ideas.",
+      "For each proposed idea, specify the subsystems involved, expected dataflow, likely oracle style, and rough complexity.",
+      "Make the recommendations specific enough that an implementer could turn them into a full test without redoing the analysis."
+    ],
+    "guardrails": [
+      "Do not recommend tests that merely duplicate an existing pattern with cosmetic changes.",
+      "Do not over-credit coverage when the current test only exercises a happy path or a trivial operand choice.",
+      "Prefer analysis that is actionable and falsifiable over broad but vague statements."
+    ]
+  },
+  "planning": {
+    "goal": "Produce net-new baremetal tests that improve the measured RTL coverage profile of the Atlas suite.",
+    "instructions": [
+      "Select test ideas from the analysis that create genuinely new coverage rather than modest variations of existing tests.",
+      "Each generated test should exercise at least three subsystems in one coherent end-to-end story.",
+      "Use the optimization menu as a search space for how to combine subsystems, shape dataflow, choose an oracle, and stress the design.",
+      "Prefer tests whose correctness argument is understandable from the assembly and generator together.",
+      "Name tests descriptively and make them feel like production-quality regression assets, not throwaway experiments.",
+      "Honor the harness preload/oracle contract exactly: every `DMA.LOAD` must get its input data from either a generator-produced JSON preload or inline `# @DRAM` annotations in the assembly; there is no implicit DRAM initialization path.",
+      "For generator-backed tests, the generator is responsible for producing the DRAM preload payloads and the golden DRAM check payloads that define correctness for the test.",
+      "When writing Python goldens, follow the checked-in `generators/gen_utils.py` helper API exactly rather than inventing new helper arguments or JSON fields.",
+      "Treat DMA sequencing conservatively by default: after each DMA.LOAD or DMA.STORE, emit a matching DMA.WAIT before issuing another DMA request unless the test is explicitly and intentionally about DMA concurrency.",
+      "Treat the LSU as a single shared resource: do not issue back-to-back LSU commands (`VLOAD`, `VSTORE`, scalar loads/stores, `SELD`) without enough separation; insert independent non-LSU work or explicit DELAYs so the previous LSU operation has completed.",
+      "When a generator is needed, model the assembly's actual value-domain dataflow rather than emitting placeholder or copied-input checks.",
+      "Use datatype-specific helpers correctly: FP8 tensors should typically flow through `matrix_to_fp8_words()` before packed beat helpers, BF16 tensors through `matrix_to_bf16_words()`, and row-wise BF16 VPU data through the checked-in row helpers.",
+      "Treat the generator as part of the test's correctness proof: explain memory regions clearly, keep offsets consistent with the assembly, and derive expected outputs from the transformed tensors that the assembly really produces.",
+      "Double-check that every preload value, preload offset, check value, and check offset matches the test intent, the assembly's memory map, and the Atlas ISA/spec behavior being exercised.",
+      "Prefer assembly self-checking over a Python generator when the expected result can be validated with a small number of scalar loads, branches, or signatures.",
+      "Treat scalar-observable loads, branch predicates, and signatures as a coverage tool for tests whose intent actually includes scalar/control interaction; do not add them as ornamental 'extra checking' to a generator-backed compute test that already has a complete DRAM oracle.",
+      "When a test uses both a generator-backed DRAM oracle and a scalar-observable/control-flow check, design them so the scalar check cannot suppress or bypass the DRAM-producing path; the scalar check should refine coverage, not become a second fragile oracle."
+    ],
+    "output_requirements": [
+      "Return exactly the requested number of tests as JSON and nothing else.",
+      "Each test must be complete, self-contained, and runnable with the standard pass/fail epilogue and directives.",
+      "Ensure the assembly reflects Atlas timing and control-flow realities, including branch delay slots and explicit waits/delays.",
+      "Optimize for meaningful post-run coverage gain, not cosmetic novelty.",
+      "Include a generator exactly when the oracle requires one; otherwise keep the test assembly-only.",
+      "Any generator-backed test must include a generator that produces correctly packed DRAM preload data and golden DRAM check data for the datatypes used by the assembly, not ad hoc byte arrays or placeholder zeros.",
+      "When the assembly transforms data (transpose, unpack, relu, pack, reduction, matmul, etc.), the generator must compute the transformed expected outputs rather than reusing the input payloads."
+    ],
+    "guardrails": [
+      "Avoid tests that are overly broad, impossible to debug, or depend on unexplained magic constants.",
+      "Do not generate a new test if the same coverage gain can only be justified as a tiny variant of an existing one.",
+      "Do not ignore synchronization, alignment, or latency hazards in order to make the program look simpler.",
+      "Do not rely on multiple outstanding DMA requests across channels in ordinary regression tests; serialize DMA traffic with DMA.WAIT unless the test purpose is to probe DMA implementation limits.",
+      "Do not assume the LSU will self-stall for VMEM hazards: a sequence like back-to-back `VLOAD`s or `VSTORE` followed immediately by a scalar load/store can assert in RTL. Schedule around LSU busy explicitly.",
+      "Do not emit an assembly-only test that uses `DMA.LOAD` unless the assembly itself includes the required inline `# @DRAM` preload annotations. If the test needs preload data but inline annotations would be bulky or brittle, use a generator instead.",
+      "Do not pass raw byte lists or unpacked element arrays directly into `preloads_from_words_packed()` or `checks_from_words_packed()`; convert them to the correct 32-bit word layout first.",
+      "Do not model FP8/BF16 compute by applying NumPy operations directly to packed storage bytes unless the test is explicitly byte-level; operate on architectural values and then repack.",
+      "Do not write a generator that simply copies inputs to outputs when the assembly performs a non-identity transform."
+    ]
+  },
+  "assembly_syntax_and_conventions": "Write Atlas assembly to match `baremetal/assembler.py` and the checked-in suite, not generic RV32I folklore.\n\n- **Directives**: Use `# @TIMEOUT <cycles>` on every test. Add `# @DRAM_BASE 0x90000000` when the test depends on the standard DMA base. Add `# @PYTHON_GEN <script.py> [args...]` only when a golden generator is required.\n- **Canonical structure**: Use a short header comment, initialize `x28` as the failure/test-case counter when useful, and end with the standard epilogue: `pass:` writes `1` to CSR `0xC10` then `ECALL`; `fail:` writes `x28` to CSR `0xC10` then `ECALL`.\n- **Operands**: Scalar registers are `x0..x31`. MREG operands are plain numeric bank indices `0..63`, not `m0`-style names. Scale-register operands are plain numeric indices `0..31`. `accSel`/`wSlot` should be treated as `0` or `1`, and DMA channels as `0..7`. In ISA prose you may see `m[vd]`; in `.S` files emit just `vd`.\n- **Accepted convenience syntax**: `LI xN, imm32` and `NOP` are fine. Labels are `name:` on their own line.\n- **Control flow is word-addressed**: The scalar PC is in IMEM words, so numeric branch/JAL/JALR offsets are in **words**, not bytes. Atlas has **two architectural delay slots** after every branch or jump; they execute unconditionally *before* control transfers to the target (not after a callee returns). Default delay-slot content is `NOP`; never place another branch/jump in either slot. See the `Delay-slot semantics` test-correctness invariant for the full rule.\n- **Address units matter**: Scalar loads/stores and `SELD` use **local VMEM byte addresses**. `VLOAD`/`VSTORE` base registers and DMA VMEM operands use **local VMEM word addresses**. DMA DRAM operands are **byte offsets from the `DMA.CONFIG` base**.\n- **DMA syntax and discipline**: Use scalar registers for DMA register operands, e.g. `DMA.CONFIG x5, 0`, `DMA.LOAD x6, x10, x12, 0`, `DMA.STORE x10, x6, x12, 1`, `DMA.WAIT 1`. Load `x5` (or another scalar register) with `0x90000000` before `DMA.CONFIG`; current hardware treats that base as global. Keep DRAM offsets, VMEM word addresses, and transfer sizes aligned to the 32-byte DMA beat, and keep each transfer `<= 4096` bytes. Reuse a DMA channel only after `DMA.WAIT ch`.\n- **VLOAD/VSTORE addressing**: `VLOAD`/`VSTORE` use VMEM word bases plus an `imm12` step of `32` words, so adjacent 1 KiB tensor slots are typically selected with immediates `0, 8, 16, ...`. Keep effective bases 1 KiB aligned.\n- **Scheduling model**: Only `DELAY imm` and `DMA.WAIT ch` stall the scalar pipe. Most accelerator commands are fire-and-forget; software must avoid issuing them too early. If you are not intentionally testing overlap behavior, schedule conservatively like the handwritten suite.\n- **Safe default delays**: Use these as the default starting point unless the test is explicitly about concurrency: scalar load/`SELD` consumed immediately -> `DELAY 1`; `VLOAD`/`VSTORE` completion -> about `DELAY 40`; `VTRPOSE.XLU` -> about `DELAY 80`; simple MXU push/pop -> about `DELAY 40`; standalone MXU matmul before pop/readback -> about `DELAY 120`; standalone VPU or `VLI.*` op -> about `DELAY 150`; column reductions -> about `DELAY 250`. For DMA completion, use `DMA.WAIT`, not a fixed `DELAY`.\n- **LSU and VMEM hazards**: Scalar loads/stores, `SELD`, `VLOAD`, and `VSTORE` all touch shared LSU/VMEM resources. Do not emit back-to-back same-path LSU commands or same-bank conflicting accesses unless the test is intentionally probing that hazard and is carefully scheduled.\n- **Engine-specific conventions**: Use `VTRPOSE.XLU vd, vs1`; use `VLI.ALL`, `VLI.ROW`, `VLI.COL`, and `VLI.ONE` exactly; use `VFP8PACK` / `VFP8UNPACK` exactly. For pair-based BF16 VPU ops, keep `vd`, `vs1`, and `vs2` even. For MXU BF16 push/pop scheduling, remember some operations reserve a bank pair (`vd` and `vd+1` or `vs` and `vs+1`).",
+  "preload_oracle_contract": "The planner must obey the real baremetal harness contract used by `assembler.py` and `verif_buddy.py`.\n\n- **There are only two preload/check sources**: (1) a generator-backed JSON passed via `--golden-json`, or (2) inline assembly comments parsed by `assembler.py` using `# @DRAM_BASE`, `# @DRAM`, and `# @CHECK_DRAM`.\n- **There is no third path**: the harness does not infer DRAM contents from assembly comments, test descriptions, or intended constants, and it does not auto-preload DRAM for assembly-only tests.\n- **If a test uses `DMA.LOAD`, its source DRAM contents must come from one of those two sources.** An assembly-only test that issues `DMA.LOAD` but has neither a generator nor inline `# @DRAM` annotations is invalid under the current flow.\n- **Assembly-only tests are best for compact self-checks.** Use them when expected values can be derived with scalar loads, branches, signatures, and a small amount of inline preload data.\n- **Use inline `# @DRAM` / `# @CHECK_DRAM` only for small, auditable payloads.** If the preload/check payload is large, patterned, multi-region, or derived from real compute, prefer a generator instead of dumping dozens of inline beats.\n- **Generator-backed tests must define both preload and oracle data.** The generator must emit the `dram_preloads` and `dram_checks` JSON that the harness consumes; it is not enough for the assembly to include `# @PYTHON_GEN` as a documentary comment.\n- **`# @PYTHON_GEN` is a documentation marker, not the execution mechanism.** In this flow, `verif_buddy.py` decides whether a generator runs from the planner's `has_generator` / `generator` fields, then writes `gen_<name>.py` and `<name>.json` into the canonical generator directory.\n- **Inline directive syntax must match the assembler exactly**: `# @DRAM_BASE <addr>`, `# @DRAM <beat_offset> <hex_payload>`, `# @CHECK_DRAM <beat_offset> <hex_payload>`. Offsets are DMA-beat offsets relative to `@DRAM_BASE`, not byte offsets.\n- **Choose the oracle path explicitly** before writing the test: either self-check in assembly with small inline preloads, or use a generator that produces complete preloads and expected outputs. Do not mix a DMA-fed test with an unspecified preload source.",
+  "test_correctness_invariants": [
+    {
+      "name": "Dataflow closure",
+      "rule": "Generators preload DRAM only. To reach VMEM, data MUST pass through a `DMA.LOAD`. Every consumer that reads VMEM — `DMA.STORE` source, `VLOAD` base, scalar `LW`/`LBU`/`LHU`/`LB`, `SELD` — must read from a region the program wrote first (prior `DMA.LOAD` covering the exact bytes, prior `VSTORE` of computed data, or prior scalar `SW`/`SH`/`SB`). Architectural state that isn't VMEM/DRAM (scale registers, MXU weight slots, MXU accumulator buffers, MREG banks) cannot be preloaded at all — it is populated only by assembly instructions (`SELD`/`SELI`, `VMATPUSH.*`, `VLOAD`). Symmetrically, every `DMA.LOAD` has matching preload bytes at the same DRAM beat offset/length, and every `DMA.STORE` has matching `checks` at the destination beat offset.",
+      "why": "Reading uninitialized VMEM yields silent failures with distinctive patterns — `got 0x00000000` everywhere, or for scale-consuming ops like `VFP8PACK`/`VFP8UNPACK` an FP8-saturation pattern (`0x7e` bytes everywhere) because a zero scale byte is interpreted as an extreme exponent."
+    },
+    {
+      "name": "Unit discipline",
+      "rule": "Generator `word_offset` is a DMA-beat index (1 beat = 32 B). DMA DRAM register operands are byte offsets; inline `# @DRAM` offsets are beats. VMEM word addresses (VLOAD/VSTORE base, DMA VMEM operand) are 4 × byte address. VLOAD/VSTORE `imm` steps by 32 words = 128 B, so 8 steps span one 1 KiB MREG bank. Scalar `LW/SW/SB/...` and `SELD` use VMEM byte addresses.",
+      "why": "Conflating beats/bytes/words/imm-steps is the single most common source of wrong-offset mismatches."
+    },
+    {
+      "name": "MREG pair discipline",
+      "rule": "Most BF16 VPU ops (`VRELU`, `VADD.BF16`, `VSUB.BF16`, `VMUL.BF16`, `VFP8PACK`, `VFP8UNPACK`, and most unary/binary BF16 VPU math per the ISA) are pair ops: read `(vs1, vs1+1)` and `(vs2, vs2+1)`, write `(vd, vd+1)`, with `vd`/`vs1`/`vs2` even. To feed a full 32×32 BF16 tile, VLOAD *consecutive* banks (`vd`, `vd+1`) from the staged 2 KiB tile, but still respect LSU pacing: the canonical safe pattern is `VLOAD vd, ...` -> `DELAY 40` -> `VLOAD vd+1, ...` -> `DELAY 40`, not two back-to-back `VLOAD`s. Likewise emit BOTH `VSTORE vd` and `VSTORE vd+1` before the DMA.STORE drains the result, with separation between each store.",
+      "why": "Skipping a bank (loading `vd` and `vd+2`) leaves `vd+1` uninitialized; the pair op reads zeros for the high half and VSTORE+DMA.STORE drains zeros, failing half the output region."
+    },
+    {
+      "name": "Delay-slot semantics",
+      "rule": "Atlas has two architectural delay slots after every branch/`JAL`/`JALR`. They execute unconditionally in program order *before* control transfers to the target; they do NOT run after a callee returns. Do not place pointer/counter/size updates that the target reads into a delay slot. Default to `NOP`; any non-NOP content must be provably independent of both the target and the post-return continuation.",
+      "why": "Iteration 0 of a loop runs with pre-incremented state if induction vars live in delay slots, causing the first DMA/VLOAD to address the wrong region."
+    },
+    {
+      "name": "Scalar LSU isolation",
+      "rule": "The generator golden models value-domain tensor compute only. Scalar `SB`/`SH`/`SW` writes are NOT modeled. Any scalar store that lands inside a later-drained `DMA.STORE` source footprint silently corrupts the oracle at those bytes. Confine scalar stores to a dedicated scratch VMEM region disjoint from every DMA.STORE source. Scalar loads (`LW`/`LBU`/`LHU`/`LB`) inside live tiles are safe.",
+      "why": "A few scattered word-level mismatches inside an otherwise-correct tile usually means a scalar SB/SW poked into the tile."
+    },
+    {
+      "name": "Oracle-producing drains must dominate fail paths",
+      "rule": "If the generator emits DRAM `checks`, every `DMA.STORE` required to produce those checked bytes must execute on every architecturally valid path before any branch to `fail:` or early `ECALL`. Do not place a speculative scalar guard before the drains if that guard can skip them. Either drain first and then classify pass/fail, or ensure both branch arms still execute the same required stores before exiting.",
+      "why": "A bad pre-drain branch turns a local control mistake into a full-screen `got 0x00000000` failure, making a healthy compute/datapath look broken because the oracle region was never written back."
+    },
+    {
+      "name": "Scalar-observable predicate soundness",
+      "rule": "Use scalar-observable reads only when the test's coverage goal genuinely includes scalar/control interaction. When branching on a value derived from accelerator output, the planner must prove the predicate is robust under the generator's exact value set and quantization. Never use `BEQ value, x0, fail` or equivalent zero/non-zero predicates on VPU/MXU results unless the generator explicitly guarantees that sampled location cannot legally be zero, `-0.0`, or another edge-class value that aliases the chosen predicate. For generator-backed compute tests, prefer the DRAM oracle alone unless scalar interaction is itself the feature under test. If a scalar predicate is still required, branch on a dedicated scratch signature or on a generator-proven non-ambiguous value, not on the first word of a compute tile by convenience.",
+      "why": "Many legitimate Atlas results are zero-like at exactly the edge classes coverage tests want to hit; a naive sentinel makes the test fail for the interesting input rather than for a real bug."
+    },
+    {
+      "name": "Value-domain golden via gen_utils",
+      "rule": "If the assembly performs any non-identity transform (transpose, relu, matmul, pack/unpack, reduction, VPU math), compute the golden on architectural float values using `gen_utils.py` helpers — `matrix_to_bf16_words`, `matrix_to_fp8_words`, `quantize_bf16`, `quantize_fp8`, `bf16_matmul_reference`, `fp8_matmul_reference`, `float_to_bf16_bits`, `float_to_fp8_e4m3_bits`, `preloads_from_words_packed`, `checks_from_words_packed`, `emit_test_data` — then repack at the end. No custom encoding dicts, no `(v<<8)` fake FP8→BF16 shortcuts, no copying inputs to outputs.",
+      "why": "Reinvented encoders are almost always wrong on edge cases (denormals, rounding, sign handling) and produce values that look plausible but mismatch."
+    },
+    {
+      "name": "DMA serialization by default",
+      "rule": "Unless the test's explicit purpose is DMA concurrency, every `DMA.LOAD`/`DMA.STORE ch=k` is followed by `DMA.WAIT k` before the same channel is reused or before the next dependent compute fires. Inside loops, ensure the wait reaches the state the next iteration needs before that iteration issues.",
+      "why": "Issuing to a busy channel is illegal in the current RTL path; assuming multi-outstanding DMA works is unsafe."
+    }
+  ]
+}
