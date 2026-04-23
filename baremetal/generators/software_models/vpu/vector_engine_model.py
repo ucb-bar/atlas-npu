@@ -12,10 +12,8 @@ cycle-accurate driver. Register-level helpers such as
 `execute_vli_registers()` mirror the RTL's bank-pair semantics when a
 single architectural op spans multiple physical tensor registers.
 
-`exp` now routes through the exact BF16 FPEX model in
-`lane_boxes/exp.py`; `exp2` still uses a temporary Python-`math`
-fallback inside that lane box until the RTL-faithful base-2 path is
-ported.
+`exp` and `exp2` route through the exact BF16 FPEX model in
+`lane_boxes/exp.py`.
 
 `fp8pack` / `fp8unpack` are phased 2→1 / 1→2 and don't fit the
 single-pulse vector file format, so `gen_vectors.py` skips them in
