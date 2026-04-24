@@ -639,7 +639,7 @@ static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t 
 
 /* Atlas memory map */
 #define ATLAS_IMEM_BASE   0x00020000UL
-#define ATLAS_CSR_BASE    0x00030000UL
+#define ATLAS_CSR_BASE    0x00040000UL
 
 #define CSR_CYCLE         (ATLAS_CSR_BASE + 0x00)
 #define CSR_INSTCNT       (ATLAS_CSR_BASE + 0x04)
@@ -651,7 +651,6 @@ static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t 
 
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
-#define ATLAS_MAX_MISMATCH_PRINT 64U
 
 #define ATLAS_PROGRAM_LEN {n}
 
@@ -677,8 +676,6 @@ int main(void)
 {{
     uint32_t i;
     int fail = 0;
-    uint32_t mismatch_printed = 0;
-    int mismatch_truncated = 0;
 """
 
     if has_golden and golden[1]:
@@ -706,15 +703,8 @@ int main(void)
     for (i = 0; i < ATLAS_PROGRAM_LEN; i++) {{
         uint32_t got = mmio_read32(ATLAS_IMEM_BASE + i * 4);
         if (got != atlas_program[i]) {{
-            if (mismatch_printed < ATLAS_MAX_MISMATCH_PRINT) {{
-                printf("MISMATCH word[%u]: expected 0x%08x, got 0x%08x\\n",
-                       i, atlas_program[i], got);
-                mismatch_printed++;
-            }} else if (!mismatch_truncated) {{
-                printf("... additional mismatches suppressed after %u entries ...\\n",
-                       ATLAS_MAX_MISMATCH_PRINT);
-                mismatch_truncated = 1;
-            }}
+            printf("MISMATCH word[%u]: expected 0x%08x, got 0x%08x\\n",
+                   i, atlas_program[i], got);
             fail++;
         }}
     }}
@@ -745,8 +735,8 @@ int main(void)
     uint32_t status   = mmio_read32(CSR_STATUS);
 
     printf("  DBG0    = %u\\n", dbg0);
-    printf("  cycles  = %u\\n", cycles);
-    printf("  instcnt = %u\\n", instcnt);
+    printf("  mcycles = %u\\n", cycles);
+    printf("  minstret = %u\\n", instcnt);
     printf("  status  = 0x%08x\\n", status);
 
     if (dbg0 == 0) {{
@@ -761,15 +751,8 @@ int main(void)
     for (i = 0; i < CHECK_WORDS; i++) {{
         uint32_t got = mmio_read32(check_addrs[i]);
         if (got != check_expected[i]) {{
-            if (mismatch_printed < ATLAS_MAX_MISMATCH_PRINT) {{
-                printf("  DRAM MISMATCH word[%u] @ 0x%08x: expected 0x%08x, got 0x%08x\\n",
-                       i, (uint32_t)check_addrs[i], check_expected[i], got);
-                mismatch_printed++;
-            }} else if (!mismatch_truncated) {{
-                printf("... additional mismatches suppressed after %u entries ...\\n",
-                       ATLAS_MAX_MISMATCH_PRINT);
-                mismatch_truncated = 1;
-            }}
+            printf("  DRAM MISMATCH word[%u] @ 0x%08x: expected 0x%08x, got 0x%08x\\n",
+                   i, (uint32_t)check_addrs[i], check_expected[i], got);
             fail++;
         }}
     }}
