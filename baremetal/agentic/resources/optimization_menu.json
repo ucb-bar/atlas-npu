@@ -1,0 +1,88 @@
+{
+  "objective": "Use these strategy categories to invent net-new Atlas baremetal tests that close measured RTL coverage gaps, strengthen subsystem integration coverage, reflect realistic Pi0-style accelerator workloads, and avoid redundant regressions.",
+  "strategy_categories": [
+    {
+      "name": "Uncovered Integration Frontiers",
+      "description": "Choose gaps where multiple Atlas subsystems should interact but currently do not appear together in one coherent dataflow.",
+      "strategies": [
+        "Target subsystem combinations that the analyzer explicitly marks as absent or shallowly covered.",
+        "Prefer tests that exercise at least one data-movement stage, one compute stage, and one control or validation stage in the same program.",
+        "Prioritize combinations that force realistic producer-consumer flows such as DMA -> VMEM -> VPU/MXU -> DMA store-back.",
+        "Use both MXU0 and MXU1 when concurrency or dual-pipeline behavior is a meaningful differentiator.",
+        "Favor dataflows where the output of one functional unit becomes the direct input of another, such as DMA -> VLOAD -> VPU transform -> MXU consume -> VSTORE/DMA."
+      ]
+    },
+    {
+      "name": "Pi0 Workload Grounding",
+      "description": "Bias ideas toward the kinds of end-to-end tensor movement and compute patterns Atlas is meant to accelerate for the Pi0 model, not toy opcode demos.",
+      "strategies": [
+        "Prefer tests that look like plausible Pi0 kernels or subgraphs: staged tensor loads, vector transforms, matrix-heavy compute, reductions, requantization, and store-back.",
+        "Use operand sizes, tiling plans, and producer-consumer sequencing that resemble real accelerator work rather than isolated single-instruction smoke tests.",
+        "When choosing between equally valid ideas, select the one that better resembles a realistic Pi0 inference pipeline with multiple dependent stages.",
+        "Include control, synchronization, and memory-management behavior that would naturally arise in a model-serving workload, not just arithmetic in isolation."
+      ]
+    },
+    {
+      "name": "Functional Unit Chaining And Overlap",
+      "description": "Deliberately exercise handoff, overlap, and backpressure between Atlas engines so the planner covers execution fabric behavior instead of only isolated unit correctness.",
+      "strategies": [
+        "Exhaust meaningful opportunities to overlap independent work across DMA, LSU, MXU, VPU, XLU, and scalar control without violating documented hazard rules.",
+        "Build tests where one engine prepares data while another consumes prior results, so overlap is part of the intended execution story rather than accidental timing noise.",
+        "Use all functional units across the generated portfolio, and prefer individual tests that activate more than one compute path when the coverage report suggests weak integration.",
+        "Stress explicit handoff paths such as XLU transpose feeding MXU, VPU pack/unpack feeding DMA traffic, or reduction results steering later control flow."
+      ]
+    },
+    {
+      "name": "Oracle And Check Design",
+      "description": "Decide how the test will prove correctness in a way that is debuggable and proportionate to the complexity of the computation.",
+      "strategies": [
+        "Use assembly-only self-checking tests when the expected result is compact and can be derived inline with scalar instructions.",
+        "Use a golden generator when the test stores DRAM results, depends on randomized payloads, or combines enough stages that inline expected values would be brittle.",
+        "Make the failure mode localizable by checking intermediate milestones or by structuring results so mismatches point to a subsystem boundary.",
+        "Keep generators simple, deterministic, and tightly coupled to the assembly dataflow."
+      ]
+    },
+    {
+      "name": "Stress Dimensions",
+      "description": "Increase the chance of uncovering scheduler, hazard, alignment, and pipeline issues without making the test impossible to reason about.",
+      "strategies": [
+        "Vary transfer sizes, address offsets, loop trip counts, and operand patterns to stress edge cases rather than only nominal cases.",
+        "Exercise non-trivial control flow such as loops, branches, or phased pipelines when it reveals integration behavior.",
+        "Use delay-sensitive instruction sequences where the required latency management is part of what the test is validating.",
+        "Favor medium-complexity tests that are still inspectable over giant kitchen-sink programs.",
+        "Make some tests intentionally pressure scoreboard and replacement behavior by forcing register reuse, VMEM buffer turnover, and staged result consumption."
+      ]
+    },
+    {
+      "name": "Memory And Layout Choices",
+      "description": "Shape VMEM and DRAM usage so the generated test models realistic movement of tensors and exposes address-generation mistakes.",
+      "strategies": [
+        "Stage data through VMEM regions that reflect true producer-consumer handoff instead of artificial single-buffer shortcuts.",
+        "Choose layouts that require explicit address arithmetic, alignment discipline, and careful buffer reuse.",
+        "Use separate DRAM source and destination regions so the expected dataflow is auditable.",
+        "When practical, design the memory plan so one can reason about correctness from offsets and tile boundaries alone.",
+        "Include cases where VMEM is effectively full or heavily partitioned so the test must recycle buffers, replace tiles, or carefully avoid clobbering live data."
+      ]
+    },
+    {
+      "name": "Register And Capacity Pressure",
+      "description": "Create pressure on TRF, VMEM, and staging resources so the planner covers state replacement and long dependency chains rather than only clean-room setups.",
+      "strategies": [
+        "Include tests that intentionally fill most or all relevant tensor-register slots before introducing the next phase of work.",
+        "Force replacement behavior by reusing registers and VMEM regions after their prior contents have been consumed, then verify that the new values are the ones that propagate.",
+        "Prefer multi-phase programs where live state must be managed carefully across loads, compute, stores, and follow-on compute.",
+        "Use capacity pressure to expose bugs in bank selection, stale-data hazards, and producer-consumer bookkeeping."
+      ]
+    },
+    {
+      "name": "Coverage Portfolio Balance",
+      "description": "Choose tests that improve weak or underrepresented areas in the measured coverage report and suite-level mix.",
+      "strategies": [
+        "Bias new tests toward subsystems or subsystem pairings that remain underrepresented after accounting for the current suite and measured coverage report.",
+        "Prefer tests that connect isolated unit-style behaviors into stronger end-to-end coverage narratives.",
+        "Reduce blind spots around branch-delay handling, DMA synchronization, VMEM reuse, mixed compute pipelines, and functional-unit handoff behavior.",
+        "If multiple candidate tests are similar, pick the one most likely to complement the suite cleanly, activate a different set of engines, and raise overall confidence."
+      ]
+    }
+  ]
+}

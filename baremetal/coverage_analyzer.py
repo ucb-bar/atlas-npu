@@ -14,6 +14,25 @@ def _to_float_or_none(s: str) -> Optional[float]:
         return None
 
 
+# URG modinfo/dashboard: SCORE LINE COND TOGGLE FSM BRANCH [ASSERT] — ASSERT was
+# added in newer URG; instance table rows append NAME after ASSERT.
+_URG_METRIC = r"(?:--|[+-]?[\d.]+)"
+_URG_SCORE_ROW_RE = re.compile(
+    rf"^\s*(?P<sc>{_URG_METRIC})\s+"
+    rf"(?P<ln>{_URG_METRIC})\s+"
+    rf"(?P<cd>{_URG_METRIC})\s+"
+    rf"(?P<tg>{_URG_METRIC})\s+"
+    rf"(?P<fs>{_URG_METRIC})\s+"
+    rf"(?P<br>{_URG_METRIC})"
+    rf"(?:\s+(?P<as>{_URG_METRIC}))?\s*$"
+)
+_URG_INSTANCE_TABLE_ROW_RE = re.compile(
+    rf"^\s*(?:{_URG_METRIC})\s+(?:{_URG_METRIC})\s+(?:{_URG_METRIC})\s+(?:{_URG_METRIC})\s+"
+    rf"(?:{_URG_METRIC})\s+(?:{_URG_METRIC})\s+(?:{_URG_METRIC})\s+"
+    rf"(?P<name>\S+(?:\.\S+)+)\s*$"
+)
+
+
 class CoverageAnalyzer:
     """Parse URG coverage-overall reports and produce a coverage analysis text."""
 
@@ -140,16 +159,8 @@ class CoverageAnalyzer:
         }
 
         section_lines = text.splitlines()
-        score_re = re.compile(
-            r"^\s*(?P<sc>[\d.]+)\s+"
-            r"(?P<ln>--|[\d.]+)\s+"
-            r"(?P<cd>--|[\d.]+)\s+"
-            r"(?P<tg>--|[\d.]+)\s+"
-            r"(?P<fs>--|[\d.]+)\s+"
-            r"(?P<br>--|[\d.]+)\s*$"
-        )
-        for line in section_lines[:10]:
-            sm = score_re.match(line)
+        for line in section_lines[:25]:
+            sm = _URG_SCORE_ROW_RE.match(line)
             if sm:
                 data["score"] = _to_float_or_none(sm.group("sc"))
                 data["line"] = _to_float_or_none(sm.group("ln"))
@@ -159,8 +170,9 @@ class CoverageAnalyzer:
                 data["branch"] = _to_float_or_none(sm.group("br"))
                 break
 
-        inst_re = re.compile(r"^\s*[\d.]+\s+.*svsimTestbench\.\S+\s*$")
-        data["instance_count"] = sum(1 for l in section_lines if inst_re.match(l))
+        data["instance_count"] = sum(
+            1 for ln in section_lines if _URG_INSTANCE_TABLE_ROW_RE.match(ln)
+        )
 
         subsections = re.split(r"\n-{40,}\n", text)
         for sub in subsections:
