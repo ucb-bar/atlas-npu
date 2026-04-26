@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Generate test vectors for `smolvla_matmul_k_chain.S`.
+"""Generate test vectors for `smolvla_matmul_k_chain_mxu1.S`.
 
 Port of npu-model/npu_model/configs/programs/smolvla_matmul_k_chain.py.
-Two-K-tile FP8 matmul that exercises the MXU0 accumulator chain:
+Two-K-tile FP8 matmul that exercises the MXU1 accumulator chain:
 
-    C[32,32] = A[:, 0:32]  @ B[0:32,  :]      (VMATMUL.MXU0     → reset)
-             + A[:, 32:64] @ B[32:64, :]      (VMATMUL.ACC.MXU0 → accumulate)
+    C[32,32] = A[:, 0:32]  @ B[0:32,  :]      (VMATMUL.MXU1     → reset)
+             + A[:, 32:64] @ B[32:64, :]      (VMATMUL.ACC.MXU1 → accumulate)
 
 Seed 44 matches npu-model. Output is BF16, split across m8/m9
-(cols 0-15 and 16-31). Golden through atlas's SARTLLinearFunction,
+(cols 0-15 and 16-31). Golden through atlas's IPTLinearRTLFunction,
 which handles per-K-tile BF16 rounding internally and mirrors
 hardware exactly.
 """
@@ -27,7 +27,7 @@ from gen_utils import (
     pack_words_into_beats,
     emit_test_data,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
+from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
 
@@ -45,8 +45,8 @@ C_BANK3_BASE = C_BANK2_BASE + TILE  # beats 160..191
 
 
 def main():
-    sa_bf16 = SARTLLinearFunction(
-        rows=TILE, cols=TILE, out_fmt_sel=OutputFmtSel.OutBF16
+    ipt_bf16 = IPTLinearRTLFunction(
+        vec_len=TILE, num_lanes=TILE, pipeline_depth=1, out_fmt_sel=OutputFmtSel.OutBF16
     )
 
     torch.manual_seed(44)
@@ -67,7 +67,7 @@ def main():
 
     a_t = torch.from_numpy(a_q)
     w_t = torch.from_numpy(b_q.T.copy())  # (TILE, K) for F.linear convention
-    c_ref = sa_bf16(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
+    c_ref = ipt_bf16(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
 
     a_k0_beats = pack_words_into_beats(matrix_to_fp8_words(a_k0), WORDS_PER_BEAT)
     a_k1_beats = pack_words_into_beats(matrix_to_fp8_words(a_k1), WORDS_PER_BEAT)

@@ -1,15 +1,15 @@
-# smolvla_fused_matmul_bias.S - port of npu-model smolvla_fused_matmul_bias
+# smolvla_fused_matmul_bias_mxu1.S (MXU1 / IPT) - port of npu-model smolvla_fused_matmul_bias
 # Tests: out = (A_bf16 @ B_fp8) + bias_bf16
 #   A is BF16, on-chip quantized to FP8 via VMATPUSH.ACC.BF16/VMATPOP.FP8
 #   B is pre-quantized FP8 in DRAM
 #   bias is BF16 added with VADD.BF16
 #
 # Atlas MXU computes A @ W^T natively, so B is VTRPOSE.XLU'd to B^T
-# before VMATPUSH.W.MXU0; the matmul then yields A @ B.
+# before VMATPUSH.W.MXU1; the matmul then yields A @ B.
 #
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_smolvla_fused_matmul_bias.py
+# @PYTHON_GEN gen_smolvla_fused_matmul_bias_mxu1.py
 #
 # DRAM layout (set by gen_smolvla_fused_matmul_bias.py):
 #   [0x0000..0x07FF]  A bf16  (32x32, 2 banks = 2048 B)
@@ -85,18 +85,18 @@
     DELAY 80
 
     # ── Quantize A bf16 (m0,m1) → m8 fp8 via acc[1] roundtrip ──
-    VMATPUSH.ACC.BF16.MXU0 1, 0
+    VMATPUSH.ACC.BF16.MXU1 1, 0
     DELAY 80
     SELI 0, 0x7F                # E8M0 unit scale (2^0 = 1.0)
-    VMATPOP.FP8.MXU0 8, 0, 1
+    VMATPOP.FP8.MXU1 8, 0, 1
     DELAY 40
 
     # ── Matmul: (m10,m11) = m8 @ m5  (= A @ B^T^T = A @ B) ──
-    VMATPUSH.W.MXU0  0, 5
+    VMATPUSH.W.MXU1  0, 5
     DELAY 40
-    VMATMUL.MXU0     0, 8, 0
+    VMATMUL.MXU1     0, 8, 0
     DELAY 120
-    VMATPOP.BF16.MXU0 10, 0
+    VMATPOP.BF16.MXU1 10, 0
     DELAY 40
 
     # ── Bias add: (m12,m13) = (m10,m11) + (m6,m7) ──

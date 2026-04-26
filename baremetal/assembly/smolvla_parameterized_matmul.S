@@ -1,12 +1,18 @@
-# smolvla_parameterized_matmul.S — tiled C = A @ B for 64x32x64 FP8 → BF16
-# Port of jrmills20 parameterized_matmul.py, MXU0 (systolic array) path.
-# First parameterization step: scale M and N to 64 (4 output tiles); keep
-# K=32 (single K-tile per output, no VMATMUL.ACC accumulation). The
-# K-chain variant lands separately as smolvla_parameterized_matmul_k_chain.
+# smolvla_parameterized_matmul.S — dual-MXU tiled C = A @ B for 64x32x64
+# Column-split across engines: output tiles with n_tile=0 run on MXU0
+# (SA); tiles with n_tile=1 run on MXU1 (IPT). Per-engine accumulators
+# are independent, so the two paths don't alias. The shared tile loop
+# dispatches via a BNE on the inner n_tile index.
 #
-# Atlas MXU0 loads weights in transposed orientation (SA model:
-# y = x @ w^T), so each B tile is VTRPOSE.XLU'd before VMATPUSH.W. Stock
-# gen_smolvla_matmul verifies this with SARTLLinearFunction; golden matches.
+# Port of jrmills20 parameterized_matmul.py. First parameterization step:
+# scale M and N to 64 (4 output tiles); keep K=32 (single K-tile per
+# output, no VMATMUL.ACC accumulation).
+#
+# Both MXU engines load weights in transposed orientation (y = x @ w^T),
+# so each B tile is VTRPOSE.XLU'd once before VMATPUSH.W regardless of
+# which engine consumes it. gen_smolvla_parameterized_matmul.py routes
+# per-tile goldens through SARTLLinearFunction or IPTLinearRTLFunction
+# depending on which engine ran that tile.
 #
 # @TIMEOUT 400000
 # @DRAM_BASE 0x90000000
@@ -80,13 +86,32 @@ output_tile_loop:
     VTRPOSE.XLU 5, 4
     DELAY 80
 
-    # ── Push weight + matmul + pop ──
+    # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
+    BNE   x13, x0, matmul_mxu1
+    NOP
+    NOP
+
+    # ── MXU0 path: push weight + matmul + pop ──
     VMATPUSH.W.MXU0 0, 5
     DELAY 40
     VMATMUL.MXU0 0, 0, 0
     DELAY 120
     VMATPOP.BF16.MXU0 2, 0
     DELAY 40
+    BEQ   x0, x0, matmul_done
+    NOP
+    NOP
+
+matmul_mxu1:
+    # ── MXU1 path ──
+    VMATPUSH.W.MXU1 0, 5
+    DELAY 40
+    VMATMUL.MXU1 0, 0, 0
+    DELAY 120
+    VMATPOP.BF16.MXU1 2, 0
+    DELAY 40
+
+matmul_done:
 
     # ── Store m2 (cols 0-15) → VMEM[512], m3 (cols 16-31) → VMEM[768] ──
     LI    x8, 512

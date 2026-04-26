@@ -1,13 +1,13 @@
-# smolvla_fused_matmul_bias_v2.S - alt port matching the npu-model reference file
+# smolvla_fused_matmul_bias_v2_mxu0.S (MXU0 / SA) - alt port matching the npu-model reference file
 # Tests: out = (A_fp8 @ B_fp8) + bias_bf16
 #   Both A and B are PRE-QUANTIZED FP8 tiles in DRAM (no on-chip quant).
-#   Matches the sketch in .claude/npu-model/smolvla_fused_matmul_bias.py
-#   and the existing smolvla_matmul.S activation path.
+#   Matches the npu-model smolvla_fused_matmul_bias sketch and the
+#   existing smolvla_matmul_mxu0.S activation path.
 #   Simpler than V1 but does NOT exercise the BF16->FP8 hardware quant.
 #
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_smolvla_fused_matmul_bias_v2.py
+# @PYTHON_GEN gen_smolvla_fused_matmul_bias_v2_mxu0.py
 #
 # DRAM layout (set by gen_smolvla_fused_matmul_bias_v2.py):
 #   [0x0000..0x03FF]  A fp8   (32x32, 1024 B)

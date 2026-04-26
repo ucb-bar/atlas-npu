@@ -1,10 +1,10 @@
-# smolvla_attention.S — port of npu-model smolvla_attention
+# smolvla_attention.S — dual-MXU scaled dot-product attention (MXU0 + MXU1)
 # Tests: single-tile scaled dot-product attention pipeline
 #   scores = Q @ K             (MXU0, FP8 → BF16)
 #   scaled = scores * scale    (VPU BF16 pair op)
 #   probs  = softmax(scaled)   (rowmax → sub → exp → rowsum → recip → mul)
 #   packed = VFP8PACK(probs)   (atlas 2→1 phased pack, permuted layout)
-#   out    = packed @ V        (MXU0, FP8 → BF16)
+#   out    = packed @ V        (MXU1, FP8 → BF16)
 # @TIMEOUT 80000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_attention.py
@@ -129,11 +129,11 @@
     # ── Matmul 2: out = packed_probs @ V (push V^T) ──
     VTRPOSE.XLU 5, 4
     DELAY 80
-    VMATPUSH.W.MXU0 0, 5
+    VMATPUSH.W.MXU1 0, 5
     DELAY 40
-    VMATMUL.MXU0 0, 26, 0
+    VMATMUL.MXU1 0, 26, 0
     DELAY 200
-    VMATPOP.BF16.MXU0 28, 0
+    VMATPOP.BF16.MXU1 28, 0
     DELAY 40
 
     # ── Store m28 (cols 0-15) → VMEM[1280] → DRAM[0x1400] ──

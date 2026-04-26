@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Generate test vectors for `smolvla_fused_attention.S`.
+"""Generate test vectors for `smolvla_fused_attention.S` (dual-MXU).
 
-Port of npu-model/npu_model/configs/programs/smolvla_fused_attention.py.
-Single-tile flash attention over 2 K-tiles (k_seq=64), head_dim=64:
+Port of npu-model/npu_model/configs/programs/smolvla_fused_attention.py,
+phase-split across both MXU engines:
 
     for each K tile:
-        scores  = Q @ K^T              (MXU0, BF16 inputs quantized to FP8
-                                         on-chip via acc roundtrip; K-chain
-                                         accumulator over head_dim=64)
+        scores  = Q @ K^T              (MXU0 / SA — K-chain accumulator over
+                                         head_dim=64, BF16 inputs quantized
+                                         to FP8 on-chip via acc roundtrip)
         scaled  = scores * scale       (VPU pair op)
         m_new   = max(m_prev, rowmax(scaled))
         exp_diff= exp(m_prev - m_new)
         O      *= exp_diff
         exp_s   = exp(scaled - m_new)
-        exp_s_q = quantize(exp_s) BF16→FP8 (acc roundtrip)
-        O      += exp_s_q @ V_left | V_right (two MXU passes)
+        exp_s_q = quantize(exp_s) BF16→FP8 (MXU0 acc roundtrip, idle at
+                                             this point)
+        O      += exp_s_q @ V_left | V_right (MXU1 / IPT — two passes)
         l       = exp_diff * l + rowsum(exp_s)
         m_prev  = m_new
     O /= l
@@ -24,13 +25,16 @@ Inputs use seed 42 + (randn * 0.5).to(bfloat16), matching npu-model.
 Atlas's MXU computes A @ W^T natively. Q @ K^T pushes K as W (no XLU).
 exp_s @ V_left pushes V_mlir[:32, :] as W (since V_left = V_mlir[:32, :]^T).
 
-Golden mirrors atlas hardware:
-  - SARTLLinearFunction handles the K-chain FP32 accumulator + final BF16
-    truncation, and quantizes BF16-valued FP32 inputs to FP8 internally
-    via `float_to_e4m3_bytes_c`. For BF16 inputs (whose float32 reps have
-    zero trailing mantissa bits past bit 23-7=16), this RNE rounding to
-    FP8-E4M3 produces the same bytes as VMATPUSH.ACC.BF16 + VMATPOP.FP8
-    (`bf16_scale_to_e4m3` with scale_exp=0).
+Golden mirrors atlas hardware, routed per-phase through the matching
+software model so each engine's rounding path is bit-exact:
+  - SARTLLinearFunction (MXU0 / SA) handles Q @ K^T: K-chain FP32
+    accumulator + final BF16 truncation, with internal FP8 quantization
+    of BF16-valued FP32 inputs via `float_to_e4m3_bytes_c`. Matches
+    VMATPUSH.ACC.BF16 + VMATPOP.FP8 with scale_exp=0.
+  - IPTLinearRTLFunction (MXU1 / IPT) handles exp_s_q @ V_left|V_right:
+    aligned-tree accumulation with a single RNE rounding at the tree
+    output. IPT requires FP32 inputs, so raw E4M3 bytes are decoded via
+    `e4m3_bytes_to_float`.
   - VPU pair ops, row-reduces, and unaries route through
     vpu_gen_utils.MODEL (atlas's VectorEngineModel) for bit-exact pipeline
     match. VMAX.BF16 → "pairmax".
@@ -67,6 +71,10 @@ from vpu_gen_utils import (
 from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
+from software_models.mxu1_ipt.ipt_rtl_linear import (
+    IPTLinearRTLFunction,
+    e4m3_bytes_to_float,
+)
 
 
 def bf16_tile_to_e4m3_bytes(tile: torch.Tensor) -> torch.Tensor:
@@ -170,8 +178,13 @@ def main():
     V0_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
     V1_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
 
+    # MXU0 (SA) for Q @ K^T; MXU1 (IPT) for probs @ V_left|V_right.
     sa_bf16 = SARTLLinearFunction(
         rows=Q_ROWS, cols=Q_ROWS, out_fmt_sel=OutputFmtSel.OutBF16
+    )
+    ipt_bf16 = IPTLinearRTLFunction(
+        vec_len=Q_ROWS, num_lanes=Q_ROWS, pipeline_depth=1,
+        out_fmt_sel=OutputFmtSel.OutBF16,
     )
 
     # ── Online-softmax state (broadcast tiles, stored as bank rows) ──
@@ -229,8 +242,13 @@ def main():
         V_top_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[:Q_ROWS, :].contiguous())
         V_bot_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[Q_ROWS:, :].contiguous())
 
-        vc_left_bf16  = sa_bf16(exp_s_fp8, V_top_fp8, scale_exp=0).to(torch.bfloat16)
-        vc_right_bf16 = sa_bf16(exp_s_fp8, V_bot_fp8, scale_exp=0).to(torch.bfloat16)
+        # probs @ V on MXU1 (IPT): decode E4M3 bytes to FP32 since IPT
+        # doesn't accept uint8 directly the way SA does.
+        exp_s_fp32 = e4m3_bytes_to_float(exp_s_fp8)
+        V_top_fp32 = e4m3_bytes_to_float(V_top_fp8)
+        V_bot_fp32 = e4m3_bytes_to_float(V_bot_fp8)
+        vc_left_bf16  = ipt_bf16(exp_s_fp32, V_top_fp32, scale_exp=0).to(torch.bfloat16)
+        vc_right_bf16 = ipt_bf16(exp_s_fp32, V_bot_fp32, scale_exp=0).to(torch.bfloat16)
 
         vc_left_low, vc_left_high   = bf16_tile_to_bank_rows(vc_left_bf16)
         vc_right_low, vc_right_high = bf16_tile_to_bank_rows(vc_right_bf16)

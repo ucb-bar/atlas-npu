@@ -1,12 +1,12 @@
-# smolvla_matmul.S — port of npu-model smolvla_matmul
+# smolvla_matmul_mxu1.S (MXU1 / IPT) — port of npu-model smolvla_matmul
 # Tests: C = A @ B on seeded random FP8 32x32 tiles
 #   (single-tile FP8 matmul → BF16 output, split across m2/m3)
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_smolvla_matmul.py
+# @PYTHON_GEN gen_smolvla_matmul_mxu1.py
 #
 # Atlas MXU loads weights in transposed orientation, so assembly
-# VTRPOSE.XLUs B (m4 → m5) before VMATPUSH.W.MXU0. VMATPOP.BF16
+# VTRPOSE.XLUs B (m4 → m5) before VMATPUSH.W.MXU1. VMATPOP.BF16
 # splits BF16 lanes 0–15 into m2 and lanes 16–31 into m3.
 #
 # DRAM layout:
@@ -45,11 +45,11 @@
     VTRPOSE.XLU 5, 4
     DELAY 80
 
-    VMATPUSH.W.MXU0  0, 5
+    VMATPUSH.W.MXU1  0, 5
     DELAY 40
-    VMATMUL.MXU0  0, 0, 0
+    VMATMUL.MXU1  0, 0, 0
     DELAY 120
-    VMATPOP.BF16.MXU0  2, 0
+    VMATPOP.BF16.MXU1  2, 0
     DELAY 40
 
     # ── Store m2 (cols 0-15) → VMEM[512] → DRAM[0x800] ──
