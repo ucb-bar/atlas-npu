@@ -7,9 +7,8 @@ input, single output.
 The "gate" in the kernel name is a misnomer inherited from the upstream
 coverage tracker phrase "silu + elementwise_mul", where elementwise_mul
 is the MLIR primitive opcode of op_b (inner sigmoid*x multiply), NOT a
-separate gate operand. Reference at
-`.claude/npu-model/smolvla_fused_silu_gate.py` is unambiguous: single-arg
-function, op_a = sigmoid(x), op_b = silu(x) = sigmoid(x) * x.
+separate gate operand. The npu-model reference is unambiguous:
+single-arg function, op_a = sigmoid(x), op_b = silu(x) = sigmoid(x) * x.
 
 Functionally equivalent to `smolvla_silu`; kept under the
 `fused_silu_gate` name for parity with the npu-model program list.

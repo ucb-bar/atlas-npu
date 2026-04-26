@@ -8,6 +8,10 @@ set -o pipefail
 #   ./run_asm_tests.sh --parallel test1 test2 test3   # parallelize VCS sims
 #   ./run_asm_tests.sh -jN  test1 test2 test3         # cap concurrency at N
 #
+# Warm-up: if the VCS simv isn't built yet (fresh clone, branch switch,
+# stale generated-src), run ONE test serially first to build simv, then
+# -jN the rest. Parallel sweeps race on simv regen and corrupt each other.
+#
 # Behavior:
 #   - If generators/gen_<test>.py exists, the script generates a golden JSON
 #     and assembles with --golden-json.

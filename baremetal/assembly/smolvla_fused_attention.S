@@ -1,4 +1,4 @@
-# smolvla_fused_attention.S — port of npu-model smolvla_fused_attention
+# smolvla_fused_attention.S — dual-MXU flash attention (MXU0 + MXU1)
 # Tests: flash attention (online softmax) over a 2-K-tile attention block
 #   Q[32,64] BF16, K[32,64] BF16 (×2 tiles), V_mlir[64,32] BF16 (×2 tiles)
 #   head_dim = 64, k_seq = 64
@@ -11,7 +11,7 @@
 #     O      *= exp_diff             (rescale running output)
 #     exp_s   = exp(scaled - m_new)
 #     exp_s_q = quantize(exp_s) BF16→FP8 via VMATPUSH.ACC.BF16/VMATPOP.FP8
-#     O      += exp_s_q @ V          (two matmuls — V_left, V_right halves)
+#     O      += exp_s_q @ V          (MXU1 — V_left + V_right halves)
 #     l       = exp_diff * l + rowsum(exp_s)
 #     m_prev  = m_new
 #   O /= l
@@ -224,19 +224,19 @@
     DELAY 40
 
     # ── exp_s @ V_left:  weight = m26 (V_top FP8) ──
-    VMATPUSH.W.MXU0 0, 26
+    VMATPUSH.W.MXU1 0, 26
     DELAY 40
-    VMATMUL.MXU0 0, 24, 0
+    VMATMUL.MXU1 0, 24, 0
     DELAY 200
-    VMATPOP.BF16.MXU0 28, 0   # (m28, m29) = vc_left BF16
+    VMATPOP.BF16.MXU1 28, 0   # (m28, m29) = vc_left BF16
     DELAY 40
 
     # ── exp_s @ V_right: weight = m27 (V_bot FP8) ──
-    VMATPUSH.W.MXU0 0, 27
+    VMATPUSH.W.MXU1 0, 27
     DELAY 40
-    VMATMUL.MXU0 0, 24, 0
+    VMATMUL.MXU1 0, 24, 0
     DELAY 200
-    VMATPOP.BF16.MXU0 30, 0   # (m30, m31) = vc_right BF16
+    VMATPOP.BF16.MXU1 30, 0   # (m30, m31) = vc_right BF16
     DELAY 40
 
     # ── O += V contributions ──
@@ -346,18 +346,18 @@
     VMATPOP.FP8.MXU0 24, 0, 1
     DELAY 40
 
-    VMATPUSH.W.MXU0 0, 26
+    VMATPUSH.W.MXU1 0, 26
     DELAY 40
-    VMATMUL.MXU0 0, 24, 0
+    VMATMUL.MXU1 0, 24, 0
     DELAY 200
-    VMATPOP.BF16.MXU0 28, 0
+    VMATPOP.BF16.MXU1 28, 0
     DELAY 40
 
-    VMATPUSH.W.MXU0 0, 27
+    VMATPUSH.W.MXU1 0, 27
     DELAY 40
-    VMATMUL.MXU0 0, 24, 0
+    VMATMUL.MXU1 0, 24, 0
     DELAY 200
-    VMATPOP.BF16.MXU0 30, 0
+    VMATPOP.BF16.MXU1 30, 0
     DELAY 40
 
     VADD.BF16 12, 12, 28

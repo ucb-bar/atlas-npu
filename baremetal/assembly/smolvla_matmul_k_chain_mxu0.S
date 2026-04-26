@@ -1,10 +1,10 @@
-# smolvla_matmul_k_chain.S — port of npu-model smolvla_matmul_k_chain
+# smolvla_matmul_k_chain_mxu0.S (MXU0 / SA) — port of npu-model smolvla_matmul_k_chain
 # Tests: two-K-tile FP8 matmul exercising the MXU0 accumulator chain
 #   C[32,32] = A[:,0:32]  @ B[0:32,:]      (VMATMUL.MXU0     → reset acc)
 #            + A[:,32:64] @ B[32:64,:]     (VMATMUL.ACC.MXU0 → accumulate)
 # @TIMEOUT 40000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_smolvla_matmul_k_chain.py
+# @PYTHON_GEN gen_smolvla_matmul_k_chain_mxu0.py
 #
 # Each B tile is XLU-transposed before being pushed to the weight slot
 # so the MXU computes A_k @ B_k rather than A_k @ B_k^T.
