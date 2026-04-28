@@ -30,6 +30,7 @@
     LI    x16, 0x0000        # src DRAM byte offset
     LI    x17, 0x2000        # dst DRAM byte offset
     LI    x12, 2048          # bytes per BF16 tile pair
+    LI    x18, 0x0800        # per-iter DRAM stride (reg: 0x800 > ADDI signed-12 max → would sign-extend to -2048).
 
 loop:
     BEQ   x2, x3, done
@@ -85,8 +86,8 @@ store_iter:
     DMA.STORE x17, x6, x12, 1
     DMA.WAIT 1
 
-    ADDI  x16, x16, 0x0800
-    ADDI  x17, x17, 0x0800
+    ADD   x16, x16, x18
+    ADD   x17, x17, x18
     ADDI  x2, x2, 1
     JAL   x0, loop
     NOP

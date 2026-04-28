@@ -2,6 +2,7 @@
 import os
 import sys
 import numpy as np
+import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
 from gen_utils import (
@@ -12,8 +13,9 @@ from gen_utils import (
     matrix_to_bf16_words,
     quantize_fp8,
     quantize_bf16,
-    fp8_matmul_reference,
 )
+from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
+from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
 TILE = 32
 A = np.zeros((TILE, TILE), dtype=np.float32)
@@ -25,8 +27,17 @@ for i in range(TILE):
 
 A_q = quantize_fp8(A).astype(np.float32)
 B_q = quantize_fp8(B).astype(np.float32)
-BT_q = quantize_fp8(B_q.T).astype(np.float32)
-raw = fp8_matmul_reference(A_q, BT_q).astype(np.float32)
+
+# Assembly stores B in logical orientation, XLU-transposes it in-place, then
+# VMATPUSH.W.MXU1 consumes that transposed tile. MXU1's RTL model computes
+# F.linear semantics y = x @ w^T, so pass w = B_q.T to realize A @ B.
+ipt = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
+raw = ipt(
+    torch.from_numpy(A_q),
+    torch.from_numpy(B_q.T.copy()),
+    scale_exp=0,
+).numpy().astype(np.float32)
+
 relu = quantize_bf16(np.maximum(raw, 0.0)).astype(np.float32)
 
 preloads = []

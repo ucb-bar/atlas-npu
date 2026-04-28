@@ -1,7 +1,6 @@
 # branch_delay_slots_mxu1_highbank_transpose.S
 # @TIMEOUT 250000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_branch_delay_slots_mxu1_highbank_transpose.py
 #
 # Coverage intent:
 #   - Taken BEQ with VLOAD side effect in a delay slot.
