@@ -46,6 +46,12 @@ def bf16_to_e4m3_byte(bf16: int, exp_shift: int) -> int:
       checked for overflow / underflow / reserved-NaN clamp. Values below
       E4M3 min-normal (unbExp < -6 after the shift) flush to zero.
     """
+    # Callers sometimes hand us NumPy scalars (for example uint16 BF16 words
+    # from generator arrays). Normalize at the API boundary so exponent math
+    # below always uses Python signed ints.
+    bf16 = int(bf16)
+    exp_shift = int(exp_shift)
+
     sign = (bf16 >> 15) & 0x1
     exp_bf = (bf16 >> 7) & 0xFF
     mant_bf = bf16 & 0x7F
@@ -96,6 +102,8 @@ def e4m3_byte_to_bf16(fp8: int, exp_shift: int) -> int:
     - Overflow (>= 255 biased) -> signed max finite BF16 (0x7F7F / 0xFF7F).
     - Underflow (<= 0 biased) -> signed zero.
     """
+    fp8 = int(fp8)
+    exp_shift = int(exp_shift)
     fp8 &= 0xFF
     sign = (fp8 >> 7) & 1
     exp_fp8 = (fp8 >> 3) & 0xF
@@ -127,6 +135,7 @@ def e8m0_to_scale_exp_clamped(scale_e8m0: int) -> int:
     Takes the raw 8-bit E8M0 scale, subtracts bias 127, and clamps to int8
     [-128, 127] before handing it to FP8Pack / FP8Unpack.
     """
+    scale_e8m0 = int(scale_e8m0)
     scale_e8m0 &= 0xFF
     scale_exp_wide = scale_e8m0 - 127
     if scale_exp_wide > 127:

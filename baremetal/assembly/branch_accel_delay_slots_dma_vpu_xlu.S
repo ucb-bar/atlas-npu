@@ -1,7 +1,6 @@
 # branch_accel_delay_slots_dma_vpu_xlu.S
 # @TIMEOUT 400000
 # @DRAM_BASE 0x90000000
-# @PYTHON_GEN gen_branch_accel_delay_slots_dma_vpu_xlu.py
 #
 # Coverage intent:
 #   - Control-flow with architecturally visible accelerator side effects in delay slots.

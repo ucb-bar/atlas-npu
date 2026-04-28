@@ -91,9 +91,11 @@
     DELAY 40
 
     # Scalar-observable read from stored exp2(log2(x)) result.
+    # The first packed word at byte 8192 is legitimately zero because the
+    # class-directed inputs begin with +0.0 and -0.0, so probe the next word.
     # VMEM byte address = 2048 words * 4 bytes/word = 8192.
     LI    x20, 8192
-    LW    x21, x20, 0
+    LW    x21, x20, 4
     DELAY 1
     BEQ   x21, x0, fail
     NOP

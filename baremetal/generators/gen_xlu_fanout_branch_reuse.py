@@ -9,9 +9,9 @@ from gen_utils import (
     preloads_from_words_packed,
     checks_from_words_packed,
     matrix_to_fp8_words,
-    matrix_to_bf16_words,
+    bf16_bits_to_words,
     quantize_fp8,
-    fp8_matmul_reference,
+    mxu0_sa_bf16_bits,
 )
 
 TILE = 32
@@ -29,7 +29,7 @@ B_q = quantize_fp8(B).astype(np.float32)
 BT_q = quantize_fp8(B_q.T).astype(np.float32)
 
 # Assembly pushes BT_q as weight; MXU computes A @ (BT_q)^T = A @ B_q.
-C = fp8_matmul_reference(A_q, BT_q).astype(np.float32)
+C_bits = mxu0_sa_bf16_bits(A_q, B_q)
 
 preloads = []
 checks = []
@@ -37,7 +37,7 @@ preloads += preloads_from_words_packed(0x0000 // 32, matrix_to_fp8_words(A_q))
 preloads += preloads_from_words_packed(0x0400 // 32, matrix_to_fp8_words(B_q))
 
 checks += checks_from_words_packed(0x1000 // 32, matrix_to_fp8_words(BT_q))
-checks += checks_from_words_packed(0x1800 // 32, matrix_to_bf16_words(C[:, :16]))
-checks += checks_from_words_packed(0x1C00 // 32, matrix_to_bf16_words(C[:, 16:]))
+checks += checks_from_words_packed(0x1800 // 32, bf16_bits_to_words(C_bits[:, :16]))
+checks += checks_from_words_packed(0x1C00 // 32, bf16_bits_to_words(C_bits[:, 16:]))
 
 emit_test_data(preloads, checks, timeout=600000)

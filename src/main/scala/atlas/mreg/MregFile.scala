@@ -109,6 +109,76 @@ class MregFile(p: MregParams) extends Module {
   val numWritePorts = writeReqs.length
 
   // ==========================================================================
+  // Shared predecode + explicit tree-mux helpers
+  // ==========================================================================
+
+  // Decode the physical bank once per request port, then reuse the one-hot
+  // selection for each bank's arbitration tree.
+  val readBankOHs = readReqs.map(req =>
+    UIntToOH(p.physicalBank(req.bits.mregId), p.numMregBanks) &
+      Fill(p.numMregBanks, req.valid))
+  val readPhysRows = readReqs.map(req =>
+    p.physicalRow(req.bits.mregId, req.bits.row))
+
+  val writeBankOHs = writeReqs.map(req =>
+    UIntToOH(p.physicalBank(req.bits.mregId), p.numMregBanks) &
+      Fill(p.numMregBanks, req.valid))
+  val writePhysRows = writeReqs.map(req =>
+    p.physicalRow(req.bits.mregId, req.bits.row))
+
+  class ReadTreeSel extends Bundle {
+    val valid = Bool()
+    val row   = UInt(p.mregBankRowAddrBits.W)
+    val port  = UInt(log2Ceil(numReadPorts).W)
+  }
+
+  class WriteTreeSel extends Bundle {
+    val valid = Bool()
+    val row   = UInt(p.mregBankRowAddrBits.W)
+    val data  = UInt(p.mregRowBits.W)
+  }
+
+  class RespTreeSel extends Bundle {
+    val valid = Bool()
+    val data  = UInt(p.mregRowBits.W)
+  }
+
+  def mergeReadSel(lhs: ReadTreeSel, rhs: ReadTreeSel): ReadTreeSel = {
+    val out = Wire(new ReadTreeSel)
+    out.valid := lhs.valid || rhs.valid
+    out.row   := Mux(lhs.valid, lhs.row, rhs.row)
+    out.port  := Mux(lhs.valid, lhs.port, rhs.port)
+    out
+  }
+
+  def mergeWriteSel(lhs: WriteTreeSel, rhs: WriteTreeSel): WriteTreeSel = {
+    val out = Wire(new WriteTreeSel)
+    out.valid := lhs.valid || rhs.valid
+    out.row   := Mux(lhs.valid, lhs.row, rhs.row)
+    out.data  := Mux(lhs.valid, lhs.data, rhs.data)
+    out
+  }
+
+  def mergeRespSel(lhs: RespTreeSel, rhs: RespTreeSel): RespTreeSel = {
+    val out = Wire(new RespTreeSel)
+    out.valid := lhs.valid || rhs.valid
+    out.data  := Mux(lhs.valid, lhs.data, rhs.data)
+    out
+  }
+
+  def treeReduce[T](leaves: Seq[T])(merge: (T, T) => T): T = {
+    require(leaves.nonEmpty, "treeReduce requires at least one leaf")
+    if (leaves.length == 1) {
+      leaves.head
+    } else {
+      val nextLevel = leaves.grouped(2).map { group =>
+        if (group.length == 1) group.head else merge(group.head, group(1))
+      }.toSeq
+      treeReduce(nextLevel)(merge)
+    }
+  }
+
+  // ==========================================================================
   // Per-bank arbitration
   // ==========================================================================
 
@@ -126,17 +196,16 @@ class MregFile(p: MregParams) extends Module {
   val bankWriteValid = Wire(Vec(p.numMregBanks, Bool()))
   val bankWriteRow   = Wire(Vec(p.numMregBanks, UInt(p.mregBankRowAddrBits.W)))
   val bankWriteData  = Wire(Vec(p.numMregBanks, UInt(p.mregRowBits.W)))
-  val bankWritePort  = Wire(Vec(p.numMregBanks, UInt(log2Ceil(numWritePorts).W)))
 
   for (b <- 0 until p.numMregBanks) {
     val readHits  = Wire(Vec(numReadPorts, Bool()))
     val writeHits = Wire(Vec(numWritePorts, Bool()))
 
     for (rp <- 0 until numReadPorts) {
-      readHits(rp) := readReqs(rp).valid && (p.physicalBank(readReqs(rp).bits.mregId) === b.U)
+      readHits(rp) := readBankOHs(rp)(b)
     }
     for (wp <- 0 until numWritePorts) {
-      writeHits(wp) := writeReqs(wp).valid && (p.physicalBank(writeReqs(wp).bits.mregId) === b.U)
+      writeHits(wp) := writeBankOHs(wp)(b)
     }
 
     val readCount  = PopCount(readHits)
@@ -147,16 +216,32 @@ class MregFile(p: MregParams) extends Module {
     assert(writeCount <= 1.U,
       s"MregFile bank conflict: multiple write ports targeting physical bank $b (m$b or m${b + p.numMregBanks})")
 
-    bankReadValid(b) := readHits.asUInt.orR
-    bankReadPort(b)  := PriorityEncoder(readHits.asUInt)
-    bankReadRow(b)   := Mux1H(readHits, readReqs.map(req =>
-      p.physicalRow(req.bits.mregId, req.bits.row)))
+    val readLeaves = (0 until numReadPorts).map { rp =>
+      val leaf = Wire(new ReadTreeSel)
+      leaf.valid := readHits(rp)
+      leaf.row   := readPhysRows(rp)
+      leaf.port  := rp.U
+      leaf
+    }
 
-    bankWriteValid(b) := writeHits.asUInt.orR
-    bankWritePort(b)  := PriorityEncoder(writeHits.asUInt)
-    bankWriteRow(b)   := Mux1H(writeHits, writeReqs.map(req =>
-      p.physicalRow(req.bits.mregId, req.bits.row)))
-    bankWriteData(b)  := Mux1H(writeHits, writeReqs.map(_.bits.data))
+    val writeLeaves = (0 until numWritePorts).map { wp =>
+      val leaf = Wire(new WriteTreeSel)
+      leaf.valid := writeHits(wp)
+      leaf.row   := writePhysRows(wp)
+      leaf.data  := writeReqs(wp).bits.data
+      leaf
+    }
+
+    val readSel  = treeReduce(readLeaves)(mergeReadSel)
+    val writeSel = treeReduce(writeLeaves)(mergeWriteSel)
+
+    bankReadValid(b) := readSel.valid
+    bankReadPort(b)  := readSel.port
+    bankReadRow(b)   := readSel.row
+
+    bankWriteValid(b) := writeSel.valid
+    bankWriteRow(b)   := writeSel.row
+    bankWriteData(b)  := writeSel.data
   }
 
   // ==========================================================================
@@ -199,7 +284,16 @@ class MregFile(p: MregParams) extends Module {
     assert(PopCount(respHits) <= 1.U,
       s"MregFile response conflict: multiple banks returning to read port $rp")
 
-    readResps(rp).valid := respHits.asUInt.orR
-    readResps(rp).bits  := Mux1H(respHits, bankReadData)
+    val respLeaves = (0 until p.numMregBanks).map { b =>
+      val leaf = Wire(new RespTreeSel)
+      leaf.valid := respHits(b)
+      leaf.data  := bankReadData(b)
+      leaf
+    }
+
+    val respSel = treeReduce(respLeaves)(mergeRespSel)
+
+    readResps(rp).valid := respSel.valid
+    readResps(rp).bits  := Mux(respSel.valid, respSel.data, 0.U)
   }
 }
