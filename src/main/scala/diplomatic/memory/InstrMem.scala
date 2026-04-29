@@ -31,11 +31,15 @@ class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
   val mem = SyncReadMem(AtlasMemMap.IMEM_WORDS, UInt(32.W))
 
   // ── TileLink state machine ────────────────────────────────────────────
-  val sIdle :: sResp :: Nil = Enum(2)
+  // sIdle -> sReadResp (Get) -> sResp, or sIdle -> sResp (Put). The
+  // sReadResp stage captures readData into respData so the D-bits stay
+  // stable across downstream tl.d.ready stalls.
+  val sIdle :: sReadResp :: sResp :: Nil = Enum(3)
   val state = RegInit(sIdle)
   val respIsGet  = Reg(Bool())
   val respSource = Reg(UInt(tlBundleParams.sourceBits.W))
   val respSize   = Reg(UInt(tlBundleParams.sizeBits.W))
+  val respData   = Reg(UInt(tlBundleParams.dataBits.W))
 
   private def tlToWordAddr(addr: UInt): UInt =
     (addr - AtlasMemMap.IMEM_BASE.U(tlBundleParams.addressBits.W))(
@@ -71,7 +75,7 @@ class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
   io.tl.d.bits.source := respSource
   io.tl.d.bits.sink   := 0.U
   io.tl.d.bits.denied := false.B
-  io.tl.d.bits.data   := Mux(respIsGet, readData, 0.U)
+  io.tl.d.bits.data   := Mux(respIsGet, respData, 0.U)
   io.tl.d.bits.corrupt := false.B
 
   // ── State machine ────────────────────────────────────────────────────
@@ -83,12 +87,18 @@ class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
         respSize   := a.size
         when(a.opcode === TLMessages.Get) {
           respIsGet := true.B
+          state     := sReadResp
         }.otherwise {
           mem.write(tlToWordAddr(a.address), a.data)
           respIsGet := false.B
+          respData  := 0.U
+          state     := sResp
         }
-        state := sResp
       }
+    }
+    is(sReadResp) {
+      respData := readData
+      state    := sResp
     }
     is(sResp) {
       when(io.tl.d.fire) { state := sIdle }
