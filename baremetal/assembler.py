@@ -612,13 +612,71 @@ def _fmt_array(words, name, ctype="uint32_t", indent="    "):
     return f"static const {ctype} {name}[] = {{\n{body}\n}};\n"
 
 
-def emit_c_file(code, test_name="test", golden=None):
+def _parse_perf_threshold(source):
+    """Parse `# @PERF_UTIL_THRESHOLD <percent>` from assembly source.
+
+    Returns the threshold as an int (0..100), or None if absent.
+    """
+    pat = re.compile(r"^\s*#\s*@PERF_UTIL_THRESHOLD\s+(\d+)\s*$", re.IGNORECASE)
+    for line in source.splitlines():
+        m = pat.match(line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _parse_perf_report(source):
+    """Parse `# @PERF_REPORT` (flag, no argument) from assembly source.
+
+    Returns True if present. Triggers perf-counter printout in the C harness
+    (incl. dbg1_cycles / util) without gating the test on utilization.
+    """
+    pat = re.compile(r"^\s*#\s*@PERF_REPORT\s*$", re.IGNORECASE)
+    for line in source.splitlines():
+        if pat.match(line):
+            return True
+    return False
+
+
+def _parse_perf_macs(source):
+    """Parse `# @PERF_MACS_MXU0 <n>` and `# @PERF_MACS_MXU1 <n>` directives.
+
+    Returns (mxu0_macs, mxu1_macs) — either may be None if its directive is
+    absent. Each 32x32x32 VMATMUL = 32768 MACs. Peak = 1024 MAC/cycle, so
+    util_mxu = MACs * 100 / (1024 * dbg1_cycles).
+    """
+    pat0 = re.compile(r"^\s*#\s*@PERF_MACS_MXU0\s+(\d+)\s*$", re.IGNORECASE)
+    pat1 = re.compile(r"^\s*#\s*@PERF_MACS_MXU1\s+(\d+)\s*$", re.IGNORECASE)
+    macs0 = None
+    macs1 = None
+    for line in source.splitlines():
+        m0 = pat0.match(line)
+        if m0:
+            macs0 = int(m0.group(1))
+        m1 = pat1.match(line)
+        if m1:
+            macs1 = int(m1.group(1))
+    return macs0, macs1
+
+
+def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
+                perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None):
     """Generate a complete baremetal C test.
 
     Args:
         code: list of 32-bit instruction words
         test_name: used in printf messages
         golden: None, or (preload_addrs, preload_words, check_addrs, check_words)
+        perf_threshold: if set (0..100), gate pass/fail on the MAC-based util
+            of any MXU declared via @PERF_MACS_MXU{0,1}. Test fails if any
+            declared util = MACs * 100 / (1024 * dbg1_cycles) is below it.
+        perf_report: if True, emit the perf printout (dbg1_cycles + per-MXU
+            MAC-based util) WITHOUT gating pass/fail on utilization. Implied
+            when perf_threshold is set. Use for tests that bank a timed-window
+            cycle delta into CSR_DBG1 (CSRW ..., 0xC11) but rely on golden
+            DRAM comparison for pass/fail.
+        perf_macs_mxu0: total MACs issued to MXU0 in the timed window, or None.
+        perf_macs_mxu1: total MACs issued to MXU1 in the timed window, or None.
     """
     n = len(code)
     array_body = ""
@@ -691,6 +749,7 @@ int main(void)
     printf("Stopping Atlas core before programming IMEM ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
     mmio_write32(CSR_DBG0, 0);
+    mmio_write32(CSR_DBG1, 0);
     asm volatile ("fence" ::: "memory");
 
     printf("Writing program to ATLAS IMEM (%u words) ...\\n", ATLAS_PROGRAM_LEN);
@@ -744,6 +803,57 @@ int main(void)
         return 1;
     }}
 """
+
+    if perf_threshold is not None or perf_report:
+        # MAC-based utilization. The program banks a timed-window cycle delta
+        # into CSR_DBG1 (two CSRR snapshots of mcycles around the measured
+        # region). MAC counts are declared statically via @PERF_MACS_MXU{0,1}.
+        # Peak = 1024 MAC/cycle per MXU (32x32 PEs), so util = MACs * 100 /
+        # (1024 * dbg1_cycles).
+        out += """
+    /* Perf metric. Denominator is the scalar-banked mcycles delta in CSR_DBG1. */
+    uint32_t dbg1_cycles  = mmio_read32(CSR_DBG1);
+    printf("  dbg1_cycles  = %u\\n", dbg1_cycles);
+"""
+        if perf_threshold is not None:
+            out += f"""
+    if (dbg1_cycles == 0) {{
+        printf("FAIL: {test_name} — dbg1_cycles == 0, program never banked mcycles delta into CSR_DBG1\\n");
+        return 1;
+    }}
+"""
+        if perf_macs_mxu0 is not None:
+            out += f"""
+    {{
+        uint64_t macs = {perf_macs_mxu0}ULL;
+        uint32_t util = dbg1_cycles ? (uint32_t)((macs * 100ULL) / (1024ULL * (uint64_t)dbg1_cycles)) : 0u;
+        printf("  util_mxu0    = %u%% (MACs=%llu, peak=1024 MAC/cyc)\\n",
+               util, (unsigned long long)macs);
+"""
+            if perf_threshold is not None:
+                out += f"""        if (util < {perf_threshold}u) {{
+            printf("FAIL: {test_name} — util_mxu0 %u%% below threshold %u%%\\n",
+                   util, (unsigned){perf_threshold});
+            return 1;
+        }}
+"""
+            out += "    }\n"
+        if perf_macs_mxu1 is not None:
+            out += f"""
+    {{
+        uint64_t macs = {perf_macs_mxu1}ULL;
+        uint32_t util = dbg1_cycles ? (uint32_t)((macs * 100ULL) / (1024ULL * (uint64_t)dbg1_cycles)) : 0u;
+        printf("  util_mxu1    = %u%% (MACs=%llu, peak=1024 MAC/cyc)\\n",
+               util, (unsigned long long)macs);
+"""
+            if perf_threshold is not None:
+                out += f"""        if (util < {perf_threshold}u) {{
+            printf("FAIL: {test_name} — util_mxu1 %u%% below threshold %u%%\\n",
+                   util, (unsigned){perf_threshold});
+            return 1;
+        }}
+"""
+            out += "    }\n"
 
     if has_golden and golden[3]:
         out += f"""
@@ -834,7 +944,22 @@ def main():
                     f"Inline golden data @DRAM_BASE 0x{inline_dram_base:08X}: "
                     f"{len(p_words)} preload words, {len(c_words)} check words"
                 )
-        c_source = emit_c_file(code, test_name, golden=golden)
+        perf_threshold = _parse_perf_threshold(source)
+        if perf_threshold is not None:
+            print(f"Perf utilization threshold: {perf_threshold}%")
+        perf_report = _parse_perf_report(source)
+        if perf_report and perf_threshold is None:
+            print("Perf reporting enabled (no gating)")
+        perf_macs_mxu0, perf_macs_mxu1 = _parse_perf_macs(source)
+        if perf_macs_mxu0 is not None:
+            print(f"Perf MACs MXU0: {perf_macs_mxu0}")
+        if perf_macs_mxu1 is not None:
+            print(f"Perf MACs MXU1: {perf_macs_mxu1}")
+        c_source = emit_c_file(code, test_name, golden=golden,
+                               perf_threshold=perf_threshold,
+                               perf_report=perf_report,
+                               perf_macs_mxu0=perf_macs_mxu0,
+                               perf_macs_mxu1=perf_macs_mxu1)
         with open(args.out_c, "w") as f:
             f.write(c_source)
         print(f"Wrote C file to {args.out_c} ({len(code)} instructions)")

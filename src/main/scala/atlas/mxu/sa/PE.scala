@@ -43,8 +43,8 @@ class PE(peArch: PEArchitecture) extends Module {
     /** An output activation element. */
     val actQ = Output(UInt(mulW))
 
-    /** An output MAC element. */
-    val macQ = Output(UInt(addW))
+    /** A combinational output MAC element. */
+    val mac = Output(UInt(addW))
 
     /** An output selector signal to use w0 or w1. */
     val weightReadSelQ = Output(Bool())
@@ -64,7 +64,7 @@ class PE(peArch: PEArchitecture) extends Module {
       mac.io.roundingMode := consts.round_near_even
       mac.io.detectTininess := consts.tininess_afterRounding
 
-      io.macQ := RegNext(mac.io.out)
+      io.mac := mac.io.out
     
     case PEArchitecture.FP32Addition =>
       val BF16 = AtlasFPType.BF16
@@ -92,7 +92,7 @@ class PE(peArch: PEArchitecture) extends Module {
       add.io.roundingMode := consts.round_near_even
       add.io.detectTininess := consts.tininess_afterRounding
 
-      io.macQ := RegNext(add.io.out)
+      io.mac := add.io.out
 
     case PEArchitecture.CustomFMA =>
       val fma = Module(new E4M3FMA)
@@ -100,7 +100,7 @@ class PE(peArch: PEArchitecture) extends Module {
       fma.io.b := weight(7, 0)
       fma.io.addend16 := io.addend
 
-      io.macQ := RegNext(fma.io.out16)
+      io.mac := fma.io.out16
   }
 
   io.actQ := RegNext(io.act)

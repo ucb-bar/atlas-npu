@@ -258,7 +258,7 @@ class SystolicArrayVectorTest extends AnyFlatSpec with Matchers with PeekPokeAPI
   "SystolicArray sequencer+MREG (VCS vectors)" should "match Python ground truth" in {
     val p       = SystolicArrayParams()
     val mregP   = MregParams()
-    val saLat   = p.rows + p.cols - 1
+    val saLat   = p.rows + p.cols - 2
     val vectors = loadVectors(vectorResource)
     require(vectors.nonEmpty)
 

@@ -38,7 +38,7 @@ class PEMesh(rows: Int, cols: Int, peArch: PEArchitecture) extends Module {
   
   for (j <- 0 until cols) {
     pes(0)(j).io.addend := io.addendVec(j)
-    io.outVec(j) := pes(rows - 1)(j).io.macQ
+    io.outVec(j) := pes(rows - 1)(j).io.mac
   }
 
   for (i <- 0 until rows; j <- 0 until cols) {
@@ -53,6 +53,6 @@ class PEMesh(rows: Int, cols: Int, peArch: PEArchitecture) extends Module {
     pes(i)(j + 1).io.weightReadSel := pes(i)(j).io.weightReadSelQ
   }
   for (i <- 0 until rows - 1; j <- 0 until cols) {
-    pes(i + 1)(j).io.addend := pes(i)(j).io.macQ
+    pes(i + 1)(j).io.addend := RegNext(pes(i)(j).io.mac)
   }
 }

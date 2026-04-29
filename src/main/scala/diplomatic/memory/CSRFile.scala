@@ -4,7 +4,7 @@ CSRFile.scala — TileLink-accessible CSR register file.
 Host reads/writes via TileLink.  Scalar core reads/writes via internal port.
 Scale registers are NOT here — see ScaleRegFile.
 
-TileLink byte-address map within the first 0x20 bytes of the CSR window:
+TileLink byte-address map within the first 0x1C bytes of the CSR window:
   0x00  cycle counter      (RW)
   0x04  instruction counter(RW)
   0x08  status             (RO — bit 0: halted, bits [2:1]: halt_reason)
@@ -83,7 +83,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
 
   // ── Internal (scalar-core) access ────────────────────────────────
   // Map 12-bit CSR addresses to word indices
-  private def csrAddrToWordIdx(addr: UInt): UInt = MuxLookup(addr, 7.U)(Seq(
+  private def csrAddrToWordIdx(addr: UInt): UInt = MuxLookup(addr, 0.U)(Seq(
     CSR_CYCLE_COUNTER -> 0.U,
     CSR_INST_COUNTER  -> 1.U,
     CSR_STATUS        -> 2.U,
@@ -157,13 +157,16 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     }
   }
 
-  //this connects the ECALL instruction to the execControl register
+  // Only clear execRun on a committed scalar halt event. Using the broader
+  // combinational "halted" signal can drop execRun early while the scalar
+  // program is still draining to completion.
   val csrTlPuts = tl.a.bits.opcode === TLMessages.PutFullData ||
     tl.a.bits.opcode === TLMessages.PutPartialData
   val csrTlWritesExec =
     tl.a.fire && csrTlPuts &&
       tl.a.bits.address(AtlasMemMap.CSR_ADDR_BITS - 1, 2) === 6.U
-  when(io.csr.halted && !csrTlWritesExec) {
+  val scalarHaltEvent = io.csr.set_illegal || io.csr.set_ecall || io.csr.set_ebreak
+  when(scalarHaltEvent && !csrTlWritesExec) {
     reg_execRun := false.B
   }
 

@@ -72,12 +72,5 @@ project/**/metals.sbt
 /baremetal/tests/atlas_*.c
 /baremetal/tests/build/
 /baremetal/results/
-/baremetal/generators/software_models/mxu0_sa/__pycache__
-/baremetal/generators/software_models/mxu1_ipt/__pycache__
-/baremetal/generators/software_models/mxu1_ipt/ipt_c/__pycache__
-/baremetal/generators/software_models/vpu/__pycache__
-/baremetal/generators/software_models/vpu/lane_boxes/__pycache__
-/baremetal/generators/software_models/vpu/lut_sources/__pycache__
-/baremetal/generators/__pycache__
+/baremetal/**/__pycache__/
 /baremetal/generators/*.json
-/baremetal/__pycache__
