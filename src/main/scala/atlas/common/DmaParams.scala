@@ -20,20 +20,19 @@ import chisel3.util._
   * @param numChannels      Number of independent DMA channels / command slots
   *                         (spec: `DMA_CHANNELS`, default 8).
   * @param channelIdBits    log2(numChannels); width of channel-index pointers.
-  * @param fenceRespBits    Reserved width for fence/barrier response tracking.
   * @param maxInFlight      Maximum outstanding (un-acknowledged) TileLink beats.
   * @param maxTransferBytes Largest single DMA transfer in bytes (default 4 KiB).
   * @param name             Instance name used for TileLink node naming and debug output.
   */
 case class DmaParams(
   beatBytes:        Int     = 32,    // DMA_ALIGN — 256-bit beats.
-  tagBits:          Int     = 6,     // 6 bits → source IDs 0..63.
   numChannels:      Int     = 8,     // DMA_CHANNELS — 8 command slots.
-  channelIdBits:    Int     = 3,     // log2(8) = 3.
-  fenceRespBits:    Int     = 4,     // Fence tracking field width.
   maxInFlight:      Int     = 64,    // Up to 64 beats on the wire at once.
   maxTransferBytes: Int     = 4096,  // 4 KiB maximum transfer.
   name:             String  = "dma"
 ) {
+  val channelIdBits:    Int = log2Ceil(numChannels)
   val transferSizeBits: Int = log2Ceil(maxTransferBytes) + 1
+  val tagBits:          Int = log2Ceil(maxInFlight)
+  val queueSize:        Int = log2Ceil(maxTransferBytes/beatBytes)    // Queue size for pending stores.
 }
