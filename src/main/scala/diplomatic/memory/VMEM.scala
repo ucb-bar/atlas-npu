@@ -114,10 +114,17 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   val r1_bankReadValid  = RegInit(VecInit(Seq.fill(p.numBanks)(false.B)))
   val r1_bankReadData   = Wire(Vec(p.numBanks, Vec(p.lineBytes, UInt(8.W))))
 
-  val r1_tlSource = RegNext(tl.a.bits.source)
-  val r1_tlSize   = RegNext(tl.a.bits.size)
   val r1_tlRead   = RegInit(false.B)
   val r1_tlWrite  = RegInit(false.B)
+  val r1_tlSource = Reg(UInt(tl.params.sourceBits.W))
+  val r1_tlSize   = Reg(UInt(tl.params.sizeBits.W))
+
+  // Held-until-fire D-response slot (mirrors CSRFile.scala).
+  val dValid  = RegInit(false.B)
+  val dOpcode = Reg(UInt(3.W))
+  val dSize   = Reg(UInt(tl.params.sizeBits.W))
+  val dSource = Reg(UInt(tl.params.sourceBits.W))
+  val dData   = Reg(UInt(tl.params.dataBits.W))
 
   val dmaReadGranted  = WireDefault(false.B)
   val dmaWriteGranted = WireDefault(false.B)
@@ -130,6 +137,12 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   def splitLine(data: UInt): Vec[UInt] =
     VecInit((0 until p.lineBytes).map(i => data(i * 8 + 7, i * 8)))
 
+  // dCanAccept gates both tl.a.ready and the per-bank decode below; the
+  // latter prevents the bank from performing an SRAM access for a TL
+  // request that has not fired.
+  val r1_tlValid = r1_tlRead || r1_tlWrite
+  val dCanAccept = !r1_tlValid && (!dValid || tl.d.ready)
+
   for (b <- 0 until p.numBanks) {
     val bank = banks(b)
 
@@ -137,12 +150,12 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     val lsuScalarWantsRead = io.lsuScalarRead.valid && io.lsuScalarRead.bits.bankIdx === b.U
     val lsuVecWantsRead    = io.lsuVecRead.valid    && io.lsuVecRead.bits.bankIdx === b.U
     val dmaWantsRead       = io.dmaRead.valid       && io.dmaRead.bits.bankIdx === b.U
-    val tlWantsRead        = tl.a.valid && tlIsGet   && tlBankIdx === b.U
+    val tlWantsRead        = tl.a.valid && dCanAccept && tlIsGet && tlBankIdx === b.U
 
     val lsuScalarWantsWrite = io.lsuScalarWrite.valid && io.lsuScalarWrite.bits.bankIdx === b.U
     val lsuVecWantsWrite    = io.lsuVecWrite.valid    && io.lsuVecWrite.bits.bankIdx === b.U
     val dmaWantsWrite       = io.dmaWrite.valid       && io.dmaWrite.bits.bankIdx === b.U
-    val tlWantsWrite        = tl.a.valid && tlIsPut    && tlBankIdx === b.U
+    val tlWantsWrite        = tl.a.valid && dCanAccept && tlIsPut && tlBankIdx === b.U
 
     // ── Shared 1RW access port ─────────────────────────────────
     val accessEn      = WireDefault(false.B)
@@ -243,20 +256,40 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   // TileLink D-channel
   // ==========================================================================
 
-  tl.a.ready := tlAccepted
+  tl.a.ready := tlAccepted && dCanAccept
   r1_tlRead  := tl.a.fire && tlIsGet
   r1_tlWrite := tl.a.fire && tlIsPut
+  when (tl.a.fire) {
+    r1_tlSource := tl.a.bits.source
+    r1_tlSize   := tl.a.bits.size
+  }
 
   val tlRespHot = VecInit((0 until p.numBanks).map(b =>
     r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_TL))
 
-  tl.d.valid        := r1_tlRead || r1_tlWrite
-  tl.d.bits.opcode  := Mux(r1_tlRead, TLMessages.AccessAckData, TLMessages.AccessAck)
+  val r1_tlData = Mux(r1_tlRead,
+    Mux1H(tlRespHot, r1_bankReadData.map(flattenBankData)), 0.U)
+
+  when (r1_tlValid) {
+    dValid  := true.B
+    dOpcode := Mux(r1_tlRead, TLMessages.AccessAckData, TLMessages.AccessAck)
+    dSize   := r1_tlSize
+    dSource := r1_tlSource
+    dData   := r1_tlData
+  } .elsewhen (tl.d.fire) {
+    dValid := false.B
+  }
+
+  assert(!(r1_tlValid && dValid && !tl.d.ready),
+    "VMEM TL D response slot overflow")
+
+  tl.d.valid        := dValid
+  tl.d.bits.opcode  := dOpcode
   tl.d.bits.param   := 0.U
-  tl.d.bits.size    := r1_tlSize
-  tl.d.bits.source  := r1_tlSource
+  tl.d.bits.size    := dSize
+  tl.d.bits.source  := dSource
   tl.d.bits.sink    := 0.U
   tl.d.bits.denied  := false.B
-  tl.d.bits.data    := Mux(r1_tlRead, Mux1H(tlRespHot, r1_bankReadData.map(flattenBankData)), 0.U)
+  tl.d.bits.data    := dData
   tl.d.bits.corrupt := false.B
 }
