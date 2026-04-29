@@ -267,7 +267,7 @@ class SystolicArrayFullMatmulTest extends AnyFlatSpec with Matchers with PeekPok
   "SystolicArray sequencer+MREG (VCS full matmul)" should "compute full matmul correctly" in {
     val p       = SystolicArrayParams()
     val mregP   = MregParams()
-    val saLat   = p.rows + p.cols - 1   // systolic drain latency
+    val saLat   = p.rows + p.cols - 2   // systolic drain latency
     val vectors = loadVectors(vectorResource)
     require(vectors.nonEmpty)
 

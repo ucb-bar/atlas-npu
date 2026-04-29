@@ -175,7 +175,7 @@ class SystolicArrayTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     }
 
   /** Total latency for data to drain through the systolic array. */
-  private def saLatency(p: SystolicArrayParams): Int = p.rows + p.cols - 1
+  private def saLatency(p: SystolicArrayParams): Int = p.rows + p.cols - 2
 
   // ── Harness helpers ──
 

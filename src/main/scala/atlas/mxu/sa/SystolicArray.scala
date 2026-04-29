@@ -11,7 +11,9 @@
 //   • Activations are skewed left-to-right across rows (delay = row index).
 //   • Addends (partial sums) are skewed top-to-bottom across columns.
 //   • Outputs are de-skewed bottom-to-top so they emerge as a single row.
-//   • Total pipeline latency = MXU_ARRAY_ROWS + MXU_ARRAY_COLS − 1 cycles.
+//   • Total pipeline latency = MXU_ARRAY_ROWS + MXU_ARRAY_COLS − 2 cycles.
+//     The bottom-row mac feeds the deskew chain combinationally; the accBuf
+//     SyncReadMem write downstream provides the missing pipeline stage.
 // ============================================================================
 
 package atlas.sa
@@ -86,9 +88,9 @@ class SystolicArray(p: SystolicArrayParams) extends Module {
   }
 
   // ==========================================================================
-  // Valid pipeline — total latency = rows + cols − 1
+  // Valid pipeline — total latency = rows + cols − 2
   // ==========================================================================
 
   io.outputRow.valid := ShiftRegister(
-    io.computeReq.valid, p.rows + p.cols - 1, false.B, true.B)
+    io.computeReq.valid, p.rows + p.cols - 2, false.B, true.B)
 }

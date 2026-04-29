@@ -249,7 +249,7 @@ class SystolicArrayVectorE4M3Test extends AnyFlatSpec with Matchers with PeekPok
   "SystolicArray sequencer+MREG (VCS vectors, E4M3)" should "match E4M3-scaled Python ground truth" in {
     val p       = SystolicArrayParams()
     val mregP   = MregParams()
-    val saLat   = p.rows + p.cols - 1
+    val saLat   = p.rows + p.cols - 2
     val vectors = loadVectors(vectorResource)
     require(vectors.nonEmpty)
 
