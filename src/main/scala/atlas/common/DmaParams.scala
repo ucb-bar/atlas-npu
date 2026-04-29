@@ -34,5 +34,5 @@ case class DmaParams(
   val channelIdBits:    Int = log2Ceil(numChannels)
   val transferSizeBits: Int = log2Ceil(maxTransferBytes) + 1
   val tagBits:          Int = log2Ceil(maxInFlight)
-  val queueSize:        Int = log2Ceil(maxTransferBytes/beatBytes)    // Queue size for pending stores.
+  val queueSize:        Int = maxTransferBytes / beatBytes    // Queue size for pending stores.
 }
