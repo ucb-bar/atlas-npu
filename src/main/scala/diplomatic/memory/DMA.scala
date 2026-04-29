@@ -203,7 +203,7 @@ class DmaEngine(
     }
   }
 
-  val storeDataQueue = Module(new Queue(UInt(beatBits.W), entries = 128))
+  val storeDataQueue = Module(new Queue(UInt(beatBits.W), entries = dmaP.queueSize))
   storeDataQueue.io.enq.valid := io.vmemReadData.valid
   storeDataQueue.io.enq.bits  := io.vmemReadData.bits
   storeDataQueue.io.deq.ready := tlAdapter.io.request.fire && slotActive(requestIdx) && currentCmdIsStore
