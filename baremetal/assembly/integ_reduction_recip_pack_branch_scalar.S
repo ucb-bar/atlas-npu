@@ -90,7 +90,7 @@
     # Load pack scale from VMEM byte address 0x0800 into e0.
     LI    x18, 0x0800
     SELD  0, x18, 0
-    DELAY 1
+    DELAY 2
 
     # packed = fp8pack(normalized, e0)
     VFP8PACK 56, 52, 0
@@ -110,7 +110,7 @@
     # This is a read only; scalar scratch stores remain disjoint from DMA.STORE regions.
     LI    x19, 0x1000
     LW    x23, x19, 0
-    DELAY 1
+    DELAY 2
     BEQ   x23, x0, fail
     NOP
     NOP

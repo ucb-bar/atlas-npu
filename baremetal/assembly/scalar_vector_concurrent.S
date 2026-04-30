@@ -7,7 +7,7 @@
 # overlapping region in a different bank to avoid LSU same-port conflicts:
 #   • During VLOAD  (vector reads)  → scalar SW only
 #   • During VSTORE (vector writes) → scalar LW only
-#   • During XLU / MXU compute      → scalar LW/SW chains with a NOP after LW
+#   • During XLU / MXU compute      → scalar LW/SW chains with a 2-cycle gap after LW
 #
 # Address units:
 #   • DMA / VLOAD / VSTORE use VMEM word addresses
@@ -91,21 +91,21 @@
 # ═══════════════════════════════════════════════════════════════
 # PHASE 2: VSTORE m0 + scalar loads
 #   Vector path writes VMEM, so scalar uses read port only.
-#   Each scalar load is followed by NOP to satisfy scalar-core assertions.
+#   Each scalar load is followed by DELAY 2 to respect the longer scalar LSU latency.
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 131072
     VSTORE 0, x6, 0
     LW    x21, x14, 0              # tile_B word 0
-    NOP
+    DELAY 2
     LW    x22, x14, 4              # tile_B word 1
-    NOP
+    DELAY 2
     LW    x23, x15, 0              # tile_W word 0
-    NOP
+    DELAY 2
     LW    x24, x16, 0              # stage1 word 0 = CAFE
-    NOP
+    DELAY 2
     LW    x25, x17, 0              # stage2 word 0 = DEAD
-    NOP
+    DELAY 2
     DELAY 22
 
 # ═══════════════════════════════════════════════════════════════
@@ -120,17 +120,17 @@
     SW    x24, x17, 12             # stage2 word 3 = CAFE
     SW    x25, x18, 8              # stage3 word 2 = DEAD
     SW    x21, x18, 12             # stage3 word 3 = tile_B word 0
-    DELAY 26
+    DELAY 27
 
     VTRPOSE.XLU 2, 1
     LW    x26, x16, 8              # read stage1 word 2 = tile_B word 0
-    NOP
+    DELAY 2
     SW    x26, x17, 16             # stage2 word 4 = tile_B word 0
     LW    x20, x17, 12             # read stage2 word 3 = CAFE
-    NOP
+    DELAY 2
     SW    x20, x18, 16             # stage3 word 4 = CAFE
     LW    x19, x18, 8              # read stage3 word 2 = DEAD
-    NOP
+    DELAY 2
     SW    x19, x16, 16             # stage1 word 4 = DEAD
     DELAY 71
 
@@ -151,13 +151,13 @@
 
     VMATMUL.ACC.MXU0      0, 0, 0
     LW    x21, x16, 16             # read stage1 word 4 = DEAD
-    NOP
+    DELAY 2
     SW    x21, x17, 24             # stage2 word 6 = DEAD
     LW    x22, x18, 12             # read stage3 word 3 = tile_B word 0
-    NOP
+    DELAY 2
     SW    x22, x16, 24             # stage1 word 6 = tile_B word 0
     LW    x23, x17, 8              # read stage2 word 2 = tile_W word 0
-    NOP
+    DELAY 2
     SW    x23, x18, 24             # stage3 word 6 = tile_W word 0
     DELAY 112
 
@@ -171,17 +171,17 @@
     LI    x6, 65536
     VSTORE 4, x6, 0                # C0 lo -> tile_W region
     LW    x24, x16, 20             # read stage1 word 5 = tile_W word 0
-    NOP
+    DELAY 2
     LW    x25, x17, 24             # read stage2 word 6 = DEAD
-    NOP
+    DELAY 2
     DELAY 28
 
     LI    x6, 98304
     VSTORE 5, x6, 0                # C0 hi -> bias region
     LW    x26, x18, 24             # read stage3 word 6 = tile_W word 0
-    NOP
+    DELAY 2
     LW    x19, x16, 24             # read stage1 word 6 = tile_B word 0
-    NOP
+    DELAY 2
     DELAY 28
 
 # ═══════════════════════════════════════════════════════════════

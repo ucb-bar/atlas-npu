@@ -61,7 +61,7 @@
     # Load scale register from VMEM byte address 0x0800.
     LI    x7, 2048
     SELD  0, x7, 0
-    DELAY 1
+    DELAY 2
 
     # ------------------------------------------------------------------
     # Stage FP8 tiles into MREGs

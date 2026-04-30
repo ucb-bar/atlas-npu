@@ -110,13 +110,13 @@
     LI    x6, 229376
     VSTORE 1, x6, 0
     LW    x14, x29, 0
-    NOP
+    DELAY 2
     LW    x15, x29, 4
-    NOP
+    DELAY 2
     LW    x16, x29, 8
-    NOP
+    DELAY 2
     LW    x17, x29, 12
-    NOP
+    DELAY 2
     DELAY 24
 
     LI    x6, 131328

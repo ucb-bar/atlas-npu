@@ -38,9 +38,7 @@
       "Use datatype-specific helpers correctly: FP8 tensors should typically flow through `matrix_to_fp8_words()` before packed beat helpers, BF16 tensors through `matrix_to_bf16_words()`, and row-wise BF16 VPU data through the checked-in row helpers.",
       "Treat the generator as part of the test's correctness proof: explain memory regions clearly, keep offsets consistent with the assembly, and derive expected outputs from the transformed tensors that the assembly really produces.",
       "Double-check that every preload value, preload offset, check value, and check offset matches the test intent, the assembly's memory map, and the Atlas ISA/spec behavior being exercised.",
-      "Prefer assembly self-checking over a Python generator when the expected result can be validated with a small number of scalar loads, branches, or signatures.",
-      "Treat scalar-observable loads, branch predicates, and signatures as a coverage tool for tests whose intent actually includes scalar/control interaction; do not add them as ornamental 'extra checking' to a generator-backed compute test that already has a complete DRAM oracle.",
-      "When a test uses both a generator-backed DRAM oracle and a scalar-observable/control-flow check, design them so the scalar check cannot suppress or bypass the DRAM-producing path; the scalar check should refine coverage, not become a second fragile oracle."
+      "Prefer assembly self-checking over a Python generator when the expected result can be validated with a small number of scalar loads, branches, or signatures."
     ],
     "output_requirements": [
       "Return exactly the requested number of tests as JSON and nothing else.",
@@ -90,16 +88,6 @@
       "name": "Scalar LSU isolation",
       "rule": "The generator golden models value-domain tensor compute only. Scalar `SB`/`SH`/`SW` writes are NOT modeled. Any scalar store that lands inside a later-drained `DMA.STORE` source footprint silently corrupts the oracle at those bytes. Confine scalar stores to a dedicated scratch VMEM region disjoint from every DMA.STORE source. Scalar loads (`LW`/`LBU`/`LHU`/`LB`) inside live tiles are safe.",
       "why": "A few scattered word-level mismatches inside an otherwise-correct tile usually means a scalar SB/SW poked into the tile."
-    },
-    {
-      "name": "Oracle-producing drains must dominate fail paths",
-      "rule": "If the generator emits DRAM `checks`, every `DMA.STORE` required to produce those checked bytes must execute on every architecturally valid path before any branch to `fail:` or early `ECALL`. Do not place a speculative scalar guard before the drains if that guard can skip them. Either drain first and then classify pass/fail, or ensure both branch arms still execute the same required stores before exiting.",
-      "why": "A bad pre-drain branch turns a local control mistake into a full-screen `got 0x00000000` failure, making a healthy compute/datapath look broken because the oracle region was never written back."
-    },
-    {
-      "name": "Scalar-observable predicate soundness",
-      "rule": "Use scalar-observable reads only when the test's coverage goal genuinely includes scalar/control interaction. When branching on a value derived from accelerator output, the planner must prove the predicate is robust under the generator's exact value set and quantization. Never use `BEQ value, x0, fail` or equivalent zero/non-zero predicates on VPU/MXU results unless the generator explicitly guarantees that sampled location cannot legally be zero, `-0.0`, or another edge-class value that aliases the chosen predicate. For generator-backed compute tests, prefer the DRAM oracle alone unless scalar interaction is itself the feature under test. If a scalar predicate is still required, branch on a dedicated scratch signature or on a generator-proven non-ambiguous value, not on the first word of a compute tile by convenience.",
-      "why": "Many legitimate Atlas results are zero-like at exactly the edge classes coverage tests want to hit; a naive sentinel makes the test fail for the interesting input rather than for a real bug."
     },
     {
       "name": "Value-domain golden via gen_utils",

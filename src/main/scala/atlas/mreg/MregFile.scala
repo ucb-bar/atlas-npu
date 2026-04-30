@@ -266,11 +266,8 @@ class MregFile(p: MregParams) extends Module {
   val bankReadValid_d = RegNext(bankReadValid, init = VecInit(Seq.fill(p.numMregBanks)(false.B)))
   val bankReadPort_d  = RegNext(bankReadPort)
 
-  // Default outputs
-  for (rp <- 0 until numReadPorts) {
-    readResps(rp).valid := false.B
-    readResps(rp).bits  := 0.U
-  }
+  val readRespValidRaw = Wire(Vec(numReadPorts, Bool()))
+  val readRespDataRaw  = Wire(Vec(numReadPorts, UInt(p.mregRowBits.W)))
 
   // Since we assert at most one read per bank, but multiple different banks
   // may target different read ports in the same cycle, each port should also
@@ -293,7 +290,17 @@ class MregFile(p: MregParams) extends Module {
 
     val respSel = treeReduce(respLeaves)(mergeRespSel)
 
-    readResps(rp).valid := respSel.valid
-    readResps(rp).bits  := Mux(respSel.valid, respSel.data, 0.U)
+    readRespValidRaw(rp) := respSel.valid
+    // Response bits are don't-care when valid is low; keeping the raw selected
+    // bank data avoids injecting the respSel.valid control tree into every bit.
+    readRespDataRaw(rp)  := respSel.data
+  }
+
+  // Keep the mreg itself at a single registered-SRAM response latency.
+  // Timing-sensitive consumers add their own ingress flops so only the
+  // problematic read cones pay an extra cycle.
+  for (rp <- 0 until numReadPorts) {
+    readResps(rp).valid := readRespValidRaw(rp)
+    readResps(rp).bits  := readRespDataRaw(rp)
   }
 }

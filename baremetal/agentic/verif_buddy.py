@@ -43,6 +43,7 @@ USED_PROMPTS_DIRNAME = "used_prompts"
 VCS_DIR_RELPATH = "sims/vcs"
 DEFAULT_SIM_CONFIG = "EE290SimConfig"
 DEFAULT_COVERAGE_THRESHOLD = 90.0
+DEFAULT_LLM_TIMEOUT_S = 30 * 60
 COVERAGE_DIRNAME = "coverage"
 COVERAGE_ANALYZER_PATH = BAREMETAL_DIR / "coverage_analyzer.py"
 RUN_ASM_TESTS_PATH = BAREMETAL_DIR / "run_asm_tests.sh"
@@ -160,37 +161,147 @@ def _extract_top_level_function_block(text: str, func_name: str) -> str:
 
 
 def _extract_function_signature(text: str, func_name: str) -> str:
-    """Return the single-line ``def`` signature and its docstring (if any)."""
+    """Return the ``def`` signature (which may span multiple lines) and its
+    docstring, if any. Handles both ``def f(x): ...`` and the more common
+    multi-line ``def f(\n    x: T,\n) -> U:`` style by balancing parentheses
+    and stopping at the line that closes the signature with ``:``.
+    """
 
-    pattern = re.compile(rf"^def {re.escape(func_name)}\(.*?\):", re.MULTILINE | re.DOTALL)
-    match = pattern.search(text)
-    if not match:
+    lines = text.split("\n")
+    # Match at file scope OR at any indentation; we accept both top-level
+    # functions and methods inside classes.
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped.startswith(f"def {func_name}("):
+            continue
+
+        sig_lines = [line]
+        depth = line.count("(") - line.count(")")
+        end_idx = idx
+        signature_complete = (
+            depth == 0 and sig_lines[-1].rstrip().endswith(":")
+        )
+        while not signature_complete and end_idx + 1 < len(lines):
+            end_idx += 1
+            nxt = lines[end_idx]
+            sig_lines.append(nxt)
+            depth += nxt.count("(") - nxt.count(")")
+            signature_complete = (
+                depth == 0 and nxt.rstrip().endswith(":")
+            )
+        sig = "\n".join(sig_lines)
+
+        # Capture the docstring (single- or multi-line) that may follow.
+        doc_lines: list[str] = []
+        rest = lines[end_idx + 1:]
+        if rest and rest[0].strip().startswith(('"""', "'''")):
+            quote = '"""' if rest[0].strip().startswith('"""') else "'''"
+            first = rest[0]
+            doc_lines.append(first)
+            if first.strip().count(quote) < 2:
+                for sub in rest[1:]:
+                    doc_lines.append(sub)
+                    if quote in sub:
+                        break
+        body = "\n".join(doc_lines).rstrip()
+        return (sig + "\n" + body).rstrip() if body else sig
+
+    return ""
+
+
+def _extract_class_signature(text: str, class_name: str) -> str:
+    """Return the class line plus the signatures (and docstrings) of
+    ``__init__`` and ``__call__`` for a single class. Used to surface
+    the software-model adapters (SARTLLinearFunction / IPTLinearRTLFunction)
+    without dumping their full implementation bodies into the prompt.
+    """
+
+    class_pattern = re.compile(rf"^class {re.escape(class_name)}\b.*?:", re.MULTILINE)
+    m = class_pattern.search(text)
+    if not m:
         return ""
 
-    sig = match.group(0)
-    rest = text[match.end():]
-    doc_lines: list[str] = []
-    lines = rest.splitlines()
-    if lines and lines[0].strip().startswith(('"""', "'''")):
-        quote = '"""' if '"""' in lines[0] else "'''"
-        first = lines[0].strip()
-        if first.count(quote) >= 2:
-            doc_lines.append("    " + first)
-        else:
-            doc_lines.append("    " + first)
-            for ln in lines[1:]:
-                doc_lines.append(ln)
-                if quote in ln:
+    tail = text[m.start():]
+    lines = tail.splitlines()
+    class_line = lines[0]
+
+    body_lines: list[str] = []
+    saw_class_docstring = False
+    for idx, line in enumerate(lines[1:], start=1):
+        stripped = line.strip()
+        if idx == 1 and stripped.startswith(('"""', "'''")):
+            saw_class_docstring = True
+            quote = '"""' if stripped.startswith('"""') else "'''"
+            body_lines.append(line)
+            if stripped.count(quote) >= 2 and len(stripped) > 3:
+                continue
+            for sub in lines[idx + 1:]:
+                body_lines.append(sub)
+                if quote in sub:
                     break
-    body = "\n".join(doc_lines).rstrip()
-    return (sig + "\n" + body).rstrip() if body else sig
+            break
+        if not saw_class_docstring:
+            break
+
+    sig_methods = ("__init__", "__call__")
+    method_blocks: list[str] = []
+    for method in sig_methods:
+        pat = re.compile(rf"^\s+def {re.escape(method)}\(.*?\)[^:]*:", re.MULTILINE | re.DOTALL)
+        found = pat.search(tail)
+        if not found:
+            continue
+        sig = found.group(0).rstrip()
+        rest = tail[found.end():]
+        rest_lines = rest.splitlines()
+        doc: list[str] = []
+        if rest_lines and rest_lines[0].strip().startswith(('"""', "'''")):
+            quote = '"""' if '"""' in rest_lines[0] else "'''"
+            first = rest_lines[0]
+            doc.append(first)
+            if first.strip().count(quote) < 2:
+                for sub in rest_lines[1:]:
+                    doc.append(sub)
+                    if quote in sub:
+                        break
+        method_text = sig + ("\n" + "\n".join(doc) if doc else "")
+        method_blocks.append(method_text)
+
+    class_body = "\n".join(body_lines).rstrip()
+    methods_text = "\n\n".join(method_blocks).rstrip()
+    parts = [class_line]
+    if class_body:
+        parts.append(class_body)
+    if methods_text:
+        parts.append(methods_text)
+    return "\n".join(parts).rstrip()
 
 
-def _load_generator_helper_reference() -> str:
-    path = BAREMETAL_DIR / "generators" / "gen_utils.py"
+def _extract_enum_summary(text: str, enum_name: str) -> str:
+    """Return a one-block summary of an ``enum.Enum`` subclass (the class line
+    and its member assignments). Useful for OutputFmtSel / AddendSel.
+    """
+
+    pattern = re.compile(rf"^class {re.escape(enum_name)}\b.*?:\s*\n", re.MULTILINE)
+    m = pattern.search(text)
+    if not m:
+        return ""
+    lines = text[m.start():].splitlines()
+    block = [lines[0]]
+    for line in lines[1:]:
+        if line and not line.startswith((" ", "\t")) and not line.startswith("#"):
+            break
+        if not line.strip():
+            if len(block) > 1:
+                break
+            continue
+        if "=" in line or line.strip().startswith(('"""', "'''")):
+            block.append(line)
+    return "\n".join(block).rstrip()
+
+
+def _load_gen_utils_reference(path: Path) -> str:
     if not path.exists():
         return ""
-
     text = path.read_text(encoding="utf-8", errors="replace")
     snippets: list[str] = []
 
@@ -242,95 +353,464 @@ def _load_generator_helper_reference() -> str:
         if sig:
             signature_snippets.append(sig)
     if signature_snippets:
-        snippets.append("# High-level datatype and reference-model helpers (signatures only):\n"
-                        + "\n\n".join(signature_snippets))
+        snippets.append(
+            "# High-level datatype and reference-model helpers (signatures only):\n"
+            + "\n\n".join(signature_snippets)
+        )
 
-    if not snippets:
+    return "\n\n".join(snippets).strip()
+
+
+def _load_vpu_gen_utils_reference(path: Path) -> str:
+    """Surface the VPU generator helpers. These wrap the VPU functional model
+    (`VectorEngineModel`) and hand back DRAM preloads/checks in the exact
+    beat layout the assembly expects; generators should reuse them instead
+    of hand-encoding BF16 lanes or walking `MODEL.execute` directly.
+    """
+
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    const_lines: list[str] = []
+    const_names = (
+        "PARAMS",
+        "MODEL",
+        "BF16_PER_BEAT",
+        "FP8_PER_BEAT",
+        "ROWS_PER_REGISTER",
+        "ROWS_PER_TENSOR",
+    )
+    for name in const_names:
+        match = re.search(rf"^{name}\s*=.*$", text, re.MULTILINE)
+        if match:
+            const_lines.append(match.group(0))
+
+    snippets: list[str] = []
+    if const_lines:
+        snippets.append("# Module constants (re-export these rather than redefining):\n"
+                        + "\n".join(const_lines))
+
+    full_body_funcs = (
+        "float_to_bf16",
+        "pack_u16_le",
+        "pack_u8_le",
+        "const_bf16_row",
+        "constant_bf16_rows",
+        "repeat_bf16_row",
+        "tensor_preloads",
+        "tensor_checks",
+        "fp8_checks",
+    )
+    for func_name in full_body_funcs:
+        block = _extract_top_level_function_block(text, func_name)
+        if block:
+            snippets.append(block)
+
+    signature_only_funcs = (
+        "run_unary_rows",
+        "run_binary_rows",
+        "run_row_reduce_tensor",
+        "run_col_reduce_tensor",
+        "run_fp8_pack_rows",
+        "run_fp8_unpack_rows",
+        "run_vli_rows",
+        "run_vli_registers",
+    )
+    sigs: list[str] = []
+    for func_name in signature_only_funcs:
+        sig = _extract_function_signature(text, func_name)
+        if sig:
+            sigs.append(sig)
+    if sigs:
+        snippets.append(
+            "# VPU functional-model wrappers (signatures only — the bodies call\n"
+            "# MODEL.execute(op, ...) under the hood; every op name that the\n"
+            "# assembly uses via VPU.* instructions is accepted here):\n"
+            + "\n\n".join(sigs)
+        )
+
+    snippets.append(textwrap.dedent(
+        """\
+        # The wrappers above route through `MODEL.execute(op, ...)` where `op`
+        # is one of (see software_models.vpu.vector_engine_model):
+        #   pointwise binary : "add", "sub", "mul", "pairmax", "pairmin"
+        #   pointwise unary  : "rcp", "sqrt", "sin", "cos", "tanh", "log",
+        #                      "exp", "exp2", "square", "cube", "relu", "mov"
+        #   row reductions   : "rsum", "rmax", "rmin"
+        #   col reductions   : "csum", "cmax", "cmin"
+        #   VLI ops          : "vliAll", "vliRow", "vliCol", "vliOne"
+        #   FP8 phased       : "fp8pack", "fp8unpack"
+        # Use these exact strings; they match the assembly VPU.<op> naming.
+        """
+    ).strip())
+
+    return "\n\n".join(snippets).strip()
+
+
+def _load_software_models_reference() -> str:
+    """Signature-only surface for the software RTL models used by the checked-in
+    MXU and attention generators. These are the source of truth for MXU0/MXU1
+    golden numerics; generators MUST call them instead of re-implementing
+    FP8 matmul, E4M3 quantization, or BF16 accumulation.
+    """
+
+    models_dir = BAREMETAL_DIR / "generators" / "software_models"
+    if not models_dir.is_dir():
         return ""
 
-    body = "\n\n".join(snippets)
-    canonical_imports = textwrap.dedent(
+    sa_path = models_dir / "mxu0_sa" / "systolic_array_rtl_linear.py"
+    ipt_path = models_dir / "mxu1_ipt" / "ipt_rtl_linear.py"
+    fp_fmt_path = models_dir / "mxu1_ipt" / "fp_formats.py"
+    conv_path = models_dir / "mxu1_ipt" / "converters.py"
+    vpu_eng_path = models_dir / "vpu" / "vector_engine_model.py"
+
+    blocks: list[str] = []
+
+    if sa_path.exists():
+        sa_text = sa_path.read_text(encoding="utf-8", errors="replace")
+        sa_sig = _extract_class_signature(sa_text, "SARTLLinearFunction")
+        if sa_sig:
+            blocks.append(
+                "# --- software_models.mxu0_sa.systolic_array_rtl_linear ---\n"
+                "# MXU0 systolic-array functional adapter. Computes\n"
+                "#     y = x @ w^T + b\n"
+                "# with FP32 accumulation over K-tiles and final BF16/E4M3 truncation.\n"
+                "# For C = A @ B + bias, pass w = B.T so y = A @ B.\n"
+                "# Accepts torch tensors (float or uint8 raw E4M3 bytes) and returns\n"
+                "# a torch tensor shaped like x with last dim replaced by out_features.\n"
+                + sa_sig
+            )
+
+    if ipt_path.exists():
+        ipt_text = ipt_path.read_text(encoding="utf-8", errors="replace")
+        ipt_sig = _extract_class_signature(ipt_text, "IPTLinearRTLFunction")
+        if ipt_sig:
+            blocks.append(
+                "# --- software_models.mxu1_ipt.ipt_rtl_linear ---\n"
+                "# MXU1 inner-product-tree functional adapter. Same y = x @ w^T + b\n"
+                "# contract as SARTLLinearFunction but modeled bit-for-bit against\n"
+                "# the IPT lane RTL (E4M3 inputs, BF16 or E4M3 output format).\n"
+                + ipt_sig
+            )
+
+    if fp_fmt_path.exists():
+        fmt_text = fp_fmt_path.read_text(encoding="utf-8", errors="replace")
+        enum_blocks: list[str] = []
+        for enum_name in ("OutputFmtSel", "AddendSel"):
+            summary = _extract_enum_summary(fmt_text, enum_name)
+            if summary:
+                enum_blocks.append(summary)
+        fmt_fn_blocks: list[str] = []
+        for fn in (
+            "f32_to_bf16_bits_rne",
+            "bf16_bits_to_f32",
+            "encode_e4m3_normal",
+            "decode_e4m3",
+            "sanitize_bf16",
+            "round_right_shift4_rne",
+        ):
+            sig = _extract_function_signature(fmt_text, fn)
+            if sig:
+                fmt_fn_blocks.append(sig)
+        if enum_blocks or fmt_fn_blocks:
+            blocks.append(
+                "# --- software_models.mxu1_ipt.fp_formats ---\n"
+                "# Canonical FP-format helpers and the enums MXU adapters expect.\n"
+                "# Use these enums as `out_fmt_sel=OutputFmtSel.OutBF16` (or OutE4M3).\n"
+                + ("\n\n".join(enum_blocks + fmt_fn_blocks))
+            )
+
+    if conv_path.exists():
+        conv_text = conv_path.read_text(encoding="utf-8", errors="replace")
+        conv_fn_blocks: list[str] = []
+        for fn in (
+            "bf16_scale_to_e4m3",
+            "output_conv_stage",
+            "e4m3_mul_to_prod",
+            "e4m3_prod_to_aligned_int",
+            "aligned_int_to_bf16",
+            "pack_e4m3_prod",
+        ):
+            sig = _extract_function_signature(conv_text, fn)
+            if sig:
+                conv_fn_blocks.append(sig)
+        if conv_fn_blocks:
+            blocks.append(
+                "# --- software_models.mxu1_ipt.converters ---\n"
+                "# BF16 <-> E4M3 / product-format conversions that mirror the\n"
+                "# VMATPUSH.ACC / VMATPOP quantization semantics of the hardware.\n"
+                "# For a BF16-valued tile that hardware will round-trip through FP8,\n"
+                "# `bf16_scale_to_e4m3(bits, scale_exp)` is the bit-exact mirror.\n"
+                + "\n\n".join(conv_fn_blocks)
+            )
+
+    if vpu_eng_path.exists():
+        vpu_text = vpu_eng_path.read_text(encoding="utf-8", errors="replace")
+        execute_sig = _extract_function_signature(vpu_text, "execute")
+        if execute_sig:
+            blocks.append(
+                "# --- software_models.vpu.vector_engine_model.VectorEngineModel ---\n"
+                "# The VPU functional model shared by every `gen_vpu_*.py` via\n"
+                "# `vpu_gen_utils.MODEL`. Prefer the `vpu_gen_utils` wrappers; fall\n"
+                "# back to `MODEL.execute(...)` only when you need bespoke per-row\n"
+                "# dispatch. Signature and op names are authoritative:\n"
+                + execute_sig
+            )
+
+    return "\n\n".join(blocks).strip()
+
+
+def _generator_canonical_imports_block() -> str:
+    """Canonical import boilerplate covering all three helper layers."""
+
+    return textwrap.dedent(
         """\
-        # Canonical imports for any generator:
+        # Canonical imports for any Atlas baremetal generator. Pick the subset you
+        # need, but prefer these spellings — they match every checked-in gen_*.py
+        # and keep `sys.path` consistent:
         import os
         import sys
         sys.path.insert(0, os.path.dirname(__file__))
+
+        # Packing / emit + BF16 / FP8 encoders + matmul references:
         from gen_utils import (
-            # Packing/emit
             emit_test_data,
             preloads_from_words_packed,
             checks_from_words_packed,
             pack_words_into_beats,
             make_preload_any,
             make_check_any,
-            # Datatype encoding (use these — do NOT invent lookup tables)
             float_to_bf16_bits,
             bf16_bits_to_float,
             pack_bf16_pair,
             float_to_fp8_e4m3_bits,
             fp8_e4m3_bits_to_float,
             pack_fp8x4,
-            # Matrix helpers (use these — do NOT hand-roll row/col shifting)
             matrix_to_bf16_words,
             matrix_to_fp8_words,
             quantize_bf16,
             quantize_fp8,
-            # Reference models (use these — do NOT simulate matmul by hand)
             bf16_matmul_reference,
             fp8_matmul_reference,
-            # Random inputs
             rand_matrix,
             rand_matrix_fp8_safe,
         )
+
+        # VPU functional-model wrappers (use for ANY test whose oracle depends on
+        # a VPU op — unary math, pair binary, row/col reductions, VLI, FP8 pack):
+        from vpu_gen_utils import (
+            BF16_PER_BEAT,
+            FP8_PER_BEAT,
+            ROWS_PER_REGISTER,
+            ROWS_PER_TENSOR,
+            float_to_bf16,
+            pack_u16_le,
+            pack_u8_le,
+            const_bf16_row,
+            constant_bf16_rows,
+            repeat_bf16_row,
+            tensor_preloads,
+            tensor_checks,
+            fp8_checks,
+            run_unary_rows,
+            run_binary_rows,
+            run_row_reduce_tensor,
+            run_col_reduce_tensor,
+            run_fp8_pack_rows,
+            run_fp8_unpack_rows,
+            run_vli_rows,
+            run_vli_registers,
+        )
+
+        # Software RTL models for MXU goldens (use for any test that pushes a
+        # matmul tile through MXU0 / MXU1 — these are bit-exact against the RTL):
+        from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
+        from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
+        from software_models.mxu1_ipt.fp_formats import OutputFmtSel, AddendSel
+        from software_models.mxu1_ipt.converters import (
+            bf16_scale_to_e4m3,
+            output_conv_stage,
+        )
         """
     ).rstrip()
-    end_to_end_example = textwrap.dedent(
+
+
+def _generator_examples_block() -> str:
+    """Three end-to-end example skeletons covering the common oracle paths:
+    MXU+packing via gen_utils, VPU-only via vpu_gen_utils, and a full
+    MXU0+VPU integration using the software RTL model.
+    """
+
+    mxu_only = textwrap.dedent(
         """\
-        # End-to-end skeleton for a BF16 / FP8 MXU test (matches the checked-in
-        # `gen_mxu0_single_output_tile_bf16.py` pattern). Follow this shape
-        # exactly when the assembly stages tiles via DMA→VLOAD→MXU→VSTORE→DMA.
+        # Example 1: BF16 / FP8 MXU tile test (matches gen_mxu0_single_output_tile_bf16).
+        # DMA→VLOAD→MXU→VSTORE→DMA; uses gen_utils helpers only — no VPU op in the chain.
         #
-        # DRAM offsets in the assembly are byte offsets from @DRAM_BASE.
+        # DRAM offsets in the assembly are BYTE offsets from @DRAM_BASE.
         # Generators emit `word_offset` values in DMA-width BEATS (1 beat = 32 B).
         # So: beat_offset = byte_offset // 32. Never conflate the two.
         import numpy as np
+        import torch
         TILE = 32
-        A = rand_matrix_fp8_safe(TILE, TILE, seed=42)         # architectural floats
+        A = rand_matrix_fp8_safe(TILE, TILE, seed=42)
         W = rand_matrix_fp8_safe(TILE, TILE, seed=43)
-        A_q = quantize_fp8(A).astype(np.float32)              # round-trip through FP8
+        A_q = quantize_fp8(A).astype(np.float32)
         W_q = quantize_fp8(W).astype(np.float32)
-        C   = fp8_matmul_reference(A_q, W_q)                  # BF16-accumulated golden
-        # Preload FP8 tiles at DRAM byte offsets 0x0000 and 0x0400.
+        # Prefer the software RTL model over fp8_matmul_reference when the
+        # hardware path uses FP8 inputs with a BF16 accumulator / output,
+        # because SARTLLinearFunction matches the exact MXU0 K-chain rounding:
+        sa = SARTLLinearFunction(rows=32, cols=32, out_fmt_sel=OutputFmtSel.OutBF16)
+        C  = sa(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
+        # Preload FP8 tiles at DRAM byte offsets 0x0000 and 0x0400:
         preloads  = preloads_from_words_packed(0x0000 // 32, matrix_to_fp8_words(A_q))
         preloads += preloads_from_words_packed(0x0400 // 32, matrix_to_fp8_words(W_q))
-        # Check BF16 result halves at DRAM byte offsets 0x0800 / 0x0C00 if the
-        # assembly stores the 32x32 result as two 32x16 banks (lo/hi lanes).
+        # Check BF16 result halves if the assembly stores 32x32 as two 32x16 banks:
         checks  = checks_from_words_packed(0x0800 // 32, matrix_to_bf16_words(C[:, :16]))
         checks += checks_from_words_packed(0x0C00 // 32, matrix_to_bf16_words(C[:, 16:]))
         emit_test_data(preloads, checks, timeout=500000)
         """
     ).rstrip()
-    return textwrap.dedent(
-        f"""\
-        Use the checked-in generator helpers from `generators/gen_utils.py` instead of inventing
-        helper signatures, encoding tables, or ad hoc JSON layouts. Match these current APIs
-        exactly. If a helper listed below would solve a sub-problem, USE IT. Do not re-implement
-        float-to-bf16 rounding, FP8 bit-packing, row/col tile shifting, or matmul reference
-        numerics by hand — the helpers below already match the Atlas RTL behavior.
 
-        ```python
-        {body}
-        ```
+    vpu_only = textwrap.dedent(
+        """\
+        # Example 2: VPU-only test (matches gen_vpu_unary_math / gen_vpu_binary).
+        # The assembly VLOADs a 32-row BF16 tensor into a bank pair, issues one
+        # or more VPU.<op> instructions, then VSTOREs each result tensor to
+        # DRAM. Use `tensor_preloads` / `tensor_checks` so every beat_offset is
+        # already aligned to BF16_PER_BEAT lanes per row.
+        import json
+        BEATS = ROWS_PER_TENSOR                  # 32 rows = one BF16 tensor pair
+        TIMEOUT = 60000
+        INPUT_ROWS = constant_bf16_rows(BEATS, float_to_bf16(1.0))
+        OPS = [
+            ("exp", 64), ("tanh", 128), ("sqrt", 192),   # (vpu op name, output beat base)
+        ]
+        preloads = tensor_preloads(0, INPUT_ROWS)
+        checks: list[dict] = []
+        for op, base in OPS:
+            checks.extend(tensor_checks(base, run_unary_rows(op, INPUT_ROWS)))
+        print(json.dumps({
+            "dram_preloads": preloads,
+            "dram_checks":   checks,
+            "timeout":       TIMEOUT,
+        }, indent=2))
+        """
+    ).rstrip()
 
-        ```python
-        {canonical_imports}
-        ```
+    integ_example = textwrap.dedent(
+        """\
+        # Example 3: MXU0 + VPU integration test (matches gen_mxu_chain_vpu_reduce
+        # and gen_smolvla_fused_*). The assembly stages one or more MXU tiles,
+        # pops a BF16 result tensor, then feeds it to the VPU for reduce /
+        # pointwise / pack. The golden chains SARTLLinearFunction for the MXU
+        # stage and `run_*_rows` / `MODEL.execute` for every VPU op.
+        import numpy as np
+        import torch
+        TILE = 32
+        A = rand_matrix_fp8_safe(TILE, TILE, seed=42)
+        W = rand_matrix_fp8_safe(TILE, TILE, seed=43)
+        A_q = quantize_fp8(A).astype(np.float32)
+        W_q = quantize_fp8(W).astype(np.float32)
+        sa = SARTLLinearFunction(rows=32, cols=32, out_fmt_sel=OutputFmtSel.OutBF16)
+        C_bf16 = sa(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
+        # Treat the BF16 result as a 32-row tensor of BF16 bits for VPU consumption.
+        from gen_utils import float_to_bf16_bits  # already imported above
+        mxu_bits = np.vectorize(float_to_bf16_bits)(C_bf16).astype(np.uint16)
+        mxu_rows = [list(mxu_bits[r]) for r in range(TILE)]      # 32 rows of 32 lanes
+        # Run the VPU stage through the functional model:
+        relu_rows = run_unary_rows("relu", mxu_rows[:ROWS_PER_REGISTER])
+        row_max   = run_row_reduce_tensor("rmax", mxu_rows)      # operates on a bank pair
+        # Emit preloads for A/W and checks for each stage:
+        preloads  = preloads_from_words_packed(0x0000 // 32, matrix_to_fp8_words(A_q))
+        preloads += preloads_from_words_packed(0x0400 // 32, matrix_to_fp8_words(W_q))
+        checks  = tensor_checks(0x0800 // 32, relu_rows)
+        checks += tensor_checks(0x0C00 // 32, row_max)
+        emit_test_data(preloads, checks, timeout=500000)
+        """
+    ).rstrip()
 
-        ```python
-        {end_to_end_example}
-        ```
+    return "\n\n".join([mxu_only, vpu_only, integ_example])
+
+
+def _load_generator_helper_reference() -> str:
+    gen_utils_ref = _load_gen_utils_reference(BAREMETAL_DIR / "generators" / "gen_utils.py")
+    vpu_gen_utils_ref = _load_vpu_gen_utils_reference(
+        BAREMETAL_DIR / "generators" / "vpu_gen_utils.py"
+    )
+    sw_models_ref = _load_software_models_reference()
+
+    canonical_imports = _generator_canonical_imports_block()
+    examples = _generator_examples_block()
+
+    if not any([gen_utils_ref, vpu_gen_utils_ref, sw_models_ref]):
+        return ""
+
+    intro = textwrap.dedent(
+        """\
+        Use the checked-in generator helper layers below instead of inventing helper
+        signatures, encoding tables, matmul references, or ad-hoc JSON layouts.
+        Generators have three import-level sources of truth, and you MUST prefer the
+        highest-level helper that solves the problem:
+
+        1. `generators/gen_utils.py` — DRAM preload/check emission, BF16 / FP8 bit
+           encoders, matrix packing, RNG, and `bf16_matmul_reference` /
+           `fp8_matmul_reference` (use the matmul references only for loose sanity
+           checks — the MXU software RTL model below is the authoritative golden).
+        2. `generators/vpu_gen_utils.py` — VPU functional-model wrappers around
+           `software_models.vpu.vector_engine_model.VectorEngineModel`. Use these
+           for any oracle that depends on a `VPU.<op>` in the assembly — unary,
+           binary, row/col reduce, VLI, fp8pack/fp8unpack. Do NOT hand-simulate
+           exp / sqrt / tanh / relu / rcp; they go through the model which is the
+           bit-exact mirror of the RTL lane boxes.
+        3. `generators/software_models/` — bit-exact RTL models of the two MXUs and
+           the VPU:
+             - `software_models.mxu0_sa.systolic_array_rtl_linear.SARTLLinearFunction`
+               — MXU0 golden for BF16 / FP8 matmul with optional bias.
+             - `software_models.mxu1_ipt.ipt_rtl_linear.IPTLinearRTLFunction` —
+               MXU1 (inner-product-tree) golden, same contract.
+             - `software_models.mxu1_ipt.fp_formats` — canonical enums
+               (`OutputFmtSel`, `AddendSel`) and BF16/E4M3 rounding primitives.
+             - `software_models.mxu1_ipt.converters` — `bf16_scale_to_e4m3` and
+               `output_conv_stage` model the VMATPUSH.ACC / VMATPOP quantization.
+             - `software_models.vpu.vector_engine_model.VectorEngineModel` —
+               the underlying VPU model; `vpu_gen_utils.MODEL` is a shared instance.
+
+        Do NOT re-implement float-to-bf16 rounding, FP8 bit-packing, FP8 matmul
+        accumulation, E4M3 quantization, VPU lane boxes, row/col tile shifting, or
+        matmul reference numerics by hand — the helpers below already match the
+        Atlas RTL behavior.
         """
     ).strip()
+
+    sections: list[str] = [intro]
+
+    if gen_utils_ref:
+        sections.append(
+            "### `generators/gen_utils.py`\n\n"
+            f"```python\n{gen_utils_ref}\n```"
+        )
+    if vpu_gen_utils_ref:
+        sections.append(
+            "### `generators/vpu_gen_utils.py`\n\n"
+            f"```python\n{vpu_gen_utils_ref}\n```"
+        )
+    if sw_models_ref:
+        sections.append(
+            "### `generators/software_models/` (signatures only)\n\n"
+            f"```python\n{sw_models_ref}\n```"
+        )
+
+    sections.append(
+        "### Canonical imports\n\n"
+        f"```python\n{canonical_imports}\n```"
+    )
+    sections.append(
+        "### End-to-end generator skeletons\n\n"
+        f"```python\n{examples}\n```"
+    )
+
+    return "\n\n".join(sections).strip()
 
 
 def _parse_isa_sections(isa_text: str) -> dict[str, str]:
@@ -676,7 +1156,11 @@ def format_generator_helper_section(generator_helper_reference: str | None = Non
     )
     if not isinstance(resolved, str) or not resolved.strip():
         return ""
-    return f"## Generator Helper API\n\n{resolved.strip()}\n"
+    return (
+        "## Generator Helper API "
+        "(`gen_utils`, `vpu_gen_utils`, `software_models`)\n\n"
+        f"{resolved.strip()}\n"
+    )
 
 
 def _truncate_block_lines(text: str, max_lines: int, note_label: str) -> str:
@@ -922,10 +1406,18 @@ tests contribute coverage.
    delay-slot semantics, scalar LSU isolation, value-domain golden compute via
    `gen_utils`, and DMA serialization. Before you emit a test, mentally check each
    invariant against it.
-2. **Helper reuse is mandatory.** `generators/gen_utils.py` is the single source of truth
-   for BF16/FP8 encoding, matrix packing, and reference compute. If you find yourself
-   writing a custom `bf16_word(v)` lookup, a `fp8_byte(v)` dict, or a `(v << 8)` style
-   conversion, stop and use the helper instead.
+2. **Helper reuse is mandatory.** The generator helpers live in three layers —
+   `generators/gen_utils.py` (DRAM emit + BF16/FP8 encoders + matmul references),
+   `generators/vpu_gen_utils.py` (VPU functional-model wrappers: `run_unary_rows`,
+   `run_binary_rows`, `run_row_reduce_tensor`, `run_col_reduce_tensor`,
+   `run_fp8_pack_rows`, `run_vli_rows`, `tensor_preloads`/`tensor_checks`), and
+   `generators/software_models/` (the bit-exact MXU0 `SARTLLinearFunction`, MXU1
+   `IPTLinearRTLFunction`, VPU `VectorEngineModel`, and `bf16_scale_to_e4m3` /
+   `OutputFmtSel` / `AddendSel`). They are the single source of truth for every
+   numerical model in the chip. If you find yourself writing a custom
+   `bf16_word(v)` lookup, a `fp8_byte(v)` dict, a `(v << 8)` conversion, an
+   ad-hoc matmul loop, or a hand-rolled `exp` / `tanh` / `rsum` oracle, stop and
+   use the matching helper instead.
 3. **Units are distinct.** DMA-beats (32 B), bytes, VMEM words, and VLOAD/VSTORE `imm`
    steps (32 words = 128 B) are four different quantities. Generator `word_offset` is a
    beat index. VMEM word addresses are 4 × byte addresses. Scalar LSU uses VMEM bytes.
@@ -956,6 +1448,39 @@ Return ONLY the JSON array, no other text before or after it.
 """)
 
 
+def _format_session_accepted_section(
+    accepted_generated_tests: list[dict] | None,
+) -> str:
+    """Render a compact summary of tests that have been accepted during this
+    incremental generation session. The planner should read this to avoid
+    duplicating its own siblings and to deliberately complement them.
+    """
+
+    items = accepted_generated_tests or []
+    if not items:
+        return ""
+
+    lines = [
+        "## Tests Already Accepted This Session",
+        "",
+        (
+            "These tests were generated earlier in the current incremental session and are "
+            "already part of the suite above. Do NOT duplicate their names, memory maps, or "
+            "coverage intent — the new test should complement them, probe a different "
+            "subsystem combination, or stress a different scheduling/hazard axis."
+        ),
+        "",
+    ]
+    for entry in items:
+        name = str(entry.get("name", "")).strip() or "(unnamed)"
+        desc = str(entry.get("description", "")).strip()
+        desc = " ".join(desc.split())  # collapse whitespace/newlines
+        if len(desc) > 240:
+            desc = desc[:237].rstrip() + "..."
+        lines.append(f"- **{name}** — {desc}" if desc else f"- **{name}**")
+    return "\n".join(lines) + "\n\n"
+
+
 def build_planner_user_prompt(
     analysis: str,
     architecture: str,
@@ -967,6 +1492,8 @@ def build_planner_user_prompt(
     optimization_menu: dict[str, object] | None = None,
     baremetal_test_examples: dict[str, dict[str, str]] | None = None,
     rules: dict[str, object] | None = None,
+    accepted_generated_tests: list[dict] | None = None,
+    forbidden_names: list[str] | set[str] | None = None,
 ) -> str:
     defaults = _get_default_shared_assets()
     generator_helper_reference = (
@@ -979,11 +1506,37 @@ def build_planner_user_prompt(
         + _format_test_suite_context(assembly_tests, generators, header_lines=15)
         + "\n\n"
     )
+    session_section = _format_session_accepted_section(accepted_generated_tests)
+
+    forbidden = sorted({str(n).strip() for n in (forbidden_names or []) if str(n).strip()})
+    if forbidden:
+        forbidden_note = (
+            "The following test names are already used by the suite and MUST NOT be reused. "
+            "Pick a distinct, descriptive name for the new test:\n"
+            + "\n".join(f"  - `{n}`" for n in forbidden)
+            + "\n\n"
+        )
+    else:
+        forbidden_note = ""
+
+    if num_tests == 1:
+        header_line = (
+            "You are an expert hardware verification engineer writing baremetal "
+            "integration tests for the Atlas chip. Generate exactly **one** new test "
+            "that meaningfully advances the coverage profile of the existing suite, "
+            "including any tests already accepted earlier in this session."
+        )
+    else:
+        header_line = (
+            "You are an expert hardware verification engineer writing baremetal "
+            "integration tests for the Atlas chip. Generate exactly "
+            f"**{num_tests}** new tests that meaningfully advance the coverage "
+            "profile of the existing suite."
+        )
+
     task_section = textwrap.dedent(
         f"""\
-        You are an expert hardware verification engineer writing baremetal integration
-        tests for the Atlas chip. Generate exactly **{num_tests}** new tests that meaningfully
-        advance the coverage profile of the existing suite.
+        {header_line}
 
         Each test must satisfy all four of the following:
 
@@ -1004,7 +1557,7 @@ def build_planner_user_prompt(
            - a generator when the outputs are tensor-scale, randomized, or derived from
              multi-stage compute. Never mix a `DMA.LOAD` with an unspecified preload source.
 
-        Write each test the way a senior verification engineer would sign it off for
+        {forbidden_note}Write each test the way a senior verification engineer would sign it off for
         regression: a clear memory-map comment at the top, conservative scheduling unless
         the test is explicitly probing overlap, descriptive names, and a generator whose
         preloads and checks can be cross-read against the assembly line by line.
@@ -1030,7 +1583,7 @@ Use the materials below to produce the planner output.
 {format_preload_oracle_contract_section(rules)}
 {format_correctness_invariants_section(rules)}
 {format_generator_helper_section(generator_helper_reference)}
-{current_suite_section}\
+{current_suite_section}{session_section}\
 ## Strategy Menu
 
 {_format_strategy_menu(optimization_menu)}
@@ -1038,6 +1591,147 @@ Use the materials below to produce the planner output.
 ## Reference Examples
 
 {_format_example_section(baremetal_test_examples)}
+
+## Your Task
+
+{task_section}
+""")
+
+
+def _trim_log_tail(text: str, max_chars: int = 8000) -> str:
+    """Keep the last ``max_chars`` of a potentially-huge log, prepended with a
+    small elided marker. This is what we feed back to the fix-prompt so it
+    stays informative but bounded.
+    """
+
+    if text is None:
+        return ""
+    text = text.rstrip()
+    if len(text) <= max_chars:
+        return text
+    return (
+        f"... [log truncated, showing final {max_chars} of {len(text)} chars] ...\n"
+        + text[-max_chars:]
+    )
+
+
+def build_fix_user_prompt(
+    *,
+    test_name: str,
+    description: str,
+    assembly: str,
+    generator: str | None,
+    failure_phase: str,
+    failure_reason: str,
+    failure_log_tail: str,
+    attempt_idx: int,
+    architecture: str,
+    isa_docs: str,
+    generator_helper_reference: str | None = None,
+    rules: dict[str, object] | None = None,
+) -> str:
+    """Build the fix-me prompt for a single failed test attempt.
+
+    The LLM must return a single-element JSON array using the same schema as
+    the planner, with the same ``name`` so we can overwrite in place. Every
+    Test Correctness Invariant still applies.
+    """
+
+    defaults = _get_default_shared_assets()
+    generator_helper_reference = (
+        generator_helper_reference or defaults.generator_helper_reference
+    )
+
+    if generator is not None and generator.strip():
+        generator_block = (
+            "## Failing Generator\n\n"
+            "```python\n"
+            f"{generator.rstrip()}\n"
+            "```\n\n"
+        )
+    else:
+        generator_block = (
+            "## Failing Generator\n\n"
+            "_(this test did not use a generator; oracle is inline `# @CHECK_DRAM`)_\n\n"
+        )
+
+    task_section = textwrap.dedent(
+        f"""\
+        A previous attempt at the test `{test_name}` failed in phase **{failure_phase}**
+        with reason `{failure_reason}`. This is retry attempt #{attempt_idx} — do not
+        guess; diagnose the root cause from the log tail below.
+
+        Return a single-element JSON array with the corrected test, using the same
+        schema as the planner output:
+
+        ```json
+        [
+          {{
+            "name": "{test_name}",
+            "description": "...",
+            "assembly": "...",
+            "has_generator": true/false,
+            "generator": "..."  // omit / null if has_generator is false
+          }}
+        ]
+        ```
+
+        Rules for the fix:
+
+        1. **Keep the test name `{test_name}`.** We overwrite in place; do not invent a
+           new name.
+        2. **Fix the real bug, do not paper over it.** If the symptom is
+           `DRAM MISMATCH ... got 0x00000000`, a consumer read uninitialized VMEM — find
+           the missing `DMA.LOAD` / `VSTORE` / scalar init. If the symptom is
+           `0x7e` saturation, a scale/exponent register was read before being loaded.
+           If the assembler/generator crashed, re-read the failure log verbatim.
+        3. **Every Test Correctness Invariant above still applies.** Trace iteration 0
+           of every loop, check MREG pair usage, check delay-slot semantics, check
+           scalar LSU isolation, check that generator preloads/checks match the
+           assembly's memory map byte-for-byte.
+        4. **You may change the memory map, operand selection, or oracle path** if that
+           is what correctness requires — but keep the coverage intent (the high-level
+           subsystem combination) similar to the original description so we stay on the
+           coverage target this test was picked to hit.
+        5. **Output format is non-negotiable:** one JSON array with exactly one object,
+           followed by nothing else. No commentary outside the array.
+        """
+    ).strip()
+
+    return textwrap.dedent(f"""\
+A single-test fix iteration.
+
+## Hardware Architecture Summary
+
+{architecture}
+
+## Atlas ISA Reference
+
+{isa_docs}
+
+{format_assembly_syntax_section(rules)}
+{format_preload_oracle_contract_section(rules)}
+{format_correctness_invariants_section(rules)}
+{format_generator_helper_section(generator_helper_reference)}
+## Failing Test
+
+- **Name:** `{test_name}`
+- **Description:** {description}
+- **Failure phase:** `{failure_phase}`
+- **Failure reason:** `{failure_reason}`
+
+## Failing Assembly
+
+```asm
+{assembly.rstrip()}
+```
+
+{generator_block}\
+## Failure Log (tail)
+
+```
+{failure_log_tail.rstrip()}
+```
 
 ## Your Task
 
@@ -1144,16 +1838,60 @@ def load_analysis_text(path: Path | None = None) -> str:
     )
 
 
-def call_llm(client: OpenAI, model: str, system: str, user: str) -> str:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.7,
-    )
-    return resp.choices[0].message.content or ""
+def _extract_responses_api_text(resp: object) -> str:
+    """Best-effort extraction of text from the Responses API payload."""
+
+    output_text = getattr(resp, "output_text", None)
+    if isinstance(output_text, str) and output_text:
+        return output_text
+
+    chunks: list[str] = []
+    for item in getattr(resp, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            text = getattr(content, "text", None)
+            if isinstance(text, str) and text:
+                chunks.append(text)
+    return "".join(chunks)
+
+
+def call_llm(
+    client: OpenAI,
+    model: str,
+    system: str,
+    user: str,
+    timeout_s: int = DEFAULT_LLM_TIMEOUT_S,
+) -> str:
+    responses_exc: Exception | None = None
+
+    if hasattr(client, "responses"):
+        try:
+            resp = client.responses.create(
+                model=model,
+                instructions=system,
+                input=user,
+                timeout=timeout_s,
+            )
+            text = _extract_responses_api_text(resp)
+            if text:
+                return text
+        except Exception as exc:
+            responses_exc = exc
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            ,
+            timeout=timeout_s,
+        )
+        return resp.choices[0].message.content or ""
+    except Exception:
+        if responses_exc is not None:
+            raise responses_exc
+        raise
 
 
 def extract_json_array(raw: str) -> list[dict]:
@@ -1170,6 +1908,101 @@ def extract_json_array(raw: str) -> list[dict]:
         raise ValueError("Planner response JSON was not a list.")
 
     return parsed
+
+
+def extract_single_test_from_json(
+    raw: str,
+    *,
+    expected_name: str | None = None,
+) -> dict:
+    """Parse the LLM response and return exactly one test dict.
+
+    Enforces schema keys we actually use downstream (``name``, ``assembly``,
+    ``has_generator``, optional ``generator``). If ``expected_name`` is given
+    we also verify the LLM didn't silently rename the test.
+    """
+
+    parsed = extract_json_array(raw)
+    if len(parsed) == 0:
+        raise ValueError("LLM returned an empty JSON array; expected exactly one test.")
+    if len(parsed) > 1:
+        raise ValueError(
+            f"LLM returned {len(parsed)} tests; expected exactly one. "
+            "Keeping the first and discarding the rest is not allowed — "
+            "the per-test loop must stay in lockstep."
+        )
+    test = parsed[0]
+    if not isinstance(test, dict):
+        raise ValueError("LLM returned a non-object element in the JSON array.")
+
+    name = _validate_generated_test_name(str(test.get("name", "")))
+    assembly = str(test.get("assembly", ""))
+    if not assembly.strip():
+        raise ValueError(f"LLM returned empty assembly for test {name!r}.")
+    has_generator = bool(test.get("has_generator", False))
+    if has_generator:
+        generator = test.get("generator")
+        if not isinstance(generator, str) or not generator.strip():
+            raise ValueError(
+                f"LLM marked test {name!r} as has_generator=true but provided no generator."
+            )
+
+    if expected_name is not None and name != expected_name:
+        raise ValueError(
+            f"LLM fix response renamed the test from {expected_name!r} to {name!r}. "
+            "Fix prompts must preserve the test name."
+        )
+
+    test["name"] = name
+    return test
+
+
+def unpublish_single_test(name: str) -> list[Path]:
+    """Remove all on-disk artifacts for a previously-published generated test.
+
+    This is used before every publish attempt (so retries can overwrite) and
+    after a test exhausts its fix-retry budget (to avoid polluting the suite).
+    Returns the list of paths that were actually deleted, for logging.
+    """
+
+    removed: list[Path] = []
+    candidates = [
+        ASSEMBLY_DIR / f"{name}.S",
+        GENERATORS_DIR / f"gen_{name}.py",
+        GENERATORS_DIR / f"{name}.json",
+        TESTS_DIR / f"atlas_{name}.c",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                path.unlink()
+                removed.append(path)
+            except OSError:
+                # Best effort; leaving the file behind will surface as a
+                # downstream error on the next publish attempt.
+                pass
+
+    # Build artifacts live under tests/build/ and are keyed off the target
+    # name (e.g. CMakeFiles/atlas_<name>.dir/). Sweep common ones.
+    if TESTS_BUILD_DIR.exists():
+        for relpath in (
+            TESTS_BUILD_DIR / f"atlas_{name}.riscv",
+            TESTS_BUILD_DIR / f"atlas_{name}.dump",
+        ):
+            if relpath.exists():
+                try:
+                    relpath.unlink()
+                    removed.append(relpath)
+                except OSError:
+                    pass
+        cmake_obj_dir = TESTS_BUILD_DIR / "CMakeFiles" / f"atlas_{name}.dir"
+        if cmake_obj_dir.exists():
+            try:
+                shutil.rmtree(cmake_obj_dir)
+                removed.append(cmake_obj_dir)
+            except OSError:
+                pass
+    return removed
 
 
 def write_generation_logs(
@@ -1240,6 +2073,30 @@ def materialize_planner_results(
         "generators_dir": gen_dir,
         "manifest": manifest_path,
     }
+
+
+def materialize_single_test_attempt(
+    *,
+    output_dir: Path,
+    test_slot: int,
+    attempt_idx: int,
+    stage_label: str,
+    planner_result: dict,
+) -> dict[str, Path]:
+    """Persist one parsed planner/fix candidate under the run directory.
+
+    Unlike publication into the canonical baremetal source tree, this is a
+    pure archival step: every successfully parsed candidate is recorded, even
+    if it later fails name checks, publishing, build, or simulation.
+    """
+
+    base_dir = (
+        output_dir
+        / "generated_candidates"
+        / f"test_{test_slot:02d}"
+        / f"attempt_{attempt_idx:02d}_{stage_label}"
+    )
+    return materialize_planner_results(base_dir, [planner_result])
 
 
 def _validate_generated_test_name(name: str) -> str:
@@ -1479,6 +2336,223 @@ def _stream_command(
 
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def try_build_and_run_single_test(
+    *,
+    test: dict[str, object],
+    output_dir: Path,
+    chipyard_root: Path,
+    vcs_dir_relpath: str = VCS_DIR_RELPATH,
+    sim_config: str = DEFAULT_SIM_CONFIG,
+    run_timeout_s: int = 0,
+    attempt_idx: int = 0,
+) -> dict[str, object]:
+    """Build + simulate a single published test, capturing every stage.
+
+    ``test`` must be the single-element result of
+    ``publish_planner_results_to_baremetal([...])``.
+
+    Returns a structured dict suitable both for logging and for feeding into
+    the next fix-prompt::
+
+        {
+          "ok": bool,
+          "phase": "generator" | "assembler" | "cmake_configure" | "cmake_build" | "sim",
+          "reason": str,
+          "log_tail": str,          # trimmed error text for the LLM
+          "full_log": str,          # untrimmed, for on-disk diagnostics
+          "vcs_log_path": Path | None,
+        }
+    """
+
+    name = str(test["name"])
+    target = str(test["target"])
+    generator_path = test.get("generator")
+    golden_json_path = test.get("golden_json")
+    assembly_path = Path(str(test["assembly"]))
+    c_source_path = Path(str(test["c_source"]))
+    binary_path = Path(str(test["binary"]))
+
+    log_dir = output_dir / "attempt_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    attempt_log_path = log_dir / f"{name}_attempt{attempt_idx:02d}.log"
+    attempt_log_parts: list[str] = [
+        f"=== Attempt {attempt_idx} :: {name} ===\n",
+    ]
+
+    def _record(rc: int, cmd: list[str], cwd: Path, output: str) -> None:
+        attempt_log_parts.append(
+            f"\n$ (cd {cwd} && {' '.join(cmd)})  [rc={rc}]\n{output}"
+        )
+
+    def _flush_log() -> None:
+        attempt_log_path.write_text("".join(attempt_log_parts), encoding="utf-8")
+
+    def _capture(cmd: list[str], cwd: Path, *, stdout_path: Path | None = None) -> tuple[int, str]:
+        try:
+            if stdout_path is not None:
+                # Generator writes JSON to stdout; capture stderr only, tee stdout to file.
+                with stdout_path.open("w", encoding="utf-8") as handle:
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=str(cwd),
+                        stdout=handle,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                return proc.returncode, proc.stderr or ""
+            proc = subprocess.run(
+                cmd,
+                cwd=str(cwd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            return proc.returncode, proc.stdout or ""
+        except FileNotFoundError as exc:
+            return 127, f"[missing executable] {exc}"
+
+    # ------------------------------------------------------------------
+    # Stage 1: generator (if present)
+    # ------------------------------------------------------------------
+    if isinstance(generator_path, Path) and isinstance(golden_json_path, Path):
+        gen_cmd = [sys.executable, str(generator_path.relative_to(BAREMETAL_DIR))]
+        print(f"       [attempt {attempt_idx}] Running generator for {name}...")
+        rc, stderr_text = _capture(gen_cmd, BAREMETAL_DIR, stdout_path=golden_json_path)
+        _record(rc, gen_cmd, BAREMETAL_DIR, stderr_text)
+        if rc != 0:
+            result = {
+                "ok": False,
+                "phase": "generator",
+                "reason": f"generator_exit_{rc}",
+                "log_tail": _trim_log_tail(stderr_text),
+                "full_log": stderr_text,
+                "vcs_log_path": None,
+            }
+            _flush_log()
+            return result
+
+    # ------------------------------------------------------------------
+    # Stage 2: assembler
+    # ------------------------------------------------------------------
+    assembler_cmd = [
+        sys.executable,
+        str(ASSEMBLER_PATH.relative_to(BAREMETAL_DIR)),
+        str(assembly_path.relative_to(BAREMETAL_DIR)),
+        "--out-c",
+        str(c_source_path.relative_to(BAREMETAL_DIR)),
+    ]
+    if isinstance(golden_json_path, Path):
+        assembler_cmd.extend(
+            ["--golden-json", str(golden_json_path.relative_to(BAREMETAL_DIR))]
+        )
+    print(f"       [attempt {attempt_idx}] Assembling {name}...")
+    rc, out = _capture(assembler_cmd, BAREMETAL_DIR)
+    _record(rc, assembler_cmd, BAREMETAL_DIR, out)
+    if rc != 0:
+        result = {
+            "ok": False,
+            "phase": "assembler",
+            "reason": f"assembler_exit_{rc}",
+            "log_tail": _trim_log_tail(out),
+            "full_log": out,
+            "vcs_log_path": None,
+        }
+        _flush_log()
+        return result
+
+    # ------------------------------------------------------------------
+    # Stage 3: cmake configure (re-globs assembly/*.S and adds new target)
+    # ------------------------------------------------------------------
+    cmake_configure = [
+        "cmake",
+        "-S", str(TESTS_DIR.relative_to(BAREMETAL_DIR)),
+        "-B", str(TESTS_BUILD_DIR.relative_to(BAREMETAL_DIR)),
+        "-DCMAKE_BUILD_TYPE=Debug",
+    ]
+    print(f"       [attempt {attempt_idx}] Reconfiguring CMake...")
+    rc, out = _capture(cmake_configure, BAREMETAL_DIR)
+    _record(rc, cmake_configure, BAREMETAL_DIR, out)
+    if rc != 0:
+        result = {
+            "ok": False,
+            "phase": "cmake_configure",
+            "reason": f"cmake_configure_exit_{rc}",
+            "log_tail": _trim_log_tail(out),
+            "full_log": out,
+            "vcs_log_path": None,
+        }
+        _flush_log()
+        return result
+
+    # ------------------------------------------------------------------
+    # Stage 4: cmake build of just this target
+    # ------------------------------------------------------------------
+    cmake_build = [
+        "cmake",
+        "--build", str(TESTS_BUILD_DIR.relative_to(BAREMETAL_DIR)),
+        "--target", target,
+    ]
+    print(f"       [attempt {attempt_idx}] Building target {target}...")
+    rc, out = _capture(cmake_build, BAREMETAL_DIR)
+    _record(rc, cmake_build, BAREMETAL_DIR, out)
+    if rc != 0:
+        result = {
+            "ok": False,
+            "phase": "cmake_build",
+            "reason": f"cmake_build_exit_{rc}",
+            "log_tail": _trim_log_tail(out),
+            "full_log": out,
+            "vcs_log_path": None,
+        }
+        _flush_log()
+        return result
+    if not binary_path.exists():
+        msg = f"Expected binary {binary_path} missing after successful build."
+        result = {
+            "ok": False,
+            "phase": "cmake_build",
+            "reason": "binary_missing_after_build",
+            "log_tail": msg,
+            "full_log": msg,
+            "vcs_log_path": None,
+        }
+        _flush_log()
+        return result
+
+    # ------------------------------------------------------------------
+    # Stage 5: VCS simulation (no coverage — that's a one-shot at the end)
+    # ------------------------------------------------------------------
+    vcs_dir = (chipyard_root / vcs_dir_relpath).resolve()
+    if not vcs_dir.is_dir():
+        raise FileNotFoundError(f"VCS directory does not exist: {vcs_dir}")
+    make_cmd = [
+        "make", "run-binary",
+        f"BINARY={binary_path}",
+        f"CONFIG={sim_config}",
+        "LOADMEM=1",
+    ]
+    print(f"       [attempt {attempt_idx}] Simulating {name} in VCS...")
+    timeout = run_timeout_s if run_timeout_s > 0 else None
+    rc, sim_output = _stream_command(make_cmd, vcs_dir, timeout_s=timeout)
+    _record(rc, make_cmd, vcs_dir, sim_output)
+
+    vcs_log_path = log_dir / f"{name}_attempt{attempt_idx:02d}_vcs.log"
+    vcs_log_path.write_text(sim_output, encoding="utf-8")
+
+    verdict = _classify_sim_run(rc, sim_output)
+    passed = bool(verdict["pass"])
+    result = {
+        "ok": passed,
+        "phase": "sim",
+        "reason": str(verdict["reason"]),
+        "log_tail": _trim_log_tail(sim_output),
+        "full_log": sim_output,
+        "vcs_log_path": vcs_log_path,
+    }
+    _flush_log()
+    return result
 
 
 def collect_handwritten_assembly_test_names() -> list[str]:
@@ -1895,26 +2969,358 @@ def load_build_manifest(path: Path) -> list[dict[str, object]]:
     return out
 
 
-def dump_used_planner_prompts(
+def dump_named_prompt_bundle(
+    *,
     output_dir: Path,
+    bundle_name: str,
     system_prompt: str,
     user_prompt: str,
+    raw_response: str | None = None,
 ) -> dict[str, Path]:
-    """
-    Persist the exact planner prompts that were sent to the LLM.
-    """
+    """Persist one named LLM prompt bundle under ``used_prompts/``."""
 
-    prompt_dir = output_dir / USED_PROMPTS_DIRNAME / "planning"
+    prompt_dir = output_dir / USED_PROMPTS_DIRNAME / bundle_name
     prompt_dir.mkdir(parents=True, exist_ok=True)
 
     outputs = {
         "used_prompts_dir": prompt_dir,
-        "planner_system": prompt_dir / "system_prompt.md",
-        "planner_user": prompt_dir / "user_prompt.md",
+        "system": prompt_dir / "system_prompt.md",
+        "user": prompt_dir / "user_prompt.md",
     }
-    outputs["planner_system"].write_text(system_prompt, encoding="utf-8")
-    outputs["planner_user"].write_text(user_prompt, encoding="utf-8")
+    outputs["system"].write_text(system_prompt, encoding="utf-8")
+    outputs["user"].write_text(user_prompt, encoding="utf-8")
+    if raw_response is not None:
+        outputs["raw_response"] = prompt_dir / "raw_response.md"
+        outputs["raw_response"].write_text(raw_response, encoding="utf-8")
     return outputs
+
+
+def _dump_per_test_prompt(
+    *,
+    output_dir: Path,
+    test_slot: int,
+    attempt_idx: int,
+    system_prompt: str,
+    user_prompt: str,
+    raw_response: str,
+) -> None:
+    base = output_dir / USED_PROMPTS_DIRNAME / f"test_{test_slot:02d}"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / f"attempt_{attempt_idx:02d}_system.md").write_text(system_prompt, encoding="utf-8")
+    (base / f"attempt_{attempt_idx:02d}_user.md").write_text(user_prompt, encoding="utf-8")
+    (base / f"attempt_{attempt_idx:02d}_raw_response.md").write_text(raw_response, encoding="utf-8")
+
+
+def run_incremental_generation_loop(
+    *,
+    client: "OpenAI",
+    model: str,
+    analysis: str,
+    architecture: str,
+    isa_docs: str,
+    assets: BuiltAgentAssets,
+    output_dir: Path,
+    chipyard_root: Path,
+    vcs_dir_relpath: str,
+    sim_config: str,
+    num_tests: int,
+    max_fix_attempts: int,
+    run_timeout_s: int,
+    llm_timeout_s: int,
+) -> dict[str, object]:
+    """Generate + validate tests one at a time.
+
+    For each of ``num_tests`` slots, ask the planner for exactly one test, then
+    publish/build/simulate it. If it fails, send a fix prompt that carries the
+    failing artifacts + the error-log tail, up to ``max_fix_attempts`` times
+    (initial + retries). Each accepted test becomes visible context for every
+    subsequent planner call, so the model deliberately complements — not
+    duplicates — its own siblings.
+
+    Returns a summary dict with ``accepted``, ``skipped``, and ``per_slot``
+    entries suitable for writing to disk.
+    """
+
+    planner_system = build_planner_system_prompt(rules=assets.rules)
+
+    # The set of names already in the canonical suite when we start. We add to
+    # this as we accept tests, and we forbid the LLM from reusing any of them.
+    forbidden_names: set[str] = set(
+        path.stem for path in ASSEMBLY_DIR.glob("*.S")
+    )
+
+    accepted: list[dict[str, object]] = []  # full published-test dicts
+    accepted_for_prompt: list[dict[str, str]] = []  # {name, description}
+    skipped: list[dict[str, object]] = []
+    per_slot_records: list[dict[str, object]] = []
+
+    for slot in range(num_tests):
+        print("\n" + "#" * 70)
+        print(f"# Incremental slot {slot + 1}/{num_tests}")
+        print(f"#   accepted so far: {len(accepted)}, skipped so far: {len(skipped)}")
+        print("#" * 70)
+
+        # Snapshot the suite *as it stands right now* so the planner sees
+        # every handwritten test + every test we've already accepted in
+        # this session.
+        current_assembly = collect_assembly_tests()
+        current_generators = collect_generators()
+
+        planner_user = build_planner_user_prompt(
+            analysis=analysis,
+            architecture=architecture,
+            isa_docs=isa_docs,
+            num_tests=1,
+            assembly_tests=current_assembly,
+            generators=current_generators,
+            optimization_menu=assets.optimization_menu,
+            baremetal_test_examples=assets.baremetal_test_examples,
+            rules=assets.rules,
+            accepted_generated_tests=accepted_for_prompt,
+            forbidden_names=forbidden_names,
+        )
+
+        candidate: dict | None = None
+        published_entry: dict | None = None
+        last_result: dict | None = None
+        attempts_log: list[dict[str, object]] = []
+        success = False
+
+        for attempt_idx in range(max_fix_attempts):
+            if attempt_idx == 0 or candidate is None:
+                user_prompt = planner_user
+                stage_label = "planner"
+            else:
+                generator_text = None
+                if bool(candidate.get("has_generator")) and isinstance(candidate.get("generator"), str):
+                    generator_text = str(candidate["generator"])
+                user_prompt = build_fix_user_prompt(
+                    test_name=str(candidate["name"]),
+                    description=str(candidate.get("description", "")),
+                    assembly=str(candidate.get("assembly", "")),
+                    generator=generator_text,
+                    failure_phase=str(last_result.get("phase")) if last_result else "unknown",
+                    failure_reason=str(last_result.get("reason")) if last_result else "unknown",
+                    failure_log_tail=str(last_result.get("log_tail")) if last_result else "",
+                    attempt_idx=attempt_idx,
+                    architecture=architecture,
+                    isa_docs=isa_docs,
+                    generator_helper_reference=assets.generator_helper_reference,
+                    rules=assets.rules,
+                )
+                stage_label = "fix"
+
+            print(f"\n   [slot {slot:02d}][attempt {attempt_idx:02d}] calling LLM ({stage_label})...")
+            raw = call_llm(
+                client=client,
+                model=model,
+                system=planner_system,
+                user=user_prompt,
+                timeout_s=llm_timeout_s,
+            )
+            _dump_per_test_prompt(
+                output_dir=output_dir,
+                test_slot=slot,
+                attempt_idx=attempt_idx,
+                system_prompt=planner_system,
+                user_prompt=user_prompt,
+                raw_response=raw,
+            )
+
+            expected_name = (
+                str(candidate["name"]) if attempt_idx > 0 and candidate is not None else None
+            )
+            try:
+                new_candidate = extract_single_test_from_json(raw, expected_name=expected_name)
+            except ValueError as exc:
+                print(f"       LLM response invalid: {exc}")
+                attempts_log.append(
+                    {
+                        "attempt": attempt_idx,
+                        "stage": stage_label,
+                        "ok": False,
+                        "phase": "llm_parse",
+                        "reason": f"parse_error: {exc}",
+                    }
+                )
+                last_result = {
+                    "phase": "llm_parse",
+                    "reason": f"parse_error: {exc}",
+                    "log_tail": raw[-4000:],
+                }
+                # If this was the very first attempt and parse failed, we don't
+                # have a candidate at all; on next iteration we'll re-prompt
+                # with planner_user. Clear candidate to be safe.
+                candidate = None
+                continue
+
+            candidate = new_candidate
+            name = str(candidate["name"])
+
+            # Archive every parsed candidate under the run folder, regardless
+            # of whether it later passes publication/build/sim. This keeps a
+            # complete record of what the LLM generated during the session.
+            materialize_single_test_attempt(
+                output_dir=output_dir,
+                test_slot=slot,
+                attempt_idx=attempt_idx,
+                stage_label=stage_label,
+                planner_result=candidate,
+            )
+
+            # Refuse to accept a test whose name collides with something
+            # already in the suite (either handwritten or previously accepted).
+            if name in forbidden_names:
+                print(f"       LLM proposed forbidden name {name!r}; rejecting.")
+                attempts_log.append(
+                    {
+                        "attempt": attempt_idx,
+                        "stage": stage_label,
+                        "ok": False,
+                        "phase": "name_collision",
+                        "reason": f"duplicate_name:{name}",
+                    }
+                )
+                last_result = {
+                    "phase": "name_collision",
+                    "reason": f"duplicate_name:{name}",
+                    "log_tail": (
+                        f"The name {name!r} is already in use by an existing test. "
+                        "Choose a different, descriptive name that reflects this test's "
+                        "distinct coverage intent."
+                    ),
+                }
+                continue
+
+            # Clean any previous on-disk copy before (re-)publishing.
+            unpublish_single_test(name)
+            try:
+                published_list = publish_planner_results_to_baremetal([candidate])
+            except (ValueError, FileExistsError) as exc:
+                print(f"       Publish failed: {exc}")
+                attempts_log.append(
+                    {
+                        "attempt": attempt_idx,
+                        "stage": stage_label,
+                        "ok": False,
+                        "phase": "publish",
+                        "reason": str(exc),
+                        "name": name,
+                    }
+                )
+                last_result = {
+                    "phase": "publish",
+                    "reason": str(exc),
+                    "log_tail": str(exc),
+                }
+                continue
+            published_entry = published_list[0]
+
+            result = try_build_and_run_single_test(
+                test=published_entry,
+                output_dir=output_dir,
+                chipyard_root=chipyard_root,
+                vcs_dir_relpath=vcs_dir_relpath,
+                sim_config=sim_config,
+                run_timeout_s=run_timeout_s,
+                attempt_idx=attempt_idx,
+            )
+            attempts_log.append(
+                {
+                    "attempt": attempt_idx,
+                    "stage": stage_label,
+                    "name": name,
+                    "ok": bool(result["ok"]),
+                    "phase": str(result["phase"]),
+                    "reason": str(result["reason"]),
+                }
+            )
+            last_result = result
+
+            if result["ok"]:
+                print(f"       [slot {slot:02d}] ACCEPTED {name} on attempt {attempt_idx}.")
+                success = True
+                break
+            print(
+                f"       [slot {slot:02d}] attempt {attempt_idx} failed "
+                f"in phase={result['phase']} reason={result['reason']}."
+            )
+
+        if success and candidate is not None and published_entry is not None:
+            accepted.append(published_entry)
+            accepted_for_prompt.append(
+                {
+                    "name": str(candidate["name"]),
+                    "description": str(candidate.get("description", "")),
+                }
+            )
+            forbidden_names.add(str(candidate["name"]))
+            per_slot_records.append(
+                {
+                    "slot": slot,
+                    "outcome": "accepted",
+                    "name": str(candidate["name"]),
+                    "description": str(candidate.get("description", "")),
+                    "attempts": attempts_log,
+                }
+            )
+        else:
+            # Exhausted all fix attempts. Revert any on-disk pollution so the
+            # next slot's planner context stays clean.
+            revert_name = str(candidate["name"]) if candidate is not None else None
+            if revert_name:
+                removed = unpublish_single_test(revert_name)
+                print(
+                    f"       [slot {slot:02d}] SKIPPED {revert_name}; "
+                    f"removed {len(removed)} artifact(s)."
+                )
+            skipped.append(
+                {
+                    "slot": slot,
+                    "name": revert_name,
+                    "attempts": attempts_log,
+                    "last_phase": str(last_result.get("phase")) if last_result else None,
+                    "last_reason": str(last_result.get("reason")) if last_result else None,
+                }
+            )
+            per_slot_records.append(
+                {
+                    "slot": slot,
+                    "outcome": "skipped",
+                    "name": revert_name,
+                    "attempts": attempts_log,
+                    "last_phase": str(last_result.get("phase")) if last_result else None,
+                    "last_reason": str(last_result.get("reason")) if last_result else None,
+                }
+            )
+
+    summary = {
+        "requested": num_tests,
+        "accepted_count": len(accepted),
+        "skipped_count": len(skipped),
+        "accepted": [
+            {
+                "name": str(t["name"]),
+                "description": str(t.get("description", "")),
+                "target": str(t["target"]),
+                "binary": str(t["binary"]),
+            }
+            for t in accepted
+        ],
+        "skipped": skipped,
+        "per_slot": per_slot_records,
+    }
+    summary_path = output_dir / "incremental_generation_summary.json"
+    _write_json(summary_path, summary)
+    print(f"\nIncremental loop complete: {len(accepted)} accepted, {len(skipped)} skipped.")
+    print(f"Summary written to {summary_path}")
+
+    return {
+        "summary": summary,
+        "summary_path": summary_path,
+        "accepted_tests": accepted,  # list of published-test dicts ready for run_vcs_binaries
+        "accepted_for_prompt": accepted_for_prompt,
+    }
 
 
 
@@ -1925,16 +3331,27 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Run the full Atlas coverage-driven generation loop: ensure handwritten "
-            "coverage exists, aggregate/analyze RTL coverage, generate new tests, "
-            "run them, then aggregate coverage again."
+            "Run the Atlas coverage-driven generation loop one test at a time: "
+            "ensure handwritten coverage exists, aggregate baseline RTL coverage, "
+            "then for each slot ask the planner for one test, build and simulate "
+            "it, retry via fix prompts on failure, and finally aggregate post-"
+            "generation coverage across every accepted test."
         )
     )
     parser.add_argument(
         "--num-tests",
         type=int,
         default=8,
-        help="Number of tests requested from the planner.",
+        help="Number of generation slots to attempt (each slot yields at most one accepted test).",
+    )
+    parser.add_argument(
+        "--max-fix-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Maximum LLM attempts per slot (initial + fix retries). "
+            "If every attempt fails, the slot is reverted and skipped."
+        ),
     )
     parser.add_argument(
         "--model",
@@ -1978,6 +3395,12 @@ def main() -> int:
         default=DEFAULT_COVERAGE_THRESHOLD,
         help="Threshold passed to coverage_analyzer.py for low-coverage module reporting.",
     )
+    parser.add_argument(
+        "--llm-timeout-s",
+        type=int,
+        default=DEFAULT_LLM_TIMEOUT_S,
+        help="Timeout in seconds per LLM request (default: 1800 = 30 minutes).",
+    )
     args = parser.parse_args()
 
     if OpenAI is None:
@@ -2013,15 +3436,19 @@ def main() -> int:
         sys.exit(f"ERROR: {exc}")
 
     args.output_dir = create_run_output_dir(args.output_dir, run_label)
-    n_steps = 8
+    n_steps = 6
 
     print("=" * 60)
-    print("Atlas Verif Buddy")
+    print("Atlas Verif Buddy (incremental loop)")
     print("=" * 60)
     print(f"Model: {args.model}")
     print(f"Output dir: {args.output_dir}")
     print(f"Chipyard root: {chipyard_root}")
     print(f"Found {len(assembly_tests)} assembly tests and {len(generators)} generators")
+    print(
+        f"Will attempt {args.num_tests} generation slot(s), "
+        f"up to {args.max_fix_attempts} LLM attempt(s) per slot."
+    )
 
     print(f"\n[1/{n_steps}] Ensuring handwritten assembly coverage databases exist...")
     baseline_status = ensure_handwritten_coverage(
@@ -2086,71 +3513,60 @@ def main() -> int:
             model=args.model,
             system=analyzer_system,
             user=analyzer_user,
+            timeout_s=args.llm_timeout_s,
+        )
+        dump_named_prompt_bundle(
+            output_dir=args.output_dir,
+            bundle_name="analyzer",
+            system_prompt=analyzer_system,
+            user_prompt=analyzer_user,
+            raw_response=analysis,
         )
         print(f"       Received analysis ({len(analysis)} chars)")
 
-    print(f"\n[4/{n_steps}] Building planner prompts for test generation...")
-    planner_system = build_planner_system_prompt(rules=assets.rules)
-    planner_user = build_planner_user_prompt(
+    # Persist the analysis we are going to drive the loop with, so each slot's
+    # prompts dumped under used_prompts/test_<slot>/ can be cross-read against
+    # the exact coverage analysis text they were built from.
+    (args.output_dir / "analysis.md").write_text(analysis, encoding="utf-8")
+
+    print(f"\n[4/{n_steps}] Incremental per-test generation loop...")
+    loop_result = run_incremental_generation_loop(
+        client=client,
+        model=args.model,
         analysis=analysis,
         architecture=architecture,
         isa_docs=isa_docs,
+        assets=assets,
+        output_dir=args.output_dir,
+        chipyard_root=chipyard_root,
+        vcs_dir_relpath=args.vcs_dir,
+        sim_config=DEFAULT_SIM_CONFIG,
         num_tests=args.num_tests,
-        assembly_tests=assembly_tests,
-        generators=generators,
-        optimization_menu=assets.optimization_menu,
-        baremetal_test_examples=assets.baremetal_test_examples,
-        rules=assets.rules,
+        max_fix_attempts=args.max_fix_attempts,
+        run_timeout_s=args.run_timeout_s,
+        llm_timeout_s=args.llm_timeout_s,
     )
-    prompt_outputs = dump_used_planner_prompts(
-        output_dir=args.output_dir,
-        system_prompt=planner_system,
-        user_prompt=planner_user,
-    )
-    print("       Dumped exact prompts used for planning:")
-    for name, path in prompt_outputs.items():
-        print(f"       {name}: {path}")
+    accepted_tests = loop_result["accepted_tests"]
+    loop_summary = loop_result["summary"]
 
-    print(f"\n[5/{n_steps}] Running planner...")
-    planner_raw = call_llm(
-        client=client,
-        model=args.model,
-        system=planner_system,
-        user=planner_user,
-    )
-    print(f"       Received planner response ({len(planner_raw)} chars)")
+    if not accepted_tests:
+        print(
+            "\nNo tests were accepted across any slot. Skipping post-generation "
+            "coverage aggregation."
+        )
+        print("\nCoverage outputs:")
+        print(f"  baseline summary: {baseline_coverage_path}")
+        print(f"  baseline analysis: {baseline_coverage['analysis_path']}")
+        print(f"  incremental summary: {loop_result['summary_path']}")
+        return 1
 
-    try:
-        planner_results = extract_json_array(planner_raw)
-    except ValueError as exc:
-        raw_path = args.output_dir / "planner_generate_raw_response.md"
-        raw_path.write_text(planner_raw, encoding="utf-8")
-        sys.exit(f"ERROR: {exc}\nRaw planner response saved to {raw_path}")
-
-    log_outputs = write_generation_logs(
-        output_dir=args.output_dir,
-        analysis=analysis,
-        planner_raw=planner_raw,
-        planner_results=planner_results,
+    print(
+        f"\n[5/{n_steps}] Re-running all {len(accepted_tests)} accepted test(s) under "
+        "GEN_COVERAGE=1 and aggregating post-generation coverage..."
     )
-    materialized_outputs = materialize_planner_results(
-        output_dir=args.output_dir,
-        planner_results=planner_results,
-    )
-    print(f"\n[6/{n_steps}] Publishing generated tests into baremetal source directories...")
-    published_tests = publish_planner_results_to_baremetal(planner_results)
-    print(f"       Published {len(published_tests)} test(s) into {ASSEMBLY_DIR} and {GENERATORS_DIR}")
-
-    print(f"\n[7/{n_steps}] Generating goldens, assembling, and building binaries...")
-    build_outputs = build_published_baremetal_tests(
-        output_dir=args.output_dir,
-        published_tests=published_tests,
-    )
-
-    print(f"\n[8/{n_steps}] Running generated tests and aggregating post-generation coverage...")
     sim_summary = run_vcs_binaries(
         chipyard_root=chipyard_root,
-        tests=published_tests,
+        tests=accepted_tests,
         output_dir=args.output_dir,
         sim_config=DEFAULT_SIM_CONFIG,
         vcs_dir_relpath=args.vcs_dir,
@@ -2170,26 +3586,39 @@ def main() -> int:
         print(f"  coverage report: {sim_summary['coverage']['urg_report_dir']}")
     if "analysis_path" in sim_summary["coverage"]:
         print(f"  coverage analysis: {sim_summary['coverage']['analysis_path']}")
-    if any(t.get("status") == "failed" for t in sim_summary["tests"]):
-        return 1
-    if sim_summary["coverage"].get("status") == "failed":
-        return 1
 
-    print("\nWrote run logs:")
-    for name, path in log_outputs.items():
-        print(f"  {name}: {path}")
-    print("\nMaterialized planner outputs:")
-    for name, path in materialized_outputs.items():
-        print(f"  {name}: {path}")
-    print("\nBuilt baremetal outputs:")
-    for name, path in build_outputs.items():
-        print(f"  {name}: {path}")
+    # A previously-accepted test re-running under GEN_COVERAGE=1 should still
+    # pass; if it regresses under coverage instrumentation we want to know.
+    regressed = [t for t in sim_summary["tests"] if t.get("status") == "failed"]
+    if regressed:
+        print(
+            "\nWARNING: the following accepted test(s) regressed under "
+            "GEN_COVERAGE=1 re-run: "
+            + ", ".join(str(t.get("name")) for t in regressed)
+        )
+
+    print(f"\n[6/{n_steps}] Writing summary...")
+    print(
+        f"       Slots attempted : {loop_summary['requested']}"
+    )
+    print(
+        f"       Accepted        : {loop_summary['accepted_count']}"
+    )
+    print(
+        f"       Skipped         : {loop_summary['skipped_count']}"
+    )
     print("\nCoverage outputs:")
     print(f"  baseline summary: {baseline_coverage_path}")
     print(f"  baseline analysis: {baseline_coverage['analysis_path']}")
+    print(f"  incremental summary: {loop_result['summary_path']}")
     print(f"  post-generation analysis: {sim_summary['coverage'].get('analysis_path')}")
-    print(f"\nGenerated {len(planner_results)} planner result entries.")
 
+    # Return nonzero if nothing was accepted or if coverage aggregation failed;
+    # regressed-under-coverage tests only warn (they already passed once).
+    if loop_summary["accepted_count"] == 0:
+        return 1
+    if sim_summary["coverage"].get("status") == "failed":
+        return 1
     return 0
 
 

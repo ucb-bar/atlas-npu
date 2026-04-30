@@ -32,23 +32,39 @@ _URG_INSTANCE_TABLE_ROW_RE = re.compile(
     rf"(?P<name>\S+(?:\.\S+)+)\s*$"
 )
 
+ATLAS_TILE_INSTANCE = "TestDriver.testHarness.chiptop0.system.domain.atlasTile"
+
 
 class CoverageAnalyzer:
     """Parse URG coverage-overall reports and produce a coverage analysis text."""
 
-    def __init__(self, coverage_overall_dir: Path, threshold: float = 90.0):
+    def __init__(
+        self,
+        coverage_overall_dir: Path,
+        threshold: float = 90.0,
+        target_instance: str = ATLAS_TILE_INSTANCE,
+    ):
         self.coverage_overall_dir = Path(coverage_overall_dir)
         self.threshold = threshold
+        self.target_instance = target_instance
 
     def analyze(self) -> str:
-        overall = self._parse_dashboard_summary()
-        module_gaps = self._parse_module_gaps()
+        instance_gaps = self._parse_instance_gaps()
+        target_instances = {
+            name: data
+            for name, data in instance_gaps.items()
+            if name == self.target_instance or name.startswith(self.target_instance + ".")
+        }
+        root = target_instances.get(self.target_instance)
+        if root is None:
+            return self._assemble_missing_target_analysis(instance_gaps)
+
         low_cov = {
             name: data
-            for name, data in module_gaps.items()
-            if (data.get("score") or 100.0) < self.threshold and name != "svsimTestbench"
+            for name, data in target_instances.items()
+            if self._effective_score(data) < self.threshold
         }
-        return self._assemble_analysis(overall, module_gaps, low_cov)
+        return self._assemble_instance_analysis(root, target_instances, low_cov)
 
     def _parse_dashboard_summary(self) -> Dict[str, Optional[float]]:
         dashboard_path = self.coverage_overall_dir / "dashboard.txt"
@@ -143,6 +159,39 @@ class CoverageAnalyzer:
 
         return modules
 
+    def _parse_instance_gaps(self) -> Dict[str, dict]:
+        modinfo_path = self.coverage_overall_dir / "modinfo.txt"
+        if not modinfo_path.exists():
+            return {}
+
+        lines = modinfo_path.read_text(errors="ignore").splitlines()
+        n = len(lines)
+
+        boundaries: List[Tuple[int, str]] = []
+        i = 0
+        while i < n - 2:
+            if (
+                lines[i].startswith("=" * 20)
+                and lines[i + 2].startswith("=" * 20)
+                and lines[i + 1].strip()
+            ):
+                boundaries.append((i + 3, lines[i + 1].strip()))
+                i += 3
+            else:
+                i += 1
+
+        instances: Dict[str, dict] = {}
+        for idx, (content_start, header) in enumerate(boundaries):
+            m = re.match(r"^Module Instance\s*:\s*(\S+)$", header)
+            if not m:
+                continue
+            inst_name = m.group(1)
+            content_end = boundaries[idx + 1][0] - 3 if idx + 1 < len(boundaries) else n
+            section_lines = lines[content_start:content_end]
+            instances[inst_name] = self._parse_instance_section(inst_name, section_lines)
+
+        return instances
+
     def _parse_module_section(self, mod_name: str, text: str) -> dict:
         data: Dict[str, Any] = {
             "name": mod_name,
@@ -185,6 +234,108 @@ class CoverageAnalyzer:
                 data["uncovered_branches"] = self._extract_uncovered_branches(s)
 
         return data
+
+    def _parse_instance_section(self, inst_name: str, section_lines: List[str]) -> dict:
+        data: Dict[str, Any] = {
+            "name": inst_name,
+            "short_name": inst_name.rsplit(".", 1)[-1],
+            "depth": inst_name.count("."),
+            "score": None,
+            "line": None,
+            "cond": None,
+            "toggle": None,
+            "fsm": None,
+            "branch": None,
+            "subtree_score": None,
+            "subtree_line": None,
+            "subtree_cond": None,
+            "subtree_toggle": None,
+            "subtree_fsm": None,
+            "subtree_branch": None,
+            "children": [],
+        }
+
+        instance_idx = self._find_line_index(section_lines, "Instance :")
+        subtree_idx = self._find_line_index(section_lines, "Instance's subtree :")
+        subtrees_idx = self._find_line_index(section_lines, "Subtrees :")
+
+        if instance_idx is not None:
+            metrics = self._extract_first_score_row(section_lines[instance_idx : instance_idx + 12])
+            if metrics:
+                data.update(metrics)
+
+        if subtree_idx is not None:
+            subtree_metrics = self._extract_first_score_row(section_lines[subtree_idx : subtree_idx + 12])
+            if subtree_metrics:
+                data["subtree_score"] = subtree_metrics["score"]
+                data["subtree_line"] = subtree_metrics["line"]
+                data["subtree_cond"] = subtree_metrics["cond"]
+                data["subtree_toggle"] = subtree_metrics["toggle"]
+                data["subtree_fsm"] = subtree_metrics["fsm"]
+                data["subtree_branch"] = subtree_metrics["branch"]
+
+        if subtrees_idx is not None:
+            data["children"] = self._extract_child_rows(section_lines[subtrees_idx + 1 :])
+
+        return data
+
+    @staticmethod
+    def _find_line_index(lines: List[str], needle: str) -> Optional[int]:
+        for idx, line in enumerate(lines):
+            if line.strip() == needle:
+                return idx
+        return None
+
+    @staticmethod
+    def _extract_first_score_row(lines: List[str]) -> Optional[Dict[str, Optional[float]]]:
+        for line in lines:
+            sm = _URG_SCORE_ROW_RE.match(line)
+            if sm:
+                return {
+                    "score": _to_float_or_none(sm.group("sc")),
+                    "line": _to_float_or_none(sm.group("ln")),
+                    "cond": _to_float_or_none(sm.group("cd")),
+                    "toggle": _to_float_or_none(sm.group("tg")),
+                    "fsm": _to_float_or_none(sm.group("fs")),
+                    "branch": _to_float_or_none(sm.group("br")),
+                }
+        return None
+
+    def _extract_child_rows(self, lines: List[str]) -> List[dict]:
+        children: List[dict] = []
+        for line in lines:
+            s = line.strip()
+            if not s:
+                if children:
+                    break
+                continue
+            if s.startswith(("SCORE", "Subtrees", "Since this is", "Module", "Parent", "no children")):
+                continue
+            if s.startswith(("-", "=")):
+                if children:
+                    break
+                continue
+
+            parts = s.split()
+            if len(parts) < 8:
+                if children:
+                    break
+                continue
+
+            metrics = [_to_float_or_none(token) for token in parts[:7]]
+            children.append(
+                {
+                    "name": parts[7],
+                    "score": metrics[0],
+                    "line": metrics[1],
+                    "cond": metrics[2],
+                    "toggle": metrics[3],
+                    "fsm": metrics[4],
+                    "branch": metrics[5],
+                    "assert": metrics[6],
+                }
+            )
+        return children
 
     @staticmethod
     def _extract_uncovered_conditions(text: str) -> List[dict]:
@@ -313,6 +464,155 @@ class CoverageAnalyzer:
             else:
                 seen[key]["_count"] += 1
         return list(seen.values())
+
+    @staticmethod
+    def _effective_score(instance: dict) -> float:
+        return (
+            instance.get("subtree_score")
+            if instance.get("subtree_score") is not None
+            else (instance.get("score") or 100.0)
+        )
+
+    @staticmethod
+    def _child_path(parent: str, child_name: str) -> str:
+        return f"{parent}.{child_name}"
+
+    def _append_child_summary_section(
+        self,
+        out: List[str],
+        parent_path: str,
+        parent_data: Dict[str, Any],
+        all_instances: Dict[str, dict],
+        *,
+        title: str,
+    ) -> None:
+        children: List[Tuple[dict, Optional[dict], float]] = []
+        for child in parent_data.get("children", []):
+            child_path = self._child_path(parent_path, child["name"])
+            child_data = all_instances.get(child_path)
+            effective = (
+                self._effective_score(child_data)
+                if child_data is not None
+                else (child.get("score") or 100.0)
+            )
+            children.append((child, child_data, effective))
+
+        if not children:
+            return
+
+        fmt_short = lambda v: f"{v:.1f}" if v is not None else "--"
+        out.append(title)
+        out.append("-" * 70)
+        children.sort(key=lambda item: item[2])
+        for child, child_data, effective in children:
+            line = child_data.get("subtree_line") if child_data else child.get("line")
+            cond = child_data.get("subtree_cond") if child_data else child.get("cond")
+            toggle = child_data.get("subtree_toggle") if child_data else child.get("toggle")
+            branch = child_data.get("subtree_branch") if child_data else child.get("branch")
+            flag = " ***" if effective < self.threshold else ""
+            out.append(
+                f"  {child['name']:<20} SCORE:{fmt_short(effective):>6}  "
+                f"LINE:{fmt_short(line):>6}  COND:{fmt_short(cond):>6}  "
+                f"TOGGLE:{fmt_short(toggle):>6}  BRANCH:{fmt_short(branch):>6}{flag}"
+            )
+        out.append("")
+
+    def _assemble_missing_target_analysis(self, instances: Dict[str, dict]) -> str:
+        available = sorted(name for name in instances if ".atlasTile" in name)
+        out = [
+            "=" * 70,
+            "ATLAS TILE COVERAGE ANALYSIS",
+            "=" * 70,
+            "",
+            f"Target instance not found: {self.target_instance}",
+            "",
+            "Available atlasTile-like instances:",
+        ]
+        if available:
+            out.extend(f"  - {name}" for name in available[:50])
+            if len(available) > 50:
+                out.append(f"  ... ({len(available) - 50} more omitted)")
+        else:
+            out.append("  (none found)")
+        out.extend(["", "=" * 70, "END OF COVERAGE ANALYSIS", "=" * 70])
+        return "\n".join(out)
+
+    def _assemble_instance_analysis(
+        self,
+        root: Dict[str, Any],
+        all_instances: Dict[str, dict],
+        low_cov: Dict[str, dict],
+    ) -> str:
+        out: List[str] = []
+        fmt = lambda v: f"{v:.2f}%" if v is not None else "--"
+        fmt_short = lambda v: f"{v:.1f}" if v is not None else "--"
+
+        out.append("=" * 70)
+        out.append("ATLAS TILE COVERAGE ANALYSIS")
+        out.append("=" * 70)
+        out.append("")
+        out.append(f"TARGET INSTANCE: {self.target_instance}")
+        out.append("")
+        out.append("ATLAS TILE SUBTREE SUMMARY")
+        out.append("-" * 70)
+        out.append(f"  SCORE : {fmt(root.get('subtree_score'))}")
+        out.append(f"  LINE  : {fmt(root.get('subtree_line'))}")
+        out.append(f"  COND  : {fmt(root.get('subtree_cond'))}")
+        out.append(f"  TOGGLE: {fmt(root.get('subtree_toggle'))}")
+        out.append(f"  FSM   : {fmt(root.get('subtree_fsm'))}")
+        out.append(f"  BRANCH: {fmt(root.get('subtree_branch'))}")
+        out.append("")
+        out.append(f"LOW-COVERAGE THRESHOLD: {self.threshold:.1f}%")
+        out.append(f"INSTANCES BELOW THRESHOLD: {len(low_cov)} / {len(all_instances)}")
+        out.append("")
+
+        self._append_child_summary_section(
+            out,
+            self.target_instance,
+            root,
+            all_instances,
+            title="DIRECT CHILD SUMMARY (sorted by subtree score, *** = below threshold)",
+        )
+
+        direct_children = [
+            all_instances[self._child_path(self.target_instance, child["name"])]
+            for child in root.get("children", [])
+            if self._child_path(self.target_instance, child["name"]) in all_instances
+        ]
+        for child_data in sorted(direct_children, key=self._effective_score):
+            if child_data.get("children"):
+                label = child_data["name"].removeprefix(self.target_instance + ".")
+                self._append_child_summary_section(
+                    out,
+                    child_data["name"],
+                    child_data,
+                    all_instances,
+                    title=f"{label} DIRECT CHILD SUMMARY (sorted by subtree score, *** = below threshold)",
+                )
+
+        out.append("ALL ATLAS TILE INSTANCES (sorted by subtree/instance score, *** = below threshold)")
+        out.append("-" * 70)
+        sorted_instances = sorted(all_instances.values(), key=self._effective_score)
+        for inst in sorted_instances:
+            flag = " ***" if inst["name"] in low_cov else ""
+            label = inst["name"].removeprefix(self.target_instance + ".")
+            if inst["name"] == self.target_instance:
+                label = "."
+            line = inst.get("subtree_line", inst.get("line"))
+            cond = inst.get("subtree_cond", inst.get("cond"))
+            toggle = inst.get("subtree_toggle", inst.get("toggle"))
+            branch = inst.get("subtree_branch", inst.get("branch"))
+            out.append(
+                f"  {label:<60} SCORE:{fmt_short(self._effective_score(inst)):>6}  "
+                f"LINE:{fmt_short(line):>6}  COND:{fmt_short(cond):>6}  "
+                f"TOGGLE:{fmt_short(toggle):>6}  BRANCH:{fmt_short(branch):>6}{flag}"
+            )
+
+        out.append("")
+        out.append("=" * 70)
+        out.append("END OF COVERAGE ANALYSIS")
+        out.append("=" * 70)
+        return "\n".join(out)
 
     def _assemble_analysis(
         self,
