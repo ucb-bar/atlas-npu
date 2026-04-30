@@ -11,11 +11,11 @@
 //
 //   VLOAD path (FSM)
 //     VLOAD  (VMEM → mreg): Streams mregRows lines.
-//                    Fixed mregRows + 1 cycle latency.
+//                    Fixed mregRows + 2 cycle latency.
 //
 //   VSTORE path (FSM)
 //     VSTORE (mreg → VMEM): Streams mregRows rows.
-//                    Fixed mregRows + 1 cycle latency.
+//                    Fixed mregRows + 2 cycle latency.
 //
 // Software guarantees no same-bank VMEM conflicts between scalar and vector
 // paths, including read/write pairs. Under block banking, aligned VLOAD/VSTORE
@@ -23,10 +23,10 @@
 // on violations. All LSU operations have deterministic latency — no stalls.
 //
 // Busy signals:
-//   scalarBusy — true while a scalar load response is pending.
-//   vloadBusy  — true while a VLOAD is in progress.
-//   vstoreBusy — true while a VSTORE is in progress.
-//   vecBusy    — true while either vector FSM is active.
+//   scalarBusy — true while a scalar load is in flight.
+//   vloadBusy  — true while a VLOAD still has pending VMEM→MREG work.
+//   vstoreBusy — true while a VSTORE still has pending MREG→VMEM work.
+//   vecBusy    — true while either vector path is active or draining.
 // ============================================================================
 
 package atlas.lsu
@@ -89,7 +89,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   })
 
   // ==========================================================================
-  // Scalar Load Path (pipelined — fixed 2-cycle latency)
+  // Scalar Load Path (from scalarCmd arrival: fixed 2-cycle latency)
   // ==========================================================================
 
   val scalarLoadPending = RegInit(false.B)
@@ -154,19 +154,39 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val vloadMregId   = Reg(UInt(mregP.mregIdBits.W))
   val vloadVmemBase = Reg(UInt(vmemP.lineAddrBits.W))
   val vloadCounter  = RegInit(0.U(log2Ceil(mregRows + 1).W))
+  val vloadRespPending = RegInit(false.B)
+  val vloadRespRow     = RegInit(0.U(log2Ceil(mregRows).W))
+  val vloadWritePending = RegInit(false.B)
+  val vloadWriteRow     = RegInit(0.U(log2Ceil(mregRows).W))
+  val vloadWriteData    = RegInit(0.U(mregP.mregRowBits.W))
 
   val vstoreState    = RegInit(sVecIdle)
   val vstoreMregId   = Reg(UInt(mregP.mregIdBits.W))
   val vstoreVmemBase = Reg(UInt(vmemP.lineAddrBits.W))
   val vstoreCounter  = RegInit(0.U(log2Ceil(mregRows + 1).W))
+  // Register the mreg read response at the LSU ingress so VSTORE no longer
+  // writes VMEM directly from the mreg SRAM/crossbar path.
+  val mregReadRespValid_q = RegNext(io.mregReadResp.valid, init = false.B)
+  val mregReadRespBits_q  = RegInit(0.U(mregP.mregRowBits.W))
+  when(io.mregReadResp.valid) {
+    mregReadRespBits_q := io.mregReadResp.bits
+  }
+  // The LSU vstore path now sees a 2-cycle mreg read-response latency:
+  // SRAM read + LSU ingress register.
+  val vstoreRespPending_d  = RegInit(false.B)
+  val vstoreRespPending_q  = RegInit(false.B)
+  val vstoreRespLineAddr_d = RegInit(0.U(vmemP.lineAddrBits.W))
+  val vstoreRespLineAddr_q = RegInit(0.U(vmemP.lineAddrBits.W))
+  val vloadBusy  = (vloadState =/= sVecIdle) || vloadRespPending || vloadWritePending
+  val vstoreBusy = (vstoreState =/= sVecIdle) || vstoreRespPending_d || vstoreRespPending_q
 
-  io.vloadBusy  := vloadState =/= sVecIdle
-  io.vstoreBusy := vstoreState =/= sVecIdle
-  io.vecBusy    := io.vloadBusy || io.vstoreBusy
+  io.vloadBusy := vloadBusy
+  io.vstoreBusy := vstoreBusy
+  io.vecBusy    := vloadBusy || vstoreBusy
 
-  assert(!(issueVloadCmd && io.vloadBusy),
+  assert(!(issueVloadCmd && vloadBusy),
     "ASSERT FAIL: VLOAD issued while VLOAD path is busy")
-  assert(!(issueVstoreCmd && io.vstoreBusy),
+  assert(!(issueVstoreCmd && vstoreBusy),
     "ASSERT FAIL: VSTORE issued while VSTORE path is busy")
   assert(!(issueVloadCmd &&
            io.cmd.bits.vmemLineAddr(tensorLineBits - 1, 0) =/= 0.U),
@@ -174,11 +194,6 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   assert(!(issueVstoreCmd &&
            io.cmd.bits.vmemLineAddr(tensorLineBits - 1, 0) =/= 0.U),
     "ASSERT FAIL: VSTORE base must be 1 KiB aligned for block banking")
-
-  io.activeMregRead.valid  := io.vstoreBusy
-  io.activeMregRead.bits   := vstoreMregId
-  io.activeMregWrite.valid := io.vloadBusy
-  io.activeMregWrite.bits  := vloadMregId
 
   // ── Vector port defaults ──
   val vloadLineAddr  = vloadVmemBase + vloadCounter
@@ -229,8 +244,6 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   }
 
   val vloadIssuedRow    = Wire(UInt(log2Ceil(mregRows).W))
-  val vloadRespPending  = RegInit(false.B)
-  val vloadRespRow      = RegInit(0.U(log2Ceil(mregRows).W))
   vloadIssuedRow := vloadCounter(log2Ceil(mregRows) - 1, 0)
 
   vloadRespPending := vloadIssueRead
@@ -238,10 +251,18 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
     vloadRespRow := vloadIssuedRow
   }
 
-  io.mregWriteReq.valid       := io.vmemVecReadData.valid && vloadRespPending
+  when(io.vmemVecReadData.valid && vloadRespPending) {
+    vloadWritePending := true.B
+    vloadWriteRow     := vloadRespRow
+    vloadWriteData    := io.vmemVecReadData.bits
+  }.otherwise {
+    vloadWritePending := false.B
+  }
+
+  io.mregWriteReq.valid       := vloadWritePending
   io.mregWriteReq.bits.mregId := vloadMregId
-  io.mregWriteReq.bits.row    := vloadRespRow
-  io.mregWriteReq.bits.data   := io.vmemVecReadData.bits
+  io.mregWriteReq.bits.row    := vloadWriteRow
+  io.mregWriteReq.bits.data   := vloadWriteData
 
   val vstoreIssueRead = WireDefault(false.B)
   switch(vstoreState) {
@@ -270,18 +291,24 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
     }
   }
 
-  val vstoreRespPending  = RegInit(false.B)
-  val vstoreRespLineAddr = RegInit(0.U(vmemP.lineAddrBits.W))
-
-  vstoreRespPending := vstoreIssueRead
+  vstoreRespPending_d := vstoreIssueRead
+  vstoreRespPending_q := vstoreRespPending_d
   when(vstoreIssueRead) {
-    vstoreRespLineAddr := vstoreLineAddr
+    vstoreRespLineAddr_d := vstoreLineAddr
+  }
+  when(vstoreRespPending_d) {
+    vstoreRespLineAddr_q := vstoreRespLineAddr_d
   }
 
-  io.vmemVecWrite.valid         := io.mregReadResp.valid && vstoreRespPending
-  io.vmemVecWrite.bits.bankIdx  := vmemP.getBankIdx(vstoreRespLineAddr)
-  io.vmemVecWrite.bits.bankAddr := vmemP.getBankAddr(vstoreRespLineAddr)
-  io.vmemVecWrite.bits.data     := io.mregReadResp.bits
+  io.activeMregRead.valid  := vstoreBusy
+  io.activeMregRead.bits   := vstoreMregId
+  io.activeMregWrite.valid := vloadBusy
+  io.activeMregWrite.bits  := vloadMregId
+
+  io.vmemVecWrite.valid         := mregReadRespValid_q && vstoreRespPending_q
+  io.vmemVecWrite.bits.bankIdx  := vmemP.getBankIdx(vstoreRespLineAddr_q)
+  io.vmemVecWrite.bits.bankAddr := vmemP.getBankAddr(vstoreRespLineAddr_q)
+  io.vmemVecWrite.bits.data     := mregReadRespBits_q
 
   assert(!(io.vmemScalarRead.valid && io.vmemScalarWrite.valid &&
            io.vmemScalarRead.bits.bankIdx === io.vmemScalarWrite.bits.bankIdx),

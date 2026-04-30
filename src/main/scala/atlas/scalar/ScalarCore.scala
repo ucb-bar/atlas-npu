@@ -20,9 +20,9 @@ Software-scheduled hazard model:
     DELAY    — stalls for `imm` cycles.
     DMA.WAIT — stalls until the targeted DMA channel is no longer busy.
 
-Scalar stores are single-cycle masked writes (no RMW).
-Scalar loads have fixed 2-cycle latency.
-VLOAD/VSTORE have fixed mregRows+1 cycle latency.
+Scalar stores are pipelined masked writes (no RMW).
+Scalar loads have fixed 3-cycle latency.
+VLOAD/VSTORE have fixed mregRows+2 cycle latency.
 Scalar, VLOAD, and VSTORE LSU paths operate concurrently; software must
 ensure no same-bank VMEM conflicts (asserted in Vmem).
 */
@@ -72,6 +72,13 @@ class ScalarCore(spP: VmemParams) extends Module {
   val memLoadCmd     = Reg(UInt(4.W))
   val memLoadRd      = Reg(UInt(5.W))
   val memLoadByteOff = Reg(UInt(2.W))
+  val memLoadRespValid   = RegInit(false.B)
+  val memLoadRespWord    = RegInit(0.U(32.W))
+  val memLoadRespCmd     = RegInit(0.U(4.W))
+  val memLoadRespRd      = RegInit(0.U(5.W))
+  val memLoadRespByteOff = RegInit(0.U(2.W))
+  val scalarMemCmdReg    = RegInit(0.U.asTypeOf(new LsuScalarCmd(spP)))
+  val scalarMemCmdValid  = RegInit(false.B)
 
   val delayCounter = RegInit(0.U(12.W))
 
@@ -304,7 +311,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   assert(!(s1_fire && dec.is_mem_load && io.lsu_scalar_busy),
     "ASSERT FAIL: scalar load issued while LSU scalar path is busy")
 
-  // Scalar stores are single-cycle masked writes — no busy check needed.
+  // Scalar stores stay deterministic and do not consume scalar-load busy.
   // VMEM bank conflicts between scalar store and active VSTORE
   // are asserted in Vmem.
 
@@ -362,25 +369,25 @@ class ScalarCore(spP: VmemParams) extends Module {
     }
   }
 
+  // Register scalar LSU commands so the scalar RF/ALU cone ends locally.
   when(issueScalarStore) {
-    io.scalarMemCmd.valid         := true.B
-    io.scalarMemCmd.bits.isStore  := true.B
-    io.scalarMemCmd.bits.byteAddr := alu_result(spP.byteAddrBits - 1, 0)
-    io.scalarMemCmd.bits.wdata    := storeData
-    io.scalarMemCmd.bits.wmask    := storeMask
+    scalarMemCmdValid           := true.B
+    scalarMemCmdReg.isStore     := true.B
+    scalarMemCmdReg.byteAddr    := alu_result(spP.byteAddrBits - 1, 0)
+    scalarMemCmdReg.wdata       := storeData
+    scalarMemCmdReg.wmask       := storeMask
   }.elsewhen(issueScalarLoad) {
-    io.scalarMemCmd.valid         := true.B
-    io.scalarMemCmd.bits.isStore  := false.B
-    io.scalarMemCmd.bits.byteAddr := alu_result(spP.byteAddrBits - 1, 0)
-    io.scalarMemCmd.bits.wdata    := 0.U
-    io.scalarMemCmd.bits.wmask    := 0.U
+    scalarMemCmdValid           := true.B
+    scalarMemCmdReg.isStore     := false.B
+    scalarMemCmdReg.byteAddr    := alu_result(spP.byteAddrBits - 1, 0)
+    scalarMemCmdReg.wdata       := 0.U
+    scalarMemCmdReg.wmask       := 0.U
   }.otherwise {
-    io.scalarMemCmd.valid         := false.B
-    io.scalarMemCmd.bits.isStore  := false.B
-    io.scalarMemCmd.bits.byteAddr := 0.U
-    io.scalarMemCmd.bits.wdata    := 0.U
-    io.scalarMemCmd.bits.wmask    := 0.U
+    scalarMemCmdValid := false.B
   }
+
+  io.scalarMemCmd.valid := scalarMemCmdValid
+  io.scalarMemCmd.bits  := scalarMemCmdReg
 
   when(issueScalarLoad) {
     memLoadPending := true.B
@@ -389,27 +396,38 @@ class ScalarCore(spP: VmemParams) extends Module {
     memLoadByteOff := alu_result(1, 0)
   }
 
-  val memRespArrived = memLoadPending && io.scalarMemResp.valid
-  when(memRespArrived) { memLoadPending := false.B }
+  val memRespCapture = memLoadPending && io.scalarMemResp.valid
+  when(memRespCapture) {
+    memLoadPending       := false.B
+    memLoadRespValid     := true.B
+    memLoadRespWord      := io.scalarMemResp.bits
+    memLoadRespCmd       := memLoadCmd
+    memLoadRespRd        := memLoadRd
+    memLoadRespByteOff   := memLoadByteOff
+  }.elsewhen(memLoadRespValid) {
+    memLoadRespValid := false.B
+  }
 
-  val memWord = io.scalarMemResp.bits
+  val memRespArrived = memLoadRespValid
+
+  val memWord = memLoadRespWord
   val memLoadResult = Wire(UInt(32.W))
   memLoadResult := memWord
-  switch(memLoadCmd) {
+  switch(memLoadRespCmd) {
     is(MEM_LB) {
-      val b = (memWord >> (memLoadByteOff ## 0.U(3.W)))(7, 0)
+      val b = (memWord >> (memLoadRespByteOff ## 0.U(3.W)))(7, 0)
       memLoadResult := Cat(Fill(24, b(7)), b)
     }
     is(MEM_LBU) {
-      val b = (memWord >> (memLoadByteOff ## 0.U(3.W)))(7, 0)
+      val b = (memWord >> (memLoadRespByteOff ## 0.U(3.W)))(7, 0)
       memLoadResult := Cat(0.U(24.W), b)
     }
     is(MEM_LH) {
-      val h = (memWord >> (memLoadByteOff(1) ## 0.U(4.W)))(15, 0)
+      val h = (memWord >> (memLoadRespByteOff(1) ## 0.U(4.W)))(15, 0)
       memLoadResult := Cat(Fill(16, h(15)), h)
     }
     is(MEM_LHU) {
-      val h = (memWord >> (memLoadByteOff(1) ## 0.U(4.W)))(15, 0)
+      val h = (memWord >> (memLoadRespByteOff(1) ## 0.U(4.W)))(15, 0)
       memLoadResult := Cat(0.U(16.W), h)
     }
     is(MEM_LW)   { memLoadResult := memWord }
@@ -439,18 +457,18 @@ class ScalarCore(spP: VmemParams) extends Module {
   assert(!(memRespArrived && s1_fire && dec.is_seli),
     "ASSERT FAIL: SELD response collides with SELI scale-register write")
 
-  val seldWriteEn = memRespArrived && memLoadCmd === MEM_SELD
+  val seldWriteEn = memRespArrived && memLoadRespCmd === MEM_SELD
   scaleRF.io.writeEn   := (s1_fire && dec.is_seli) || seldWriteEn
-  scaleRF.io.writeIdx  := Mux(seldWriteEn, memLoadRd, dec.rd)
+  scaleRF.io.writeIdx  := Mux(seldWriteEn, memLoadRespRd, dec.rd)
   scaleRF.io.writeData := Mux(seldWriteEn, memLoadResult(7, 0), dec.imm(7, 0))
 
-  val isMemLoadWB = memRespArrived && memLoadCmd =/= MEM_SELD
+  val isMemLoadWB = memRespArrived && memLoadRespCmd =/= MEM_SELD
   val wb_data = Mux(isMemLoadWB, memLoadResult,
     Mux(dec.is_csr, io.csrPort.rdata,
     Mux(dec.is_jal || dec.is_jalr, link_value, alu_result)))
 
   regfile.io.wr_en   := s1WritesScalarRd || isMemLoadWB
-  regfile.io.wr_addr := Mux(isMemLoadWB, memLoadRd, dec.rd)
+  regfile.io.wr_addr := Mux(isMemLoadWB, memLoadRespRd, dec.rd)
   regfile.io.wr_data := wb_data
 
   // ==============================================================
@@ -522,5 +540,7 @@ class ScalarCore(spP: VmemParams) extends Module {
     s1_hold_active  := false.B
     s1_instr_hold   := 0.U
     memLoadPending  := false.B
+    memLoadRespValid := false.B
+    scalarMemCmdValid := false.B
   }
 }

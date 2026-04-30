@@ -91,8 +91,8 @@
 
 # ============================================================================
 # LSU pressure loop. Stores deny DMA write grants on banks 0..3; loads deny DMA
-# read grants on banks 4..7. A NOP follows each scalar load for its fixed
-# response latency and to avoid scalar writeback collisions.
+# read grants on banks 4..7. Each scalar load uses DELAY 2 so the loop respects
+# the longer fixed scalar-load latency.
 # ============================================================================
 
 lsu_stall_loop:
@@ -102,13 +102,13 @@ lsu_stall_loop:
     SW    x13, x23, 0
 
     LW    x14, x24, 0
-    NOP
+    DELAY 2
     LW    x15, x25, 0
-    NOP
+    DELAY 2
     LW    x16, x26, 0
-    NOP
+    DELAY 2
     LW    x17, x27, 0
-    NOP
+    DELAY 2
 
     ADDI  x18, x18, -1
     BNE   x18, x0, lsu_stall_loop

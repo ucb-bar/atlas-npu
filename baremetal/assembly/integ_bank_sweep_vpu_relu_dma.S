@@ -79,21 +79,21 @@
     DELAY 40
 
     LB    x20, x29, 0
-    DELAY 1
+    DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
     NOP
 
     LHU   x20, x29, 2
-    DELAY 1
+    DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
     NOP
 
     LW    x20, x29, 4
-    DELAY 1
+    DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
@@ -126,21 +126,21 @@
     DELAY 40
 
     LB    x20, x29, 0
-    DELAY 1
+    DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
     NOP
 
     LHU   x20, x29, 2
-    DELAY 1
+    DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
     NOP
 
     LW    x20, x29, 4
-    DELAY 1
+    DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
@@ -173,21 +173,21 @@
     DELAY 40
 
     LB    x20, x29, 0
-    DELAY 1
+    DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
     NOP
 
     LHU   x20, x29, 2
-    DELAY 1
+    DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
     NOP
 
     LW    x20, x29, 4
-    DELAY 1
+    DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
@@ -220,21 +220,21 @@
     DELAY 40
 
     LB    x20, x29, 0
-    DELAY 1
+    DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
     NOP
 
     LHU   x20, x29, 2
-    DELAY 1
+    DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
     NOP
 
     LW    x20, x29, 4
-    DELAY 1
+    DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP

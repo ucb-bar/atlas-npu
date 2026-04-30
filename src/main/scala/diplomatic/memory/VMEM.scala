@@ -137,113 +137,192 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   def splitLine(data: UInt): Vec[UInt] =
     VecInit((0 until p.lineBytes).map(i => data(i * 8 + 7, i * 8)))
 
+  class AccessTreeSel extends Bundle {
+    val valid         = Bool()
+    val isWrite       = Bool()
+    val addr          = UInt(p.bankLineAddrBits.W)
+    val readClient    = UInt(3.W)
+    val writeData     = Vec(p.lineBytes, UInt(8.W))
+    val writeMask     = Vec(p.lineBytes, Bool())
+    val dmaReadGrant  = Bool()
+    val dmaWriteGrant = Bool()
+    val tlAccepted    = Bool()
+  }
+
+  class RespTreeSel extends Bundle {
+    val valid = Bool()
+    val data  = UInt(p.lineWidthBits.W)
+  }
+
+  def mergeAccessSel(lhs: AccessTreeSel, rhs: AccessTreeSel): AccessTreeSel = {
+    val out = Wire(new AccessTreeSel)
+    out.valid         := lhs.valid || rhs.valid
+    out.isWrite       := Mux(lhs.valid, lhs.isWrite, rhs.isWrite)
+    out.addr          := Mux(lhs.valid, lhs.addr, rhs.addr)
+    out.readClient    := Mux(lhs.valid, lhs.readClient, rhs.readClient)
+    out.writeData     := Mux(lhs.valid, lhs.writeData, rhs.writeData)
+    out.writeMask     := Mux(lhs.valid, lhs.writeMask, rhs.writeMask)
+    out.dmaReadGrant  := Mux(lhs.valid, lhs.dmaReadGrant, rhs.dmaReadGrant)
+    out.dmaWriteGrant := Mux(lhs.valid, lhs.dmaWriteGrant, rhs.dmaWriteGrant)
+    out.tlAccepted    := Mux(lhs.valid, lhs.tlAccepted, rhs.tlAccepted)
+    out
+  }
+
+  def mergeRespSel(lhs: RespTreeSel, rhs: RespTreeSel): RespTreeSel = {
+    val out = Wire(new RespTreeSel)
+    out.valid := lhs.valid || rhs.valid
+    out.data  := Mux(lhs.valid, lhs.data, rhs.data)
+    out
+  }
+
+  def treeReduce[T](leaves: Seq[T])(merge: (T, T) => T): T = {
+    require(leaves.nonEmpty, "treeReduce requires at least one leaf")
+    if (leaves.length == 1) {
+      leaves.head
+    } else {
+      val nextLevel = leaves.grouped(2).map { group =>
+        if (group.length == 1) group.head else merge(group.head, group(1))
+      }.toSeq
+      treeReduce(nextLevel)(merge)
+    }
+  }
+
+  def makeAccessLeaf(
+    valid:         Bool,
+    isWrite:       Bool,
+    addr:          UInt,
+    readClient:    UInt,
+    writeData:     Vec[UInt],
+    writeMask:     Vec[Bool],
+    dmaReadGrant:  Bool,
+    dmaWriteGrant: Bool,
+    tlAccepted:    Bool
+  ): AccessTreeSel = {
+    val leaf = Wire(new AccessTreeSel)
+    leaf.valid         := valid
+    leaf.isWrite       := isWrite
+    leaf.addr          := addr
+    leaf.readClient    := readClient
+    leaf.writeData     := writeData
+    leaf.writeMask     := writeMask
+    leaf.dmaReadGrant  := dmaReadGrant
+    leaf.dmaWriteGrant := dmaWriteGrant
+    leaf.tlAccepted    := tlAccepted
+    leaf
+  }
+
+  def makeRespLeaf(valid: Bool, data: UInt): RespTreeSel = {
+    val leaf = Wire(new RespTreeSel)
+    leaf.valid := valid
+    leaf.data  := data
+    leaf
+  }
+
   // dCanAccept gates both tl.a.ready and the per-bank decode below; the
   // latter prevents the bank from performing an SRAM access for a TL
   // request that has not fired.
   val r1_tlValid = r1_tlRead || r1_tlWrite
   val dCanAccept = !r1_tlValid && (!dValid || tl.d.ready)
 
+  val zeroData = VecInit(Seq.fill(p.lineBytes)(0.U(8.W)))
+  val zeroMask = VecInit(Seq.fill(p.lineBytes)(false.B))
+  val fullMask = VecInit(Seq.fill(p.lineBytes)(true.B))
+
+  val lsuScalarWriteData = splitLine(io.lsuScalarWrite.bits.data)
+  val lsuVecWriteData    = splitLine(io.lsuVecWrite.bits.data)
+  val dmaWriteData       = splitLine(io.dmaWrite.bits.data)
+  val tlWriteData        = splitLine(tl.a.bits.data)
+  val tlWriteMask        = VecInit((0 until p.lineBytes).map(i => tl.a.bits.mask(i)))
+
+  def bankOH(bankIdx: UInt, valid: Bool): UInt =
+    UIntToOH(bankIdx, p.numBanks) & Fill(p.numBanks, valid)
+
+  val lsuScalarReadBankOH  = bankOH(io.lsuScalarRead.bits.bankIdx, io.lsuScalarRead.valid)
+  val lsuVecReadBankOH     = bankOH(io.lsuVecRead.bits.bankIdx, io.lsuVecRead.valid)
+  val dmaReadBankOH        = bankOH(io.dmaRead.bits.bankIdx, io.dmaRead.valid)
+  val tlReadBankOH         = bankOH(tlBankIdx, tl.a.valid && dCanAccept && tlIsGet)
+  val lsuScalarWriteBankOH = bankOH(io.lsuScalarWrite.bits.bankIdx, io.lsuScalarWrite.valid)
+  val lsuVecWriteBankOH    = bankOH(io.lsuVecWrite.bits.bankIdx, io.lsuVecWrite.valid)
+  val dmaWriteBankOH       = bankOH(io.dmaWrite.bits.bankIdx, io.dmaWrite.valid)
+  val tlWriteBankOH        = bankOH(tlBankIdx, tl.a.valid && dCanAccept && tlIsPut)
+
+  val bankDmaReadGrant  = Wire(Vec(p.numBanks, Bool()))
+  val bankDmaWriteGrant = Wire(Vec(p.numBanks, Bool()))
+  val bankTlAccepted    = Wire(Vec(p.numBanks, Bool()))
+
   for (b <- 0 until p.numBanks) {
     val bank = banks(b)
 
-    // ── Request decode ─────────────────────────────────────────
-    val lsuScalarWantsRead = io.lsuScalarRead.valid && io.lsuScalarRead.bits.bankIdx === b.U
-    val lsuVecWantsRead    = io.lsuVecRead.valid    && io.lsuVecRead.bits.bankIdx === b.U
-    val dmaWantsRead       = io.dmaRead.valid       && io.dmaRead.bits.bankIdx === b.U
-    val tlWantsRead        = tl.a.valid && dCanAccept && tlIsGet && tlBankIdx === b.U
+    val accessSel = treeReduce(Seq(
+      makeAccessLeaf(lsuScalarWriteBankOH(b), true.B, io.lsuScalarWrite.bits.bankAddr,
+        CLIENT_NONE, lsuScalarWriteData, io.lsuScalarWrite.bits.mask,
+        false.B, false.B, false.B),
+      makeAccessLeaf(lsuVecWriteBankOH(b), true.B, io.lsuVecWrite.bits.bankAddr,
+        CLIENT_NONE, lsuVecWriteData, fullMask,
+        false.B, false.B, false.B),
+      makeAccessLeaf(lsuScalarReadBankOH(b), false.B, io.lsuScalarRead.bits.bankAddr,
+        CLIENT_LSU_SCALAR, zeroData, zeroMask,
+        false.B, false.B, false.B),
+      makeAccessLeaf(lsuVecReadBankOH(b), false.B, io.lsuVecRead.bits.bankAddr,
+        CLIENT_LSU_VEC, zeroData, zeroMask,
+        false.B, false.B, false.B),
+      makeAccessLeaf(dmaWriteBankOH(b), true.B, io.dmaWrite.bits.bankAddr,
+        CLIENT_NONE, dmaWriteData, fullMask,
+        false.B, true.B, false.B),
+      makeAccessLeaf(dmaReadBankOH(b), false.B, io.dmaRead.bits.bankAddr,
+        CLIENT_DMA, zeroData, zeroMask,
+        true.B, false.B, false.B),
+      makeAccessLeaf(tlWriteBankOH(b), true.B, tlBankAddr,
+        CLIENT_NONE, tlWriteData, tlWriteMask,
+        false.B, false.B, true.B),
+      makeAccessLeaf(tlReadBankOH(b), false.B, tlBankAddr,
+        CLIENT_TL, zeroData, zeroMask,
+        false.B, false.B, true.B)
+    ))(mergeAccessSel)
 
-    val lsuScalarWantsWrite = io.lsuScalarWrite.valid && io.lsuScalarWrite.bits.bankIdx === b.U
-    val lsuVecWantsWrite    = io.lsuVecWrite.valid    && io.lsuVecWrite.bits.bankIdx === b.U
-    val dmaWantsWrite       = io.dmaWrite.valid       && io.dmaWrite.bits.bankIdx === b.U
-    val tlWantsWrite        = tl.a.valid && dCanAccept && tlIsPut && tlBankIdx === b.U
-
-    // ── Shared 1RW access port ─────────────────────────────────
-    val accessEn      = WireDefault(false.B)
-    val accessIsWrite = WireDefault(false.B)
-    val accessAddr    = WireDefault(0.U(p.bankLineAddrBits.W))
-    val readClient    = WireDefault(CLIENT_NONE)
-    val writeData = WireDefault(VecInit(Seq.fill(p.lineBytes)(0.U(8.W))))
-    val writeMask = WireDefault(VecInit(Seq.fill(p.lineBytes)(false.B)))
-    val fullMask  = VecInit(Seq.fill(p.lineBytes)(true.B))
-
-    when(lsuScalarWantsWrite) {
-      accessEn      := true.B
-      accessIsWrite := true.B
-      accessAddr    := io.lsuScalarWrite.bits.bankAddr
-      writeData     := splitLine(io.lsuScalarWrite.bits.data)
-      writeMask     := io.lsuScalarWrite.bits.mask
-
-    }.elsewhen(lsuVecWantsWrite) {
-      accessEn      := true.B
-      accessIsWrite := true.B
-      accessAddr    := io.lsuVecWrite.bits.bankAddr
-      writeData     := splitLine(io.lsuVecWrite.bits.data)
-      writeMask     := fullMask
-
-    }.elsewhen(lsuScalarWantsRead) {
-      accessEn   := true.B
-      accessAddr := io.lsuScalarRead.bits.bankAddr
-      readClient := CLIENT_LSU_SCALAR
-
-    }.elsewhen(lsuVecWantsRead) {
-      accessEn   := true.B
-      accessAddr := io.lsuVecRead.bits.bankAddr
-      readClient := CLIENT_LSU_VEC
-
-    }.elsewhen(dmaWantsWrite) {
-      accessEn      := true.B
-      accessIsWrite := true.B
-      accessAddr    := io.dmaWrite.bits.bankAddr
-      writeData     := splitLine(io.dmaWrite.bits.data)
-      writeMask     := fullMask
-      dmaWriteGranted := true.B
-
-    }.elsewhen(dmaWantsRead) {
-      accessEn   := true.B
-      accessAddr := io.dmaRead.bits.bankAddr
-      readClient := CLIENT_DMA
-      dmaReadGranted := true.B
-
-    }.elsewhen(tlWantsWrite) {
-      accessEn      := true.B
-      accessIsWrite := true.B
-      accessAddr    := tlBankAddr
-      writeData     := splitLine(tl.a.bits.data)
-      writeMask     := VecInit((0 until p.lineBytes).map(i => tl.a.bits.mask(i)))
-      tlAccepted := true.B
-
-    }.elsewhen(tlWantsRead) {
-      accessEn   := true.B
-      accessAddr := tlBankAddr
-      readClient := CLIENT_TL
-      tlAccepted := true.B
-    }
-
-    r1_bankReadData(b)   := bank.readWrite(accessAddr, writeData, writeMask, accessEn, accessIsWrite)
-    r1_bankReadClient(b) := Mux(accessEn && !accessIsWrite, readClient, CLIENT_NONE)
-    r1_bankReadValid(b)  := accessEn && !accessIsWrite
+    r1_bankReadData(b)   := bank.readWrite(
+      accessSel.addr,
+      accessSel.writeData,
+      accessSel.writeMask,
+      accessSel.valid,
+      accessSel.isWrite
+    )
+    r1_bankReadClient(b) := Mux(accessSel.valid && !accessSel.isWrite, accessSel.readClient, CLIENT_NONE)
+    r1_bankReadValid(b)  := accessSel.valid && !accessSel.isWrite
+    bankDmaReadGrant(b)  := accessSel.dmaReadGrant
+    bankDmaWriteGrant(b) := accessSel.dmaWriteGrant
+    bankTlAccepted(b)    := accessSel.tlAccepted
   }
+
+  dmaReadGranted  := treeReduce((0 until p.numBanks).map(b => bankDmaReadGrant(b)))(_ || _)
+  dmaWriteGranted := treeReduce((0 until p.numBanks).map(b => bankDmaWriteGrant(b)))(_ || _)
+  tlAccepted      := treeReduce((0 until p.numBanks).map(b => bankTlAccepted(b)))(_ || _)
 
   // ==========================================================================
   // Read-response routing
   // ==========================================================================
 
   def flattenBankData(bdata: Vec[UInt]): UInt = Cat(bdata.reverse)
+  val flatBankReadData = r1_bankReadData.map(flattenBankData)
 
-  val lsuScalarRespHot = VecInit((0 until p.numBanks).map(b =>
-    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_LSU_SCALAR))
-  io.lsuScalarReadData.valid := lsuScalarRespHot.asUInt.orR
-  io.lsuScalarReadData.bits  := Mux1H(lsuScalarRespHot, r1_bankReadData.map(flattenBankData))
+  def selectReadResp(client: UInt): RespTreeSel = {
+    val leaves = (0 until p.numBanks).map { b =>
+      makeRespLeaf(r1_bankReadValid(b) && r1_bankReadClient(b) === client, flatBankReadData(b))
+    }
+    treeReduce(leaves)(mergeRespSel)
+  }
 
-  val lsuVecRespHot = VecInit((0 until p.numBanks).map(b =>
-    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_LSU_VEC))
-  io.lsuVecReadData.valid := lsuVecRespHot.asUInt.orR
-  io.lsuVecReadData.bits  := Mux1H(lsuVecRespHot, r1_bankReadData.map(flattenBankData))
+  val lsuScalarRespSel = selectReadResp(CLIENT_LSU_SCALAR)
+  io.lsuScalarReadData.valid := lsuScalarRespSel.valid
+  io.lsuScalarReadData.bits  := lsuScalarRespSel.data
 
-  val dmaRespHot = VecInit((0 until p.numBanks).map(b =>
-    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_DMA))
-  io.dmaReadData.valid := dmaRespHot.asUInt.orR
-  io.dmaReadData.bits  := Mux1H(dmaRespHot, r1_bankReadData.map(flattenBankData))
+  val lsuVecRespSel = selectReadResp(CLIENT_LSU_VEC)
+  io.lsuVecReadData.valid := lsuVecRespSel.valid
+  io.lsuVecReadData.bits  := lsuVecRespSel.data
+
+  val dmaRespSel = selectReadResp(CLIENT_DMA)
+  io.dmaReadData.valid := dmaRespSel.valid
+  io.dmaReadData.bits  := dmaRespSel.data
 
   // ==========================================================================
   // Grants
@@ -264,11 +343,8 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     r1_tlSize   := tl.a.bits.size
   }
 
-  val tlRespHot = VecInit((0 until p.numBanks).map(b =>
-    r1_bankReadValid(b) && r1_bankReadClient(b) === CLIENT_TL))
-
-  val r1_tlData = Mux(r1_tlRead,
-    Mux1H(tlRespHot, r1_bankReadData.map(flattenBankData)), 0.U)
+  val tlRespSel = selectReadResp(CLIENT_TL)
+  val r1_tlData = Mux(r1_tlRead, tlRespSel.data, 0.U)
 
   when (r1_tlValid) {
     dValid  := true.B
