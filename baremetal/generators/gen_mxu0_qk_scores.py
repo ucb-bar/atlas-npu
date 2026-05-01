@@ -47,6 +47,7 @@ WK_BASE     = 0x1800
 Q_BASE      = 0x2800
 K_BASE      = 0x3000
 SCORES_BASE = 0x4000
+ZERO_BIAS_BASE = 0x4800
 
 # Per-tensor E8M0 scales used by SELI in assembly.
 # 127 => scaleExp = 0 => multiply by 2^0 = 1
@@ -185,6 +186,7 @@ WK_n0_d0 = WK[0:32,  0:32]
 WK_n0_d1 = WK[32:64, 0:32]
 WK_n1_d0 = WK[0:32,  32:64]
 WK_n1_d1 = WK[32:64, 32:64]
+ZERO_BIAS = np.zeros((32, 32), dtype=np.float32)
 
 # ------------------------------------------------------------------
 # Reference intermediates via SA functional model
@@ -247,6 +249,7 @@ emit_fp8_preload(preloads, WK_BASE + 0x0000, WK_n0_d0)
 emit_fp8_preload(preloads, WK_BASE + 0x0400, WK_n0_d1)
 emit_fp8_preload(preloads, WK_BASE + 0x0800, WK_n1_d0)
 emit_fp8_preload(preloads, WK_BASE + 0x0C00, WK_n1_d1)
+emit_fp8_preload(preloads, ZERO_BIAS_BASE, ZERO_BIAS)
 
 # FP8 intermediate checks (exact)
 emit_fp8_check(checks, Q_BASE + 0x0000, Q_n0)
