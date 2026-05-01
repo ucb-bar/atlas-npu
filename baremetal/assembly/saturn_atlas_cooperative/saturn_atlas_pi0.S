@@ -79,9 +79,9 @@ phase_1:
 
 p1_loop:
     LW    x10, x3, 0             # Q'[i]
-    DELAY 1
+    DELAY 2
     LW    x11, x7, 0             # K'[i]
-    DELAY 1
+    DELAY 2
     XOR   x12, x10, x11          # result
     XOR   x9,  x9,  x12          # checksum ^= result
     SW    x12, x8, 0             # VMEM[256 + i*4] = result

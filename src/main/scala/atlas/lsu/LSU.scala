@@ -333,4 +333,10 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   assert(!(io.vmemVecRead.valid && io.vmemVecWrite.valid &&
            io.vmemVecRead.bits.bankIdx === io.vmemVecWrite.bits.bankIdx),
     "ASSERT FAIL: VLOAD and VSTORE target same VMEM bank")
+
+  assert(!(io.vmemVecRead.valid && vloadState =/= sVecRun),
+    "LSU: vmemVecRead.valid asserted outside sVecRun")
+    
+  assert(!(io.vmemVecWrite.valid && !(mregReadRespValid_q && vstoreRespPending_q)),
+    "LSU: vmemVecWrite.valid asserted outside SRAM write issue cycle")
 }

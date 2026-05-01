@@ -57,7 +57,7 @@ phase_1:
 
 p1_loop:
     LW    x6, x3, 0              # got
-    DELAY 1
+    DELAY 2
     OR    x7, x2, x4             # expected = base | i
     BNE   x6, x7, p1_fail
     NOP
