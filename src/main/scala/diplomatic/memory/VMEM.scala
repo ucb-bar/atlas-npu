@@ -162,9 +162,9 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     out.readClient    := Mux(lhs.valid, lhs.readClient, rhs.readClient)
     out.writeData     := Mux(lhs.valid, lhs.writeData, rhs.writeData)
     out.writeMask     := Mux(lhs.valid, lhs.writeMask, rhs.writeMask)
-    out.dmaReadGrant  := Mux(lhs.valid, lhs.dmaReadGrant, rhs.dmaReadGrant)
-    out.dmaWriteGrant := Mux(lhs.valid, lhs.dmaWriteGrant, rhs.dmaWriteGrant)
-    out.tlAccepted    := Mux(lhs.valid, lhs.tlAccepted, rhs.tlAccepted)
+    out.dmaReadGrant  := Mux(lhs.valid, lhs.dmaReadGrant,  rhs.valid && rhs.dmaReadGrant)
+    out.dmaWriteGrant := Mux(lhs.valid, lhs.dmaWriteGrant, rhs.valid && rhs.dmaWriteGrant)
+    out.tlAccepted    := Mux(lhs.valid, lhs.tlAccepted,    rhs.valid && rhs.tlAccepted)
     out
   }
 
@@ -292,11 +292,30 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     bankDmaReadGrant(b)  := accessSel.dmaReadGrant
     bankDmaWriteGrant(b) := accessSel.dmaWriteGrant
     bankTlAccepted(b)    := accessSel.tlAccepted
+
+    // Invariant: a TL fire on a bank means that bank's TL leaf won the SRAM port.
+    val bankIsTlBank = tlBankIdx === b.U
+    when (tl.a.fire && bankIsTlBank && tlIsPut) {
+      assert(accessSel.tlAccepted && accessSel.isWrite && accessSel.addr === tlBankAddr,
+        "VMEM: TL Put fired but bank's TL write leaf did not win SRAM port")
+    }
+    when (tl.a.fire && bankIsTlBank && tlIsGet) {
+      assert(accessSel.tlAccepted && !accessSel.isWrite && accessSel.addr === tlBankAddr,
+        "VMEM: TL Get fired but bank's TL read leaf did not win SRAM port")
+    }
   }
 
   dmaReadGranted  := treeReduce((0 until p.numBanks).map(b => bankDmaReadGrant(b)))(_ || _)
   dmaWriteGranted := treeReduce((0 until p.numBanks).map(b => bankDmaWriteGrant(b)))(_ || _)
   tlAccepted      := treeReduce((0 until p.numBanks).map(b => bankTlAccepted(b)))(_ || _)
+
+  // Global tlAccepted must equal the active bank's tlAccepted (one-hot decode).
+  val activeBankOH         = UIntToOH(tlBankIdx, p.numBanks)
+  val activeBankTlAccepted = (bankTlAccepted.asUInt & activeBankOH).orR
+  when (tl.a.valid && dCanAccept && (tlIsPut || tlIsGet)) {
+    assert(tlAccepted === activeBankTlAccepted,
+      "VMEM: global tlAccepted differs from active-bank tlAccepted")
+  }
 
   // ==========================================================================
   // Read-response routing

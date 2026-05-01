@@ -12,7 +12,7 @@
 _start:
     ADDI  x3, x0, 0
     LW    x4, x3, 0                 # got = VMEM[0]
-    DELAY 1
+    DELAY 2
 
     LI    x5, 0xAAAAAAAA             # expected marker
     BNE   x4, x5, b_fail

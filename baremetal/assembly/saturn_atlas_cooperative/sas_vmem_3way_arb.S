@@ -42,15 +42,15 @@
     DMA.CONFIG x5, 0
     LI    x12, 1024              # transfer size
 
-    # Inner-loop count × outer rounds: 64 × 2 = 128 LSU+DMA cycles to
-    # give Saturn a wide overlap window. Each iteration runs ~1K Atlas
-    # cycles; 128 iterations ≈ 128K cycles. Saturn at ~500 cycles per
-    # 1 KiB sweep gets ~256 iters of overlap; floor of 16 leaves slack.
-    LI    x27, 2                 # outer round cap
+    # Inner-loop count × outer rounds: 128 × 4 = 512 LSU+DMA cycles for
+    # a sustained overlap window. Each iteration runs ~1K Atlas cycles;
+    # 512 iterations ≈ 200K cycles. Saturn's TARGET_ITERS is 4096 so
+    # the sweep does not exhaust before Atlas halts.
+    LI    x27, 4                 # outer round cap
     LI    x26, 0                 # outer round counter
 
 outer:
-    LI    x13, 64                # inner iter cap
+    LI    x13, 128               # inner iter cap
     LI    x11, 0                 # inner iter counter
 
 loop:
