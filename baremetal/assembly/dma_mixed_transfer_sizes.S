@@ -1,13 +1,13 @@
 # dma_mixed_transfer_sizes.S - mixed DMA command sizes in one burst
 # @TIMEOUT 200000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_mixed_transfer_sizes.py
 #
 # Existing DMA tests mostly use 1024-byte tiles, with one 128-byte loopback.
 # This test queues several legal sub-tile sizes together so the DMA's per-slot
 # outstanding counters and isLast metadata see 1, 2, 3, 5, and 7 beat commands.
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x12, 32

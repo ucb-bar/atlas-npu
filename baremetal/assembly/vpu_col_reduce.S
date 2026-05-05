@@ -1,7 +1,7 @@
 # vpu_col_reduce.S — VPU column (sublane) reduction ops
 # Tests: vredsum.bf16, vredmin.bf16, vredmax.bf16
 # @TIMEOUT 40000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_col_reduce.py
 #
 # Column reductions reduce over rows for each column:
@@ -19,7 +19,7 @@
 #   [0x1800..0x1FFF]  vredmax output     (2048 B)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

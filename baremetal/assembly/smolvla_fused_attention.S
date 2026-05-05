@@ -17,7 +17,7 @@
 #   O /= l
 #
 # @TIMEOUT 200000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_fused_attention.py
 #
 # Atlas MXU computes A @ W^T, so K and V_mlir slices are pushed as
@@ -73,7 +73,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 4096          # tile size in bytes (Q/K/V/OUT all 4096 B)
 

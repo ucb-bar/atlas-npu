@@ -1,7 +1,7 @@
 # vpu_unary_simple.S — VPU simple unary operations integration test
 # Tests: vmov, vrelu.bf16, vrecip.bf16, vsquare.bf16, vcube.bf16
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_unary_simple.py
 #
 # DRAM layout:
@@ -15,7 +15,7 @@
 # Mreg: m0,m1 = A    m4,m5 = result
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

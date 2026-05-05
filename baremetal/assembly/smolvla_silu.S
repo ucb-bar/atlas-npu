@@ -1,7 +1,7 @@
 # smolvla_silu.S — port of npu-model smolvla_silu
 # Tests: silu(x) = x / (1 + exp(-x)) on seeded random BF16 32x32 tile
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_silu.py
 #
 # Atlas has no VSILU opcode; this synthesizes silu from primitives.
@@ -23,7 +23,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 

@@ -266,7 +266,7 @@ rd, imm
 pseudo
 expands to either ADDI or LUI + ADDI
 
-`imm` must be a numeric literal accepted by `assembler.py` (`123`, `-7`, `0x90000000`, etc.).
+`imm` must be a numeric literal accepted by `assembler.py` (`123`, `-7`, `0x00000001`, etc.).
 The current assembler does not relocate symbolic labels through `LI`, so `LI x26, helper`
 is illegal even if `helper:` exists later in the file.
 

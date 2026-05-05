@@ -1,5 +1,6 @@
 # dma_8chan_burst.S — All 8 DMA channels in flight simultaneously
 # @TIMEOUT 1500000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_8chan_burst.py 42
 #
 # Exercises:
@@ -49,7 +50,7 @@
 #   m2  W transposed      m12,13 VPU result
 #   m3  bias (zero)       m4,5   MXU0 pop result
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127

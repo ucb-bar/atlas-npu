@@ -1,6 +1,6 @@
 # integ_reduction_recip_pack_branch_scalar.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_integ_reduction_recip_pack_branch_scalar.py
 #
 # Coverage intent:
@@ -33,7 +33,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     # Sizes
@@ -113,12 +113,10 @@
     DELAY 2
     BEQ   x23, x0, fail
     NOP
-    NOP
 
     # Branch coverage with a not-taken path determined by the loaded result.
     ADDI  x24, x0, 1
     BEQ   x23, x24, scalar_marker
-    NOP
     NOP
 
 after_scalar_branch:
@@ -134,14 +132,12 @@ after_scalar_branch:
 
     JAL   x0, pass
     NOP
-    NOP
 
 scalar_marker:
     # Write a disjoint scalar scratch marker, then fall through to common storeback.
     LI    x25, 0x3000
     SW    x24, x25, 0
     JAL   x0, after_scalar_branch
-    NOP
     NOP
 
 pass:

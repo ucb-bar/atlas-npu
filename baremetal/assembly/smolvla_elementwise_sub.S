@@ -1,7 +1,7 @@
 # smolvla_elementwise_sub.S — port of npu-model smolvla_elementwise_sub
 # Tests: vsub.bf16 on seeded random BF16 32x32 tiles
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_elementwise_sub.py
 #
 # DRAM layout (set by gen_smolvla_elementwise_sub.py):
@@ -17,7 +17,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 

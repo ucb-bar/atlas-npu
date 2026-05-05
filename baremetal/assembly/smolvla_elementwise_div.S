@@ -1,7 +1,7 @@
 # smolvla_elementwise_div.S — port of npu-model smolvla_elementwise_div
 # Tests: A / B = vrecip(B) * A on seeded random BF16 32x32 tiles
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_elementwise_div.py
 #
 # DRAM layout (set by gen_smolvla_elementwise_div.py):
@@ -19,7 +19,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 

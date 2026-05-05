@@ -46,7 +46,7 @@ class VpuStatus extends Bundle {
 class DmaCmd extends Bundle {
   val op       = UInt(3.W)
   val vmemAddr = UInt(32.W)
-  val addr     = UInt(32.W)
+  val addr     = UInt(64.W)
   val size     = UInt(32.W)
   val channel  = UInt(3.W)
 }

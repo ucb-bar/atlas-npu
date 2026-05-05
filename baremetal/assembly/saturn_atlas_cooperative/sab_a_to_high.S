@@ -15,7 +15,6 @@ a_busy:
     ADDI  x11, x11, 1
     BLT   x11, x10, a_busy
     NOP
-    NOP
 
     LI    x2, 0xAAAAAAAA            # marker
     ADDI  x3, x0, 0                 # VMEM byte 0
@@ -24,5 +23,4 @@ a_busy:
 
     LI    x1, 0x4000                # word index of IMEM byte 0x10000
     JALR  x0, x1, 0
-    NOP
     NOP

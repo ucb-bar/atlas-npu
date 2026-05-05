@@ -6,7 +6,7 @@
 #   packed = VFP8PACK(probs)   (atlas 2→1 phased pack, permuted layout)
 #   out    = packed @ V        (MXU1, FP8 → BF16)
 # @TIMEOUT 80000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_attention.py
 #
 # Atlas's MXU computes A @ W^T, so K and V are both XLU-transposed
@@ -44,7 +44,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

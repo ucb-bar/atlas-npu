@@ -1,6 +1,6 @@
 # xlu_fanout_branch_reuse.S
 # @TIMEOUT 600000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_xlu_fanout_branch_reuse.py
 #
 # Coverage intent:
@@ -24,7 +24,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
@@ -69,7 +69,6 @@
 
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7
-    ADDI  x30, x0, 9
 
     # Use the same transposed bank as MXU0 weight.
     VMATPUSH.W.MXU0 0, 8

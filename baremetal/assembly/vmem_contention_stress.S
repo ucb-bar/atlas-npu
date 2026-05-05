@@ -1,5 +1,6 @@
 # vmem_contention_stress.S — VMEM bank arbitration + DMA pipeline stress test
 # @TIMEOUT 1500000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vmem_contention_stress.py 42
 #
 # Exercises every VMEM contention path:
@@ -63,7 +64,7 @@
 #   0x4400  C2 lo      (1024B BF16)
 #   0x4800  C2 hi      (1024B BF16)
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127

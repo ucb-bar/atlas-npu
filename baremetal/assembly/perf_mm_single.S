@@ -1,5 +1,6 @@
 # perf_mm_single.S — single-matmul per-MXU utilization characterization
 # @TIMEOUT 200000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_perf_mm_single.py 500
 # @PERF_UTIL_THRESHOLD 5
 # @PERF_MACS_MXU0 32768
@@ -34,7 +35,7 @@
 #   0x0400  W0     (1024B FP8, 32x32)
 #   0x0800  W1     (1024B FP8, 32x32)
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127

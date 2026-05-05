@@ -24,9 +24,7 @@ _start:
     CSRR  x1, 0xC11              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
     NOP
-    NOP
     JAL   x0, phase_1
-    NOP
     NOP
 
 phase_0:
@@ -42,7 +40,6 @@ p0_loop:
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p0_loop
-    NOP
     NOP
 
     ADDI  x1, x0, 1
@@ -61,11 +58,9 @@ p1_loop:
     OR    x7, x2, x4             # expected = base | i
     BNE   x6, x7, p1_fail
     NOP
-    NOP
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p1_loop
-    NOP
     NOP
 
     ADDI  x1, x0, 2

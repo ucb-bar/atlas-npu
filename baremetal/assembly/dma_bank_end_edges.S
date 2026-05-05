@@ -1,13 +1,13 @@
 # dma_bank_end_edges.S - DMA at the last lines of every VMEM bank
 # @TIMEOUT 300000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_bank_end_edges.py
 #
 # The block-banked VMEM has 32768 words per bank. Starting at word 32736 within
 # a bank and transferring 128 bytes touches local lines 4092..4095, ending at
 # the last word in that bank without crossing into the next bank.
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 128
 

@@ -1,7 +1,7 @@
 # smolvla_rms_norm.S — port of npu-model smolvla_rms_norm
 # Tests: y = X * rsqrt(mean(X^2) + eps) on seeded random BF16 32x32 tile
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_rms_norm.py
 #
 # Atlas's VREDSUM.ROW.BF16 reduces the full 32-lane (m, m+1) pair in a
@@ -29,7 +29,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

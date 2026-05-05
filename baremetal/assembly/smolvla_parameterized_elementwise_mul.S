@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_elementwise_mul.py, but using Atlas bank-split
 # tile layout (matching stock smolvla_elementwise_mul) and a scalar tile loop.
 # @TIMEOUT 1000000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_elementwise_mul.py
 #
 # Shape: M=128, N=128 → M_tiles=4, N_tiles=4, total_tiles=16. Tile-major order.
@@ -25,7 +25,7 @@
 #
 # Register map:
 #   x2   = bank size in bytes (1024)
-#   x5   = DRAM base (0x90000000)
+#   x5   = DRAM base (0x00000001)
 #   x10  = tile_idx counter (0..total_tiles)
 #   x11  = total_tiles (4)
 #   x20  = tile_idx * 2048 (per-tile DRAM stride)
@@ -36,7 +36,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x21, 0x8000
@@ -106,8 +106,7 @@ tile_loop:
     # ── Advance ──
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP                        # delay slot 1 (always executes)
-    NOP                        # delay slot 2 (always executes)
+    NOP                        # delay slot (always executes)
 
 pass:
     ADDI  x1, x0, 1

@@ -6,6 +6,8 @@ import json
 BEAT_BYTES = 32
 WORDS_PER_BEAT = 8
 BEATS = 4
+DRAM_WINDOW_START = 0x80000000
+STORE_DRAM_OFFSET = 0x80002000
 
 
 def beat_offset(byte_off):
@@ -28,10 +30,11 @@ def make_beat(region, beat):
     ])
 
 
-def emit(entries, byte_base, region, key):
+def emit(entries, byte_base, region, key, dram_base=None):
     for beat in range(BEATS):
         entries.append({
             "word_offset": beat_offset(byte_base) + beat,
+            "dram_base": dram_base,
             key: make_beat(region, beat),
         })
 
@@ -40,10 +43,10 @@ def main():
     preloads = []
     checks = []
 
-    emit(preloads, 0x0000, 0, "data")
-    emit(preloads, 0x1000, 1, "data")
-    emit(checks, 0x2000, 0, "expected")
-    emit(checks, 0x3000, 1, "expected")
+    emit(preloads, DRAM_WINDOW_START, 0, "data", dram_base=0x00000000)
+    emit(preloads, DRAM_WINDOW_START, 1, "data", dram_base=0x00000001)
+    emit(checks,   STORE_DRAM_OFFSET, 0, "expected", dram_base=0x00000000)
+    emit(checks,   STORE_DRAM_OFFSET, 1, "expected", dram_base=0x00000001)
 
     print(json.dumps({
         "dram_preloads": preloads,

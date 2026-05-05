@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_rope_frequency.py with Atlas bank-split
 # tile layout and a scalar tile loop.
 # @TIMEOUT 1000000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_rope_frequency.py
 #
 # Shape: M=128, N=128 → 16 tiles. Tile-major order.
@@ -17,7 +17,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000          # output DRAM base
@@ -66,7 +66,6 @@ tile_loop:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP
     NOP
 
 pass:

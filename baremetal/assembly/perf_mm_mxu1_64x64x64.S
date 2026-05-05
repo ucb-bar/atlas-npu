@@ -1,5 +1,6 @@
 # perf_mm_mxu1_64x64x64.S — single-MXU (M=64, K=64, N=64) tiled matmul perf test
 # @TIMEOUT 400000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_perf_mm_mxu1_64x64x64.py 500
 # @PERF_REPORT
 # @PERF_MACS_MXU1 262144
@@ -61,7 +62,7 @@
 #   0x0800  A10     0x1800  B10_T      0x2800  C10
 #   0x0C00  A11     0x1C00  B11_T      0x2C00  C11
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127                    # scale reg 0 = 0x7F → unit scale

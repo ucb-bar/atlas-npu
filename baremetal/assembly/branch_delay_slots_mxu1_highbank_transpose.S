@@ -1,6 +1,6 @@
 # branch_delay_slots_mxu1_highbank_transpose.S
 # @TIMEOUT 250000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # Coverage intent:
 #   - Taken BEQ with VLOAD side effect in a delay slot.
@@ -29,7 +29,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
 
     LI    x10, 0           # DRAM byte offset of A
@@ -54,10 +54,9 @@
     DMA.LOAD  x21, x11, x12, 1
     DMA.WAIT  1
 
-    # Taken branch: VLOAD in the first delay slot must execute before redirect.
+    # Taken branch: the single delay-slot VLOAD must execute before redirect.
     BEQ   x0, x0, act_loaded
     VLOAD 53, x20, 0
-    NOP
     ADDI  x27, x27, 1      # must be skipped
 act_loaded:
     DELAY 40
@@ -65,10 +64,8 @@ act_loaded:
     # Not-taken branch: delay-slot VLOAD must still execute, and fallthrough must occur.
     BEQ   x0, x29, weight_taken
     VLOAD 54, x21, 0
-    NOP
     ADDI  x26, x26, 1      # must execute exactly once
     JAL   x0, weight_done
-    NOP
     NOP
 weight_taken:
     ADDI  x25, x25, 1      # must stay zero
@@ -78,7 +75,6 @@ weight_done:
     # JAL delay-slot XLU transpose into another cold upper bank.
     JAL   x1, xlu_done
     VTRPOSE.XLU 55, 54
-    NOP
     ADDI  x24, x24, 1      # must be skipped
 xlu_done:
     DELAY 80
@@ -86,7 +82,6 @@ xlu_done:
     # JAL delay-slot MXU1 weight push from the transposed bank.
     JAL   x1, push_done
     VMATPUSH.W.MXU1 0, 55
-    NOP
     ADDI  x24, x24, 1      # must be skipped
 push_done:
     DELAY 40
@@ -94,7 +89,6 @@ push_done:
     # JAL delay-slot MXU1 compute launch.
     JAL   x1, compute_done
     VMATMUL.MXU1 0, 53, 0
-    NOP
     ADDI  x24, x24, 1      # must be skipped
 compute_done:
     DELAY 120
@@ -102,7 +96,6 @@ compute_done:
     # JAL delay-slot MXU1 BF16 pop into m56/m57.
     JAL   x1, pop_done
     VMATPOP.BF16.MXU1 56, 0
-    NOP
     ADDI  x24, x24, 1      # must be skipped
 pop_done:
     DELAY 40
@@ -120,22 +113,18 @@ pop_done:
     ADDI  x28, x0, 2
     BNE   x27, x0, fail
     NOP
-    NOP
 
     ADDI  x28, x0, 3
     ADDI  x30, x0, 1
     BNE   x26, x30, fail
     NOP
-    NOP
 
     ADDI  x28, x0, 4
     BNE   x25, x0, fail
     NOP
-    NOP
 
     ADDI  x28, x0, 5
     BNE   x24, x0, fail
-    NOP
     NOP
 
 pass:

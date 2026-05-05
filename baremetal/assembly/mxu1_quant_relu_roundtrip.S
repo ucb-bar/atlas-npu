@@ -1,6 +1,6 @@
 # mxu1_quant_relu_roundtrip.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu1_quant_relu_roundtrip.py
 #
 # MXU1 -> VPU quantization bridge regression.
@@ -33,7 +33,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x12, 1024

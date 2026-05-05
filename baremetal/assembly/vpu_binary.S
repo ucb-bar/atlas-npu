@@ -1,7 +1,7 @@
 # vpu_binary.S — VPU binary operations integration test
 # Tests: vadd.bf16, vsub.bf16, vmul.bf16, vmin.bf16, vmax.bf16
 # @TIMEOUT 50000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_binary.py
 #
 # DRAM layout (set by Python generator):
@@ -22,7 +22,7 @@
     ADDI  x28, x0, 1
 
     # ── DMA config ──
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size
 

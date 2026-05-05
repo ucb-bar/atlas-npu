@@ -1,9 +1,10 @@
 # gen_mxu0_single_input_tile_bf16.S — FP8 32×32 matmul C = A @ B
 # @TIMEOUT 200000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu0_single_input_tile_bf16.py 32 42
 
     LI    x12, 1024
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG  x5, 0
 
     # Load B DRAM[1024] → VMEM[0] → TRF m4

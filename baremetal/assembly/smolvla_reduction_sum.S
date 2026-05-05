@@ -2,7 +2,7 @@
 # Tests: VREDSUM.ROW.BF16 on seeded random BF16 32x32 tile
 #   y[i,:] = broadcast(sum_{j=0..31} X[i, j])
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_reduction_sum.py
 #
 # Atlas's VREDSUM.ROW.BF16 is a one-shot pair op: it reduces all 32
@@ -20,7 +20,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

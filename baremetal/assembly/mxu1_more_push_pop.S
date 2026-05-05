@@ -1,6 +1,6 @@
 # mxu1_more_push_pop.S — VMATPUSH.ACC.BF16 + VMATPOP.FP8 with non-trivial scaling
 # @TIMEOUT 20000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu1_more_push_pop.py
 #
 # Test flow:
@@ -23,7 +23,7 @@
 #   Output:       word offsets 128..159  (1024 B, E4M3)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG  x5, 0
     LI    x2, 1024
 

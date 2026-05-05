@@ -1,6 +1,7 @@
 # mxu1_single_output_tile_bf16_k96.S — C_tile = A_tile @ B_tile + bias (K=96)
 #                                       weight double-buffer with overlap
 # @TIMEOUT 500000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu1_single_output_tile_bf16_k96.py 42 1
 #
 # K=96 (3 tiles) diagnostic variant: loop body executes exactly ONCE.
@@ -35,7 +36,7 @@
     LI    x23, 7168          # result DRAM offset (0x01C00)
     LI    x24, 1024          # result bytes per bank
     LI    x30, 1             # const 1
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG  x5, 0
 
     # Bias -> TRF 8
@@ -96,10 +97,8 @@
 tile_loop:
     BEQ   x10, x11, epilogue
     NOP
-    NOP
 
     BEQ   x29, x0, preload_for_buf1
-    NOP
     NOP
 
 preload_for_buf0:
@@ -112,7 +111,6 @@ preload_for_buf0:
     VTRPOSE.XLU 5, 4
     DELAY 80
     BEQ   x0, x0, do_matmul
-    NOP
     NOP
 
 preload_for_buf1:
@@ -139,14 +137,12 @@ do_matmul:
 
     BEQ   x29, x0, matmul_buf0
     NOP
-    NOP
 
 matmul_buf1:
     VMATMUL.ACC.MXU1  0, 0, 1
     VMATPUSH.W.MXU1   0, 5
     DELAY 40
     BEQ   x0, x0, advance
-    NOP
     NOP
 
 matmul_buf0:
@@ -157,7 +153,6 @@ matmul_buf0:
 advance:
     XOR   x29, x29, x30
     BEQ   x0, x0, tile_loop
-    NOP
     NOP
 
 epilogue:
@@ -170,12 +165,10 @@ epilogue:
 
     BEQ   x29, x0, last_buf0
     NOP
-    NOP
 
 last_buf1:
     VMATMUL.ACC.MXU1  0, 0, 1
     BEQ   x0, x0, do_pop
-    NOP
     NOP
 
 last_buf0:

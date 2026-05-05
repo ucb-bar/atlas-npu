@@ -1,6 +1,6 @@
 # dma_compute_control_serialized_pipeline.S
 # @TIMEOUT 800000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_compute_control_serialized_pipeline.py
 #
 # Coverage intent:
@@ -22,7 +22,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x2, 0              # loop counter
@@ -34,7 +34,6 @@
 
 loop:
     BEQ   x2, x3, done
-    NOP
     NOP
 
     ADDI  x6, x0, 0
@@ -63,12 +62,10 @@ loop:
 
     BLT   x21, x0, use_mov
     ADDI  x29, x0, 3
-    ADDI  x30, x0, 4
 
     VRELU 4, 2
     DELAY 150
     JAL   x0, store_iter
-    NOP
     NOP
 
 use_mov:
@@ -90,7 +87,6 @@ store_iter:
     ADD   x17, x17, x18
     ADDI  x2, x2, 1
     JAL   x0, loop
-    NOP
     NOP
 
 done:

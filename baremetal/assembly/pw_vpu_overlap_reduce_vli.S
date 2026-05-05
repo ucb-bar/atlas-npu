@@ -5,7 +5,7 @@
 # because the current FSM never accepts them into the overlap slot.
 # Cases in this file: 168
 # @TIMEOUT 600000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_pw_vpu_overlap_reduce_vli.py
 #
 # DRAM inputs:
@@ -19,7 +19,7 @@
 #   slot1 low, slot1 high, slot2 low, slot2 high
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x21, 64

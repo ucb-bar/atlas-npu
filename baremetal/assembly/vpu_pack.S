@@ -1,7 +1,7 @@
 # vpu_pack.S — VPU FP8 pack/unpack integration test
 # Tests: vfp8pack, vfp8unpack with non-trivial scaling
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_pack.py
 #
 # Pack quantizes BF16 → FP8, unpack dequantizes FP8 → BF16.
@@ -27,7 +27,7 @@
 # Mreg: m0,m1 = input BF16    m4 = packed FP8    m8,m9 = unpacked BF16
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

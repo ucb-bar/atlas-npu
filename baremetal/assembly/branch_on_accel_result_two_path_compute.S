@@ -1,6 +1,6 @@
 # branch_on_accel_result_two_path_compute.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_branch_on_accel_result_two_path_compute.py
 #
 # Coverage intent:
@@ -24,7 +24,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 2048
 
@@ -66,13 +66,11 @@
     # Generator makes row 0 sum positive, so branch to relu_path is deterministic.
     BLT   x21, x0, neg_path
     ADDI  x29, x0, 1         # delay-slot marker only
-    ADDI  x30, x0, 2         # delay-slot marker only
 
 relu_path:
     VRELU 4, 2
     DELAY 150
     JAL   x0, store_final
-    NOP
     NOP
 
 neg_path:

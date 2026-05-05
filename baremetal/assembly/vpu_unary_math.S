@@ -1,7 +1,7 @@
 # vpu_unary_math.S — VPU transcendental / math unary ops
 # Tests: vexp, vexp2, vsin, vcos, vtanh, vlog2, vsqrt
 # @TIMEOUT 60000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_unary_math.py
 #
 # DRAM layout:
@@ -15,7 +15,7 @@
 #   [0x3800..0x3FFF]  vsqrt output       (2048 B)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

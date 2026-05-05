@@ -503,7 +503,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.dmaCmd.valid         := is_dma_launch
   io.dmaCmd.bits.op       := dec.dma_cmd
   io.dmaCmd.bits.vmemAddr := Mux(isDmaLoad, rd_data, rs1_data)
-  io.dmaCmd.bits.addr     := Mux(isDmaLoad, rs1_data + dmaBaseReg, rd_data + dmaBaseReg)
+  io.dmaCmd.bits.addr     := Mux(isDmaLoad, Cat(dmaBaseReg, rs1_data), Cat(dmaBaseReg, rd_data))
   io.dmaCmd.bits.size     := rs2_data
   io.dmaCmd.bits.channel  := dec.funct3
 

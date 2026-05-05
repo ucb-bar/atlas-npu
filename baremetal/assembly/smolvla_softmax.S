@@ -2,7 +2,7 @@
 # Tests: row-wise stable softmax on seeded random BF16 32x32 tile
 #   y = exp(X - rowmax(X)) / rowsum(exp(...))
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_softmax.py
 #
 # Atlas's VREDMAX.ROW / VREDSUM.ROW reduce the full 32-lane (m, m+1)
@@ -22,7 +22,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

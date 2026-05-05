@@ -1,12 +1,12 @@
 # branch_accel_delay_slots_dma_vpu_xlu.S
 # @TIMEOUT 400000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # Coverage intent:
-#   - Control-flow with architecturally visible accelerator side effects in delay slots.
-#   - DMA side effects from branch delay slots (launch + wait on a taken BEQ).
-#   - VLI + XLU side effects from not-taken BNE delay slots.
-#   - VSTORE side effect from a JAL delay slot, proving delay slots execute before transfer.
+#   - Control-flow with architecturally visible accelerator side effects in one delay slot.
+#   - DMA launch from a taken-BEQ delay slot, with completion waited on after redirect.
+#   - VLI + XLU side effects from a not-taken BNE with a single delay-slot write.
+#   - VSTORE side effect from a JAL delay slot, proving the slot executes before transfer.
 #   - End-to-end dataflow closed through DMA load/store and exact generator comparison.
 #
 # DRAM byte layout (generator-backed):
@@ -15,24 +15,24 @@
 #   [0x0800 .. 0x0BFF]  DRAM result of BNE-delay-slot XLU transpose    (1024 B)
 #
 # VMEM layout:
-#   word 0    / byte    0  : FP8 staging tile loaded by BEQ delay slots
+#   word 0    / byte    0  : FP8 staging tile loaded by the BEQ delay slot
 #   word 256  / byte 1024  : JAL-delay-slot VSTORE output
 #   word 512  / byte 2048  : BNE-delay-slot XLU-transpose output
 #
 # MREG allocation:
-#   m20  = FP8 tile loaded by DMA in BEQ delay slots
+#   m20  = FP8 tile loaded by DMA in the BEQ delay slot
 #   m24  = VLI.COL-written source bank for XLU
 #   m25  = XLU transpose destination
 #
 # Key scheduling fix vs. prior failing version:
-#   - VLI.COL writes m24. The immediately-following VTRPOSE.XLU 25,24 in the second
-#     branch delay slot read m24 while its write was still pending, tripping the
-#     ScalarCore MREG RAW hazard assertion. Keep VLI.COL in the BNE delay slot, then
-#     issue VTRPOSE.XLU only after a conservative VPU completion delay in fallthrough.
+#   - VLI.COL writes m24. An immediately-following VTRPOSE.XLU 25,24 after the branch
+#     read m24 while its write was still pending, tripping the ScalarCore MREG RAW
+#     hazard assertion. Keep VLI.COL in the BNE delay slot, then issue VTRPOSE.XLU
+#     only after a conservative VPU completion delay in fallthrough.
 #
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x8, 1024          # common 1 KiB transfer size
@@ -48,31 +48,27 @@
     LI    x12, 2048         # output tile 1
 
 # ----------------------------------------------------------------------
-# Case 1: taken BEQ; both delay slots must execute before redirect.
-# Delay slot 1 launches DMA.LOAD, delay slot 2 waits for completion.
+# Case 1: taken BEQ; the single delay slot launches DMA.LOAD.
+# The redirect target then waits for completion before consuming the data.
 # ----------------------------------------------------------------------
     BEQ   x0, x0, beq_target
     DMA.LOAD x6, x7, x8, 0
-    DMA.WAIT 0
 
     ADDI  x28, x0, 101
     JAL   x0, fail
     NOP
-    NOP
 
 beq_target:
+    DMA.WAIT 0
     VLOAD 20, x6, 0         # m20 <- loaded FP8 tile
     DELAY 40
 
 # ----------------------------------------------------------------------
-# Case 2: not-taken BNE; both delay slots still execute.
-# Delay slot 1 writes m24 with a column-immediate pattern.
-# Delay slot 2 is an independent NOP to preserve legal delay-slot behavior.
+# Case 2: not-taken BNE; the single delay slot writes m24 with a column-immediate pattern.
 # Fallthrough then waits for VLI completion before issuing XLU transpose.
 # ----------------------------------------------------------------------
     BNE   x0, x0, bne_unreached
     VLI.COL 24, 0x3F80
-    NOP
 
     DELAY 150
     VTRPOSE.XLU 25, 24
@@ -83,34 +79,29 @@ beq_target:
     DMA.WAIT 1
     JAL   x0, after_bne_case
     NOP
-    NOP
 
 bne_unreached:
     ADDI  x28, x0, 102
     JAL   x0, fail
     NOP
-    NOP
 
 after_bne_case:
 # ----------------------------------------------------------------------
-# Case 3: JAL helper; delay slots execute before control enters helper.
-# Delay slot 1 VSTOREs m20 to VMEM word 256, which helper then DMA.STOREs.
-# Delay slot 2 provides the conservative VSTORE completion wait before helper reads VMEM.
+# Case 3: JAL helper; the single delay slot VSTOREs m20 to VMEM word 256,
+# and helper then waits conservatively before DMA.STORE reads VMEM.
 # ----------------------------------------------------------------------
     JAL   x1, helper_store
     VSTORE 20, x9, 0
-    DELAY 40
 
     JAL   x0, pass
-    NOP
     NOP
 
 helper_store:
 helper_body:
+    DELAY 40
     DMA.STORE x11, x9, x8, 2
     DMA.WAIT 2
     JALR  x0, x1, 0
-    NOP
     NOP
 
 pass:

@@ -17,7 +17,7 @@
 #                      (host accesses Saturn region via SBUS at
 #                       ATLAS_VMEM_BASE + 0x60800)
 #
-# DRAM (DMA base 0x90000000):
+# DRAM (DMA base 0x00000001):
 #   IN  tile at 0x0000 (1024 B, fixed pattern from generator)
 #   OUT tile at 0x1000 (1024 B, expected = IN after echo)
 #
@@ -38,7 +38,7 @@
 # The Saturn sub-region is untouched by Atlas; the host driver runs an
 # RVV stride-1 sweep over it during the same window.
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024              # transfer size
 
@@ -85,11 +85,9 @@ loop:
     ADDI  x11, x11, 1
     BLT   x11, x13, loop
     NOP
-    NOP
 
     ADDI  x26, x26, 1
     BLT   x26, x27, outer
-    NOP
     NOP
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────

@@ -330,19 +330,17 @@
 # ================================================================
 #  7. BRANCH TESTS
 # ================================================================
-# Architecture has 2 delay slots.
+# Architecture has 1 delay slot.
 #
 # Taken test pattern (branch skips the fail marker):
 #   BXX  x1, x2, target       # +4 words to target
-#   NOP                       # delay slot 1
-#   NOP                       # delay slot 2
+#   NOP                       # delay slot
 #   ORI  x3, x3, 1            # fail marker (skipped if taken)
 #   target:  OR x30, x30, x3  # x3 must be 0
 #
 # Not-taken test pattern:
 #   BXX  x1, x2, target       # +4 words to target
-#   NOP                       # delay slot 1
-#   NOP                       # delay slot 2
+#   NOP                       # delay slot
 #   ORI  x3, x3, 1            # expected (x3 = 1)
 #   target:  (check x3 == 1)
 
@@ -351,7 +349,6 @@
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BLT     x1, x2, blt_t
-    NOP
     NOP
     ORI     x3, x3, 1
 blt_t:
@@ -362,7 +359,6 @@ blt_t:
     ADDI    x2, x0, -5
     ADDI    x3, x0, 0
     BLT     x1, x2, blt_n
-    NOP
     NOP
     ORI     x3, x3, 1
 blt_n:
@@ -376,7 +372,6 @@ blt_n:
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_t
     NOP
-    NOP
     ORI     x3, x3, 1
 bge_t:
     OR      x30, x30, x3
@@ -387,7 +382,6 @@ bge_t:
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_eq
     NOP
-    NOP
     ORI     x3, x3, 1
 bge_eq:
     OR      x30, x30, x3
@@ -397,7 +391,6 @@ bge_eq:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_n
-    NOP
     NOP
     ORI     x3, x3, 1
 bge_n:
@@ -411,7 +404,6 @@ bge_n:
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_t
     NOP
-    NOP
     ORI     x3, x3, 1
 bltu_t:
     OR      x30, x30, x3
@@ -421,7 +413,6 @@ bltu_t:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_n
-    NOP
     NOP
     ORI     x3, x3, 1
 bltu_n:
@@ -435,7 +426,6 @@ bltu_n:
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_e
     NOP
-    NOP
     ORI     x3, x3, 1
 bltu_e:
     OR      x30, x30, x3
@@ -445,7 +435,6 @@ bltu_e:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_t
-    NOP
     NOP
     ORI     x3, x3, 1
 bgeu_t:
@@ -457,7 +446,6 @@ bgeu_t:
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_eq
     NOP
-    NOP
     ORI     x3, x3, 1
 bgeu_eq:
     OR      x30, x30, x3
@@ -467,7 +455,6 @@ bgeu_eq:
     ADDI    x2, x0, 10
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_n
-    NOP
     NOP
     ORI     x3, x3, 1
 bgeu_n:
@@ -480,7 +467,6 @@ bgeu_n:
     ADDI    x2, x0, 1
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_e
-    NOP
     NOP
     ORI     x3, x3, 1
 bgeu_e:
@@ -501,13 +487,11 @@ bgeu_e:
     # We branch over it so it never executes in the main flow.
     BEQ     x0, x0, ecall_skip      # always taken (0 == 0)
     NOP
-    NOP
     ECALL                            # never reached; proves encoding accepted
 ecall_skip:
 
     # Verify EBREAK encoding similarly.
     BEQ     x0, x0, ebreak_skip     # always taken
-    NOP
     NOP
     EBREAK                           # never reached; proves encoding accepted
 ebreak_skip:
@@ -519,7 +503,6 @@ ebreak_skip:
 # x30 != 0 → some test failed → write x30 to DBG0 (nonzero, != 1)
 
     BEQ     x30, x0, all_pass
-    NOP
     NOP
     # ── FAIL path ──
     CSRW    x30, 0xC10              # DBG0 = fail flags (nonzero != 1)

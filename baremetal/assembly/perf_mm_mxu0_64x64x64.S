@@ -1,5 +1,6 @@
 # perf_mm_mxu0_64x64x64.S — single-MXU (M=64, K=64, N=64) tiled matmul perf test
 # @TIMEOUT 400000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_perf_mm_mxu0_64x64x64.py 500
 # @PERF_REPORT
 # @PERF_MACS_MXU0 262144
@@ -70,13 +71,13 @@
 #   0x2C00  C11
 #
 # Register usage:
-#   x5  DMA DRAM base (0x90000000)   x12  DMA size (1024 B/tile)
+#   x5  DMA DRAM base (0x00000001)   x12  DMA size (1024 B/tile)
 #   x6  VMEM input staging offset    x10  DRAM offset (scratch)
 #   x8  VMEM output staging offset   x3   DRAM offset for writeback
 #   x20 start-cycle snapshot         x21  end-cycle snapshot
 #   x22 cycle delta (→ CSR_DBG1)     x30  completion signal
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127                    # scale reg 0 = 0x7F → unit scale

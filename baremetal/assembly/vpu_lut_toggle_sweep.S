@@ -1,6 +1,6 @@
 # vpu_lut_toggle_sweep.S — mantissa/exponent-diverse VPU unary math sweep
 # @TIMEOUT 200000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_lut_toggle_sweep.py
 #
 # Coverage intent (directly targets atlasTile_coverage_report.md findings):
@@ -43,7 +43,7 @@
 #   m4,m5  VPU result pair
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 2048           # 2 KiB per tile / output
     LI    x3, 2048           # same, used for DMA.STOREs

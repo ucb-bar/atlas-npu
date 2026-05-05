@@ -2,7 +2,7 @@
 # Tests: BF16 → FP8 unit-scale cast on seeded random 32x32 tile
 #   y = cast_bf16_to_e4m3(X)
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_requant.py
 #
 # VFP8PACK consumes a BF16 (m, m+1) pair and emits a single FP8 mreg
@@ -19,7 +19,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

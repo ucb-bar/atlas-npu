@@ -1,6 +1,6 @@
 # dma_overlap.S — Multiple in-flight DMA transfers with early/late waits
 # @TIMEOUT 20000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_overlap.py
 #
 # Tests three scenarios:
@@ -35,7 +35,7 @@
 #   Output C:  word offsets 160..191  (1024 B, expect 0xCC)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG  x5, 0
     DMA.CONFIG  x5, 1
     DMA.CONFIG  x5, 2

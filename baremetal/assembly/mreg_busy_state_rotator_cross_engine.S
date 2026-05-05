@@ -1,6 +1,6 @@
 # mreg_busy_state_rotator_cross_engine.S
 # @TIMEOUT 700000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mreg_busy_state_rotator_cross_engine.py
 #
 # Coverage intent:
@@ -24,7 +24,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
 

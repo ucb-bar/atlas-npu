@@ -1,6 +1,6 @@
 # dma_lsu_stall_mixed.S - DMA mixed directions under repeated LSU grant stalls
 # @TIMEOUT 800000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_lsu_stall_mixed.py
 #
 # Baremetal cannot force TileLink D-channel reordering; that needs a harness or
@@ -11,7 +11,7 @@
 #   - scalar loads repeatedly hit the same banks as DMA STORE VMEM reads
 #   - final checks prove both load-data and store-data slots retire correctly
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
@@ -112,7 +112,6 @@ lsu_stall_loop:
 
     ADDI  x18, x18, -1
     BNE   x18, x0, lsu_stall_loop
-    NOP
     NOP
 
     DMA.WAIT  0
