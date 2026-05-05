@@ -2,7 +2,7 @@
 # Tests: GELU (tanh approx) on seeded random BF16 32x32 tile
 #   y = 0.5 * X * (1 + tanh(sqrt(2/pi) * (X + 0.044715 * X^3)))
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_gelu_tanh.py
 #
 # Differs from npu-model's program: uses VLI.ALL constants instead of
@@ -22,7 +22,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

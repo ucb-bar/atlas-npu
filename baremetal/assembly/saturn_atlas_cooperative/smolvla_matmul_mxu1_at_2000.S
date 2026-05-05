@@ -9,7 +9,7 @@
 # VMEM offsets are unchanged.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # DRAM layout:
 #   [0x2000..0x23FF]  A FP8 (32×32)             (1024 B)
@@ -21,7 +21,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

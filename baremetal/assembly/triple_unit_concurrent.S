@@ -1,5 +1,6 @@
 # triple_unit_concurrent.S — MXU0 + MXU1 + VPU concurrent execution
 # @TIMEOUT 500000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_triple_unit_concurrent.py 777
 #
 # Three independent functional units compute simultaneously:
@@ -61,7 +62,7 @@
 #   0x4400  sum bank0    (1024B BF16) — VPU vadd(C0,C1) lanes 0-15
 #   0x4800  sum bank1    (1024B BF16) — VPU vadd(C0,C1) lanes 16-31
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127          # scale reg 0 — identity E8M0

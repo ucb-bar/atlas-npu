@@ -5,13 +5,12 @@ Program counter control for the scalar pipeline frontend.
 The PC is a word index (not byte address) starting at 0.
 It directly addresses IMEM words. Increments by 1 per cycle.
 
-Implements 2 architectural delay slots:
+Implements 1 architectural delay slot:
   Cycle N  : branch/jump evaluated in execute (at branch_pc).
-             Instruction at branch_pc+1 is in-flight (delay slot 1).
-  Cycle N+1: delay slot 1 executes. Fetch PC advances to branch_pc+2
-             (delay slot 2).
-  Cycle N+2: delay slot 2 executes. Fetch redirects to target.
-  Cycle N+3: target instruction executes.
+             Instruction at branch_pc+1 is already in-flight (delay slot).
+             Fetch redirects to the target for the next cycle.
+  Cycle N+1: delay slot executes. Target instruction is in-flight.
+  Cycle N+2: target instruction executes.
 */
 
 package atlas.scalar
@@ -40,15 +39,13 @@ class PcControl(resetPC: Int = 0) extends Module {
   val fetch_pc_reg = RegInit(resetPC.U(32.W))
   val s1_valid_reg = RegInit(false.B)
 
-  // 2-deep delay slot counter: 0=normal, 2=first slot pending, 1=second slot pending
-  val delay_count  = RegInit(0.U(2.W))
-  val saved_target = Reg(UInt(32.W))
+  val delay_slot_pending = RegInit(false.B)
 
   when(io.restart) {
     pc_reg        := resetPC.U
     fetch_pc_reg  := resetPC.U
     s1_valid_reg  := false.B
-    delay_count   := 0.U
+    delay_slot_pending := false.B
   }.elsewhen(io.halted) {
     s1_valid_reg := false.B
   }.elsewhen(io.stall) {
@@ -60,22 +57,16 @@ class PcControl(resetPC: Int = 0) extends Module {
     s1_valid_reg := true.B
     fetch_pc_reg := pc_reg
 
-    when(io.redirect && delay_count === 0.U) {
-      // Branch evaluated. The in-flight fetch (pc_reg) is delay slot 1.
-      // Advance to fetch delay slot 2.
-      saved_target := io.redirect_target
-      delay_count  := 2.U
-      pc_reg       := pc_reg + 1.U
-    }.elsewhen(delay_count === 2.U) {
-      // Delay slot 1 now in execute. Delay slot 2 in-flight (at pc_reg).
-      // Redirect fetch to target so it arrives after delay slot 2.
-      delay_count := 1.U
-      pc_reg      := saved_target
-    }.elsewhen(delay_count === 1.U) {
-      // Delay slot 2 now in execute. Target in-flight (at saved_target).
-      // Resume normal sequential execution from target.
-      delay_count := 0.U
-      pc_reg      := pc_reg + 1.U
+    when(io.redirect && !delay_slot_pending) {
+      // Branch evaluated. The in-flight fetch (pc_reg) is the only
+      // architecturally visible delay slot, so start fetching the target now.
+      delay_slot_pending := true.B
+      pc_reg             := io.redirect_target
+    }.elsewhen(delay_slot_pending) {
+      // The delay-slot instruction is now in execute and the branch target is
+      // in-flight, so resume sequential fetch from target+1.
+      delay_slot_pending := false.B
+      pc_reg             := pc_reg + 1.U
     }.otherwise {
       pc_reg := pc_reg + 1.U
     }
@@ -84,5 +75,5 @@ class PcControl(resetPC: Int = 0) extends Module {
   io.pc            := pc_reg
   io.s1_pc         := fetch_pc_reg
   io.s1_valid      := s1_valid_reg
-  io.in_delay_slot := delay_count =/= 0.U
+  io.in_delay_slot := delay_slot_pending
 }

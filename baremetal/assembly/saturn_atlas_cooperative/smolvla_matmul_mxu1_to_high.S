@@ -5,13 +5,13 @@
 # a word-indexed JALR to byte 0x10000 (word 0x4000) so the next kernel staged
 # into the upper IMEM half runs without halting.
 #
-# Used by tests/saturn_atlas_quad_phase_large.c. Atlas has 2-cycle delay slots
-# after JAL/JALR (PcControl.scala); the two NOPs after JALR absorb them. The
+# Used by tests/saturn_atlas_quad_phase_large.c. Atlas has 1 delay slot
+# after JAL/JALR (PcControl.scala); the NOP after JALR absorbs it. The
 # fail: ECALL block is dead code (no branches into it), retained as a safety
 # net in case a later edit adds an explicit jump to fail:.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # DRAM layout (same as smolvla_matmul_mxu1):
 #   [0x0000..0x03FF]  A FP8 (32×32)             (1024 B)
@@ -23,7 +23,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
@@ -78,10 +78,9 @@
 
 to_high:
     # Hop to the kernel staged at byte 0x10000 (word 0x4000) without halting.
-    # Two NOP delay slots cover Atlas's 2-cycle JAL/JALR latency.
+    # One NOP delay slot covers Atlas's JAL/JALR latency.
     LI    x1, 0x4000
     JALR  x0, x1, 0
-    NOP
     NOP
 
 fail:

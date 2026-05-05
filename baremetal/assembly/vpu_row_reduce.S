@@ -1,7 +1,7 @@
 # vpu_row_reduce.S — VPU row (lane) reduction ops
 # Tests: vredsum.row.bf16, vredmin.row.bf16, vredmax.row.bf16
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_row_reduce.py
 #
 # Row reductions reduce over the full BF16 tensor-register pair for each row:
@@ -19,7 +19,7 @@
 #   [0x1800..0x1FFF]  vredmax.row output      (2048 B)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

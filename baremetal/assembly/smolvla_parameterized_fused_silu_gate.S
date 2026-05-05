@@ -5,7 +5,7 @@
 # smolvla_parameterized_silu.S. See stock smolvla_fused_silu_gate.S for
 # the same naming-misnomer explanation.
 # @TIMEOUT 2000000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_fused_silu_gate.py
 #
 # Shape: M=128, N=128 → 16 tiles.
@@ -21,7 +21,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000
@@ -84,7 +84,6 @@ tile_loop:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP
     NOP
 
 pass:

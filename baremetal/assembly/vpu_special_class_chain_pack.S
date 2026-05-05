@@ -1,6 +1,6 @@
 # vpu_special_class_chain_pack.S
 # @TIMEOUT 300000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_special_class_chain_pack.py
 #
 # Coverage intent:
@@ -32,7 +32,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x12, 2048              # BF16 tensor-pair bytes

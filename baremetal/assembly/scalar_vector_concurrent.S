@@ -1,5 +1,6 @@
 # scalar_vector_concurrent.S — safe scalar/vector overlap on block-banked VMEM
 # @TIMEOUT 800000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_scalar_vector_concurrent.py 42
 #
 # VMEM is 8-bank block-banked in 128 KiB chunks, so each aligned 1 KiB tensor
@@ -23,7 +24,7 @@
 #   stage2   word 196608  byte 786432   bank 6
 #   stage3   word 229376  byte 917504   bank 7
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127

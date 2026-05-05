@@ -23,7 +23,7 @@
 #   ch6 → word 196608     (bank 6)
 #   ch7 → word 256        (bank 0, slot 1)
 #
-# DRAM (DMA base 0x90000000):
+# DRAM (DMA base 0x00000001):
 #   IN  tiles  at 0x0000, 0x0400, ..., 0x1C00 (8 × 1024 B)
 #   OUT tiles  at 0x2000, 0x2400, ..., 0x3C00 (8 × 1024 B, expected = IN)
 #
@@ -34,7 +34,7 @@
 #
 # End: dbg0 = 1, halt_reason = ECALL.
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024            # transfer size
 
@@ -155,7 +155,6 @@ round_loop:
     # Outer round loop counter.
     ADDI  x28, x28, 1
     BLT   x28, x29, round_loop
-    NOP
     NOP
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────

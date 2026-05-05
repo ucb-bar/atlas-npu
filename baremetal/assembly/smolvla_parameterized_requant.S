@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_requant.py. Same VFP8PACK semantics as
 # stock smolvla_requant (E8M0 scale 0x7F = 2^0, SELI hoisted out of loop).
 # @TIMEOUT 1000000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_requant.py
 #
 # Input X is BF16 2048 B per tile (2 banks); packed output is FP8 1024 B
@@ -17,7 +17,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000          # output DRAM base (FP8)
@@ -64,7 +64,6 @@ tile_loop:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP
     NOP
 
 pass:

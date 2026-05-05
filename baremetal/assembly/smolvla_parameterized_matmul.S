@@ -15,7 +15,7 @@
 # depending on which engine ran that tile.
 #
 # @TIMEOUT 400000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_matmul.py
 #
 # Shape: M=64, K=32, N=64 → M_tiles=2, N_tiles=2, K_tiles=1.
@@ -35,7 +35,7 @@
 #   [768..1023]  C cols 16-31 (BF16, m3)
 #
 # Register map:
-#   x2   = 1024 (tile size bytes)     x5  = 0x90000000 (DRAM base)
+#   x2   = 1024 (tile size bytes)     x5  = 0x00000001 (DRAM base)
 #   x10  = output_tile_idx (0..3)     x11 = 4 (total output tiles)
 #   x12  = m_tile (idx >> 1)          x13 = n_tile (idx & 1)
 #   x16  = C DRAM offset scratch      x17 = 0x2000 (C DRAM base)
@@ -45,7 +45,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x25, 0x1000
@@ -89,7 +89,6 @@ output_tile_loop:
     # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
     BNE   x13, x0, matmul_mxu1
     NOP
-    NOP
 
     # ── MXU0 path: push weight + matmul + pop ──
     VMATPUSH.W.MXU0 0, 5
@@ -99,7 +98,6 @@ output_tile_loop:
     VMATPOP.BF16.MXU0 2, 0
     DELAY 40
     BEQ   x0, x0, matmul_done
-    NOP
     NOP
 
 matmul_mxu1:
@@ -140,7 +138,6 @@ matmul_done:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, output_tile_loop
-    NOP
     NOP
 
 pass:

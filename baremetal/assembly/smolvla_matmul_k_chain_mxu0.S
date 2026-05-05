@@ -3,7 +3,7 @@
 #   C[32,32] = A[:,0:32]  @ B[0:32,:]      (VMATMUL.MXU0     → reset acc)
 #            + A[:,32:64] @ B[32:64,:]     (VMATMUL.ACC.MXU0 → accumulate)
 # @TIMEOUT 40000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_matmul_k_chain_mxu0.py
 #
 # Each B tile is XLU-transposed before being pushed to the weight slot
@@ -24,7 +24,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

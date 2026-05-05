@@ -3,7 +3,7 @@
 # (Jeremy's constraint); M scales via a tile loop. Reduction is local to
 # each 32-row group, so no cross-tile helper is needed.
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_reduction_sum.py
 #
 # Shape: M=512, N=32 → 16 groups of 32x32. Tile-major DRAM order.
@@ -22,7 +22,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000
@@ -71,7 +71,6 @@ tile_loop:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP
     NOP
 
 pass:

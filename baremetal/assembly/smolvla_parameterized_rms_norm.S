@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_rms_norm.py. N fixed at 32; M scales via
 # tile loop. Each 32-row group is independent. VLI constants hoisted.
 # @TIMEOUT 2500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_parameterized_rms_norm.py
 #
 # Shape: M=512, N=32 → 16 groups.
@@ -27,7 +27,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000
@@ -94,7 +94,6 @@ tile_loop:
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP
     NOP
 
 pass:

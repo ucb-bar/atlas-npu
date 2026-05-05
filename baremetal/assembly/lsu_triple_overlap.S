@@ -1,5 +1,6 @@
 # lsu_triple_overlap.S — scalar + VLOAD + VSTORE overlap on split LSU paths
 # @TIMEOUT 200000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_lsu_triple_overlap.py
 #
 # This test exercises two overlap windows without any inter-vector waits:
@@ -22,7 +23,7 @@
 #   out_load_2        131328 / 525312      bank 4 slot 1
 #   scalar_load_out   229632 / 918528      bank 7 slot 1
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
 

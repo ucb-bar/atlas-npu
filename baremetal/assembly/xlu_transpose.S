@@ -1,6 +1,6 @@
 # xlu_transpose.S — XLU transpose with functional correctness checks
 # @TIMEOUT 20000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # VMEM layout: tile 0 at word 0, tile 1 at word 256
 
@@ -71,7 +71,7 @@
 # @CHECK_DRAM 63 0x0000000000000000000000000000000000000000000000000000000041312111
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG  x5, 0
     LI    x2, 1024           # tile bytes
 

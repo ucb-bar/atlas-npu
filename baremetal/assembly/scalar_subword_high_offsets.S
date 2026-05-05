@@ -1,6 +1,6 @@
 # scalar_subword_high_offsets.S - high-offset scalar byte masks/sign extension
 # @TIMEOUT 10000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_scalar_subword_high_offsets.py
 #
 # mem_scalar.S covers sub-word loads/stores near byte 0. This test targets the
@@ -9,7 +9,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 32
 
@@ -30,12 +30,10 @@
     LI    x30, 0x81
     BNE   x9, x30, fail
     NOP
-    NOP
     LB    x9, x8, 31
     DELAY 2
     LI    x30, 0xFFFFFF81
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1
 
@@ -48,7 +46,6 @@
     LI    x30, 0x7F80
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1
 
 # Halfword at byte 26: negative sign bit.
@@ -60,12 +57,10 @@
     LI    x30, 0xFFFF8001
     BNE   x9, x30, fail
     NOP
-    NOP
     LHU   x9, x8, 26
     DELAY 2
     LI    x30, 0x8001
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1
 
@@ -77,7 +72,6 @@
     DELAY 2
     LI    x30, 0xA1B2C3D4
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1
 

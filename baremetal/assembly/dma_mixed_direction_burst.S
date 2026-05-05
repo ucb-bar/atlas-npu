@@ -1,13 +1,13 @@
 # dma_mixed_direction_burst.S - queue DMA loads and stores in the same burst
 # @TIMEOUT 400000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dma_mixed_direction_burst.py
 #
 # This exercises source-ID metadata with both response directions live:
 # AccessAckData beats from LOADs and AccessAck beats from STOREs can overlap
 # once the memory system has outstanding work from both command types.
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 256
 

@@ -1,5 +1,6 @@
 # mxu0_qk_scores.S — Q=X@WQ+bias, K=X@WK+bias, scores=Q@K^T  (all overlaps)
 # @TIMEOUT 300000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu0_qk_scores.py 900
 #
 # Overlap patterns demonstrated:
@@ -56,7 +57,7 @@
 #   0x4400  scores result hi (1024B)
 #   0x4800  zero bias FP8    (1024B, all 0x00)
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     LI    x15, 1024

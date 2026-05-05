@@ -1,5 +1,6 @@
 # dual_mxu_pipeline_vpu.S — MXU0 + MXU1 pipelined K=64, VPU interleaved
 # @TIMEOUT 800000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_dual_mxu_pipeline_vpu.py 500
 #
 # Both MXUs perform 2-k-tile (K=64) matmuls with weight double-buffering
@@ -70,7 +71,7 @@
 #   0x4C00  diff bank0     (1024B BF16) — vsub(C0,C1)
 #   0x5000  diff bank1     (1024B BF16)
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127

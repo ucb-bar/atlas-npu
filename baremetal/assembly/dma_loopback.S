@@ -1,6 +1,6 @@
 # dma_loopback.S — DMA load + store roundtrip via VMEM
 # @TIMEOUT 5000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # DMA.LOAD  x_vmem, x_dram_off, x_size, ch  → DRAM[base+x_dram_off] → VMEM[x_vmem]
 # DMA.STORE x_dram_off, x_vmem, x_size, ch  → VMEM[x_vmem] → DRAM[base+x_dram_off]
@@ -17,7 +17,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG  x5, 0
 
     ADDI  x6, x0, 0         # VMEM word address = 0

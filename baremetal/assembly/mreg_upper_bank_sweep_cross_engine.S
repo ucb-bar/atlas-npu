@@ -1,6 +1,6 @@
 # mreg_upper_bank_sweep_cross_engine.S — upper-bank MREG sweep across DMA, XLU, MXU1, and VPU
 # @TIMEOUT 500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mreg_upper_bank_sweep_cross_engine.py
 #
 # Coverage intent:
@@ -34,7 +34,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x2, 1024            # common 1 KiB DMA size
@@ -43,11 +43,9 @@
     # Conservative branch-delay-slot sanity case with accelerator-independent work.
     ADDI  x20, x0, 0
     BEQ   x0, x0, setup_done
-    ADDI  x20, x20, 1
-    ADDI  x20, x20, 2
+    ADDI  x20, x20, 3
     ADDI  x21, x0, 3
     BNE   x20, x21, fail
-    NOP
     NOP
     ADDI  x28, x28, 1
 

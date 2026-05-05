@@ -1,5 +1,6 @@
 # mxu_chain_vpu_reduce.S — MXU0→FP8→MXU1 chain + VPU post-process
 # @TIMEOUT 1000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mxu_chain_vpu_reduce.py 333
 #
 # Attention-like pipeline exercising all three functional units:
@@ -58,7 +59,7 @@
 #   0x4000  biased b0  (1024B BF16) — vadd(scores, bias_vpu)
 #   0x4400  biased b1  (1024B BF16)
 
-    LI    x5,  0x90000000
+    LI    x5,  0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127          # identity scale for FP8 pops

@@ -1,6 +1,6 @@
 # mreg_tracker_full_sweep.S — sweep every MREG bank as both a read and write
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_mreg_tracker_full_sweep.py
 #
 # Coverage intent:
@@ -49,7 +49,7 @@
 #                      bank, in bank-index order (64 KiB = 64 * 1 KiB)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x12, 1024             # 1 KiB tile size
 

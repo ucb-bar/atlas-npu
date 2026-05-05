@@ -1,6 +1,6 @@
 # integ_bank_sweep_vpu_relu_dma.S — VMEM bank/address sweep with DMA, VPU, and scalar LSU
 # @TIMEOUT 800000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_integ_bank_sweep_vpu_relu_dma.py
 #
 # Coverage intent:
@@ -41,7 +41,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x29, 0x7000        # scratch byte base
@@ -83,20 +83,17 @@
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LHU   x20, x29, 2
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LW    x20, x29, 4
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
     NOP
 
     LI    x11, 0x2000        # output DRAM byte offset
@@ -130,20 +127,17 @@
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LHU   x20, x29, 2
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LW    x20, x29, 4
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
     NOP
 
     LI    x11, 0x2800
@@ -177,20 +171,17 @@
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LHU   x20, x29, 2
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LW    x20, x29, 4
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
     NOP
 
     LI    x11, 0x3000
@@ -224,20 +215,17 @@
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LHU   x20, x29, 2
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
-    NOP
 
     LW    x20, x29, 4
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
     NOP
 
     LI    x11, 0x3800

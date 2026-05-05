@@ -6,7 +6,7 @@
 #   Simpler than V1 but does NOT exercise the BF16->FP8 hardware quant.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_smolvla_fused_matmul_bias_v2_mxu1.py
 #
 # DRAM layout (set by gen_smolvla_fused_matmul_bias_v2.py):
@@ -31,7 +31,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 

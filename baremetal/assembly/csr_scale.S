@@ -10,7 +10,6 @@
     ADDI  x30, x0, 0x42
     BNE   x2, x30, fail
     NOP
-    NOP
     CSRRW x0, 0xC11, x0
     ADDI  x28, x28, 1
 
@@ -22,11 +21,9 @@
     ADDI  x30, x0, 0x0F
     BNE   x2, x30, fail
     NOP
-    NOP
     CSRRS x4, 0xC11, x0
     ADDI  x30, x0, 0x3F
     BNE   x4, x30, fail
-    NOP
     NOP
     CSRRW x0, 0xC11, x0
     ADDI  x28, x28, 1
@@ -49,7 +46,6 @@
     SLT   x31, x1, x2
     ADDI  x30, x0, 1
     BNE   x31, x30, fail
-    NOP
     NOP
 
 pass:

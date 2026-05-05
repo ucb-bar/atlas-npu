@@ -1,6 +1,6 @@
 # vpu_special_math_roundtrip_classes.S
 # @TIMEOUT 700000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_special_math_roundtrip_classes.py
 #
 # Coverage intent:
@@ -31,7 +31,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x12, 2048
@@ -98,7 +98,6 @@
     LW    x21, x20, 4
     DELAY 1
     BEQ   x21, x0, fail
-    NOP
     NOP
     ADDI  x28, x28, 1
 

@@ -1,5 +1,6 @@
 # integ_xlu_multi_consumer_bank_sweep.S — XLU transpose feeding MXU and VMEM across rotated banks
 # @TIMEOUT 500000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_integ_xlu_multi_consumer_bank_sweep.py
 #
 # Iteration 0:
@@ -14,7 +15,7 @@
 # This keeps DMA serialized and uses distinct VMEM/MREG placements per phase.
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
 
     LI    x14, 1024

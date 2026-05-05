@@ -1,7 +1,7 @@
 # vpu_vli.S — VPU vector load immediate operations
 # Tests: vli.all, vli.row, vli.col, vli.one
 # @TIMEOUT 20000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_vpu_vli.py
 #
 # VLI instructions write an immediate BF16 constant into a tensor
@@ -28,7 +28,7 @@
 #   [0x1C00..0x1FFF]  vli.one  m5 output        (1024 B)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 

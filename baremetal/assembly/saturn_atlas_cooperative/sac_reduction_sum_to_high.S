@@ -11,11 +11,11 @@
 #
 # The fail: ECALL block is dead code in this kernel — nothing in the pre-JAL
 # body branches to it, so it is effectively unreachable. It is retained
-# (past the JALR + 2 NOP delay slots) only as a safety net in case someone
+# (past the JALR + NOP delay slot) only as a safety net in case someone
 # later adds an explicit jump to `fail:` from the reduce body.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # DRAM layout:
 #   [0x0000..0x03FF]  Input X bank 0    (1024 B)
@@ -26,7 +26,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
@@ -68,15 +68,14 @@
 to_high:
     # Hop to the kernel staged at byte 0x10000 (word 0x4000) without halting.
     # Atlas PC is a word index; JALR uses rs1+imm as-is (no byte-to-word shift).
-    # Atlas has 2-cycle delay slots after JAL/JALR: the two instructions
+    # Atlas has 1 delay slot after JAL/JALR: the instruction
     # immediately following the JALR are fetched and executed before the
     # redirect takes effect. They MUST be harmless NOPs; otherwise the
-    # `fail:` CSRRW+ECALL below would fire in the delay slots, halting
+    # `fail:` CSRRW+ECALL below would fire in the delay slot, halting
     # the core with dbg0=1 / halt_reason=ECALL BEFORE the redirect to
     # kernel_add lands. (See sab_a_to_high.S:26-28 for the same pattern.)
     LI    x1, 0x4000
     JALR  x0, x1, 0
-    NOP
     NOP
 
 fail:

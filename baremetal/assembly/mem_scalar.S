@@ -1,6 +1,6 @@
 # mem_scalar.S — Scalar load/store and SELD functional test
 # @TIMEOUT 10000
-# @DRAM_BASE 0x90000000
+# @DRAM_BASE 0x00000001
 #
 # All scalar VMEM access goes through the LSU.
 # Scalar loads now have a 3-cycle software-visible latency, and scalar stores
@@ -22,7 +22,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x90000000
+    LI    x5, 0x00000001
     DMA.CONFIG  x5, 0
     LI    x2, 32
 
@@ -40,7 +40,6 @@
     LI    x30, 0xFF84A201
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1       # x28 = 3
 
 # ── Test 3: LB byte 0 = sign_ext(0x01) = 1 ──────────────
@@ -48,7 +47,6 @@
     DELAY 2
     ADDI  x30, x0, 1
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1       # x28 = 4
 
@@ -58,7 +56,6 @@
     LI    x30, 0xFFFFFF84
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1       # x28 = 5
 
 # ── Test 5: LBU byte 2 = 0x84 ───────────────────────────
@@ -66,7 +63,6 @@
     DELAY 2
     ADDI  x30, x0, 0x84
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1       # x28 = 6
 
@@ -76,7 +72,6 @@
     LI    x30, 0xFFFFA201
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1       # x28 = 7
 
 # ── Test 7: LHU byte 0 = 0xA201 ─────────────────────────
@@ -84,7 +79,6 @@
     DELAY 2
     LI    x30, 0xA201
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1       # x28 = 8
 
@@ -102,7 +96,6 @@
     LI    x30, 0xAABBCCDD
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1       # x28 = 10
 
 # ── Test 10: SB then LBU at same byte ───────────────────
@@ -114,7 +107,6 @@
     ADDI  x30, x0, 0x42
     BNE   x9, x30, fail
     NOP
-    NOP
     ADDI  x28, x28, 1       # x28 = 11
 
 # ── Test 11: SH then LHU at byte 2 ──────────────────────
@@ -125,7 +117,6 @@
     DELAY 2
     LI    x30, 0x1234
     BNE   x9, x30, fail
-    NOP
     NOP
     ADDI  x28, x28, 1       # x28 = 12
 

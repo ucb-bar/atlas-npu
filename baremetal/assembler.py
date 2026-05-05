@@ -506,12 +506,18 @@ def _parse_golden_json(path, dram_base, beat_bytes):
 
     words_per_beat = beat_bytes // 4
 
+    def _parse_base(value):
+        if value is None:
+            return dram_base
+        return int(value, 0) if isinstance(value, str) else int(value)
+
     def _expand(entries, key):
         """Convert beat-level entries to sorted per-word (byte_addr, u32) pairs."""
         pairs = []
         for e in entries:
+            entry_dram_base = _parse_base(e.get("dram_base", dram_base))
             beat_off = e["word_offset"]
-            beat_addr = dram_base + beat_off * beat_bytes
+            beat_addr = (entry_dram_base << 32) + beat_off * beat_bytes
             raw = _hex_to_words(e[key])
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -550,7 +556,7 @@ def _parse_inline_golden(source, beat_bytes):
       (dram_base, preload_addrs, preload_words, check_addrs, check_words)
       or None if no inline preload/check directives were found.
     """
-    dram_base = 0x90000000
+    dram_base = 0x00000000
     words_per_beat = beat_bytes // 4
 
     dram_base_re = re.compile(r"^\s*#\s*@DRAM_BASE\s+(\S+)\s*$", re.IGNORECASE)
@@ -569,7 +575,7 @@ def _parse_inline_golden(source, beat_bytes):
         m = dram_re.match(raw_line)
         if m:
             beat_off = int(m.group(1), 0)
-            beat_addr = dram_base + beat_off * beat_bytes
+            beat_addr = (dram_base << 32) + beat_off * beat_bytes
             raw = _hex_to_words(m.group(2))
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -580,7 +586,7 @@ def _parse_inline_golden(source, beat_bytes):
         m = check_re.match(raw_line)
         if m:
             beat_off = int(m.group(1), 0)
-            beat_addr = dram_base + beat_off * beat_bytes
+            beat_addr = (dram_base << 32) + beat_off * beat_bytes
             raw = _hex_to_words(m.group(2))
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -601,12 +607,24 @@ def _parse_inline_golden(source, beat_bytes):
     return dram_base, p_addrs, p_words, c_addrs, c_words
 
 
+def _parse_dram_base(source):
+    """Parse the default # @DRAM_BASE directive from assembly comments."""
+    dram_base_re = re.compile(r"^\s*#\s*@DRAM_BASE\s+(\S+)\s*$", re.IGNORECASE)
+    for raw_line in source.splitlines():
+        m = dram_base_re.match(raw_line)
+        if m:
+            return int(m.group(1), 0)
+    return None
+
+
 def _fmt_array(words, name, ctype="uint32_t", indent="    "):
-    """Format a C array initializer."""
     lines = []
     for i in range(0, len(words), 8):
         chunk = words[i:i+8]
-        vals = ", ".join(f"0x{w & 0xFFFFFFFF:08X}" for w in chunk)
+        if ctype == "uint64_t":
+            vals = ", ".join(f"0x{w & 0xFFFFFFFFFFFFFFFF:016X}ULL" for w in chunk)
+        else:
+            vals = ", ".join(f"0x{w & 0xFFFFFFFF:08X}U" for w in chunk)
         lines.append(f"{indent}{vals},")
     body = "\n".join(lines)
     return f"static const {ctype} {name}[] = {{\n{body}\n}};\n"
@@ -692,8 +710,8 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
 #include <stdio.h>
 #include <stdint.h>
 
-static inline uint32_t mmio_read32(uintptr_t a) {{ return *(volatile uint32_t *)a; }}
-static inline void mmio_write32(uintptr_t a, uint32_t v) {{ *(volatile uint32_t *)a = v; }}
+static inline uint32_t mmio_read32(uint64_t addr) {{ return *(volatile uint32_t *)addr; }}
+static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint32_t *)addr = val; }}
 
 /* Atlas memory map */
 #define ATLAS_IMEM_BASE   0x00020000UL
@@ -721,11 +739,11 @@ static const uint32_t atlas_program[ATLAS_PROGRAM_LEN] = {{
         p_addrs, p_words, c_addrs, c_words = golden
         if p_words:
             out += f"#define PRELOAD_WORDS {len(p_words)}\n"
-            out += _fmt_array(p_addrs, "preload_addrs", ctype="uintptr_t")
+            out += _fmt_array(p_addrs, "preload_addrs", ctype="uint64_t")
             out += _fmt_array(p_words, "preload_data")
         if c_words:
             out += f"#define CHECK_WORDS   {len(c_words)}\n"
-            out += _fmt_array(c_addrs, "check_addrs", ctype="uintptr_t")
+            out += _fmt_array(c_addrs, "check_addrs", ctype="uint64_t")
             out += _fmt_array(c_words, "check_expected")
 
     # main()
@@ -762,7 +780,7 @@ int main(void)
     for (i = 0; i < ATLAS_PROGRAM_LEN; i++) {{
         uint32_t got = mmio_read32(ATLAS_IMEM_BASE + i * 4);
         if (got != atlas_program[i]) {{
-            printf("MISMATCH word[%u]: expected 0x%08x, got 0x%08x\\n",
+            printf("MISMATCH word[%u]: expected 0x%016x, got 0x%08x\\n",
                    i, atlas_program[i], got);
             fail++;
         }}
@@ -861,8 +879,11 @@ int main(void)
     for (i = 0; i < CHECK_WORDS; i++) {{
         uint32_t got = mmio_read32(check_addrs[i]);
         if (got != check_expected[i]) {{
-            printf("  DRAM MISMATCH word[%u] @ 0x%08x: expected 0x%08x, got 0x%08x\\n",
-                   i, (uint32_t)check_addrs[i], check_expected[i], got);
+            printf("  DRAM MISMATCH word[%u] @ 0x%08X%08X: expected 0x%08x, got 0x%08x\\n",
+            i,
+            (uint32_t)((uint64_t)check_addrs[i] >> 32),
+            (uint32_t)((uint64_t)check_addrs[i] & 0xFFFFFFFFU),
+            check_expected[i], got);
             fail++;
         }}
     }}
@@ -903,8 +924,8 @@ def main():
     parser.add_argument("--out-c", default=None, help="Output C file with full baremetal test")
     parser.add_argument("--golden-json", default=None,
                         help="Golden JSON from gen_*.py (dram_preloads + dram_checks)")
-    parser.add_argument("--dram-base", default="0x90000000",
-                        help="DRAM base address for golden data (default 0x90000000)")
+    parser.add_argument("--dram-base", default="0x00000000",
+                        help="DRAM base address for golden data (default 0x00000000)")
     parser.add_argument("--beat-bytes", type=int, default=32,
                         help="DMA beat width in bytes (default 32)")
     args = parser.parse_args()
@@ -930,11 +951,16 @@ def main():
         test_name = os.path.splitext(os.path.basename(args.input))[0]
         golden = None
         if args.golden_json:
-            dram_base = int(args.dram_base, 0)
+            dram_base = _parse_dram_base(source)
+            if dram_base is None:
+                dram_base = int(args.dram_base, 0)
             golden = _parse_golden_json(args.golden_json, dram_base, args.beat_bytes)
             n_pre = len(golden[1])
             n_chk = len(golden[3])
-            print(f"Golden data: {n_pre} preload words, {n_chk} check words")
+            print(
+                f"Golden data @DRAM_BASE 0x{dram_base:08X}: "
+                f"{n_pre} preload words, {n_chk} check words"
+            )
         else:
             inline = _parse_inline_golden(source, args.beat_bytes)
             if inline is not None:
