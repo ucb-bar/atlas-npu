@@ -35,18 +35,18 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Unit-scale FP8 pack: scale reg 0 = 0x7F (2^0 = 1.0) ──
     SELI 0, 0x7F
     VFP8PACK 4, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

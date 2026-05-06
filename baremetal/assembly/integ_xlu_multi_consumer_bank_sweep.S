@@ -27,30 +27,30 @@
     DMA.LOAD x11, x10, x14, 0
     DMA.WAIT 0
     VLOAD 0, x11, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 0x0400       # B0 src
     LI    x11, 256          # VMEM word 256
     DMA.LOAD x11, x10, x14, 1
     DMA.WAIT 1
     VLOAD 4, x11, 0
-    DELAY 40
+    DELAY 33
 
     VTRPOSE.XLU 8, 4
-    DELAY 80
+    DELAY 64
 
     VMATPUSH.W.MXU0 0, 8
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 0, 0
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0 12, 0
-    DELAY 40
+    DELAY 31
 
     LI    x11, 4096
     VSTORE 12, x11, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x11, 8
-    DELAY 40
+    DELAY 33
 
     LI    x10, 0x2000
     DMA.STORE x10, x11, x15, 2
@@ -62,21 +62,21 @@
     DMA.LOAD x11, x10, x14, 0
     DMA.WAIT 0
     VLOAD 16, x11, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 0x0C00       # B1 src
     LI    x11, 33024
     DMA.LOAD x11, x10, x14, 1
     DMA.WAIT 1
     VLOAD 20, x11, 0
-    DELAY 40
+    DELAY 33
 
     VTRPOSE.XLU 24, 20
-    DELAY 80
+    DELAY 64
 
     LI    x11, 36864
     VSTORE 24, x11, 0
-    DELAY 40
+    DELAY 33
     LI    x10, 0x2800
     DMA.STORE x10, x11, x14, 3
     DMA.WAIT 3

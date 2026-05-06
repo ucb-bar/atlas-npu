@@ -48,7 +48,7 @@
     DMA.WAIT  3
     LI    x6, 512
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
 
     # Load weights[0] → VMEM[0] → TRF 4 → transpose → TRF 5
     ADDI  x6, x0, 0
@@ -56,14 +56,14 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # Overlap-safe prologue push pair
     VMATPUSH.W.MXU0       0, 5
     VMATPUSH.ACC.FP8.MXU0 0, 8
-    DELAY 40
+    DELAY 94
 
     ADD   x17, x17, x12
     ADDI  x10, x10, 1
@@ -76,9 +76,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
     ADD   x17, x17, x12
     ADDI  x10, x10, 1
@@ -91,13 +91,13 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
     ADD   x16, x16, x12
 
     # Overlap-safe first compute/push
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 40
+    DELAY 94
 
     LI    x29, 1             # next matmul uses wbuf 1
 
@@ -124,9 +124,9 @@ preload_for_buf0:
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
     BEQ   x0, x0, do_matmul
     NOP
 
@@ -137,9 +137,9 @@ preload_for_buf1:
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
 do_matmul:
     ADD   x17, x17, x12
@@ -151,7 +151,7 @@ do_matmul:
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
     ADD   x16, x16, x12
 
     # ── OVERLAP [b]: compute + weight push ──
@@ -162,7 +162,7 @@ matmul_buf1:
     # Matmul with wbuf 1 + push pre-loaded weights to wbuf 0
     VMATMUL.ACC.MXU0  0, 0, 1      # Slot A: acc 0, acts TRF 0, wbuf 1
     VMATPUSH.W.MXU0   0, 5         # Slot B: wbuf 0 ← TRF 5  (OVERLAPPED)
-    DELAY 40
+    DELAY 94
     BEQ   x0, x0, advance
     NOP
 
@@ -170,7 +170,7 @@ matmul_buf0:
     # Matmul with wbuf 0 + push pre-loaded weights to wbuf 1
     VMATMUL.ACC.MXU0  0, 0, 0      # Slot A: acc 0, acts TRF 0, wbuf 0
     VMATPUSH.W.MXU0   1, 7         # Slot B: wbuf 1 ← TRF 7  (OVERLAPPED)
-    DELAY 40
+    DELAY 94
 
 advance:
     XOR   x29, x29, x30            # toggle buffer
@@ -186,7 +186,7 @@ epilogue:
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
 
     BEQ   x29, x0, last_buf0
     NOP
@@ -198,17 +198,17 @@ last_buf0:
     VMATMUL.ACC.MXU0  0, 0, 0
 
 do_pop:
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0  2, 0
-    DELAY 40
+    DELAY 31
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
 
     LI    x9, 768
     VSTORE 3, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     DMA.STORE x23, x8, x24, 2

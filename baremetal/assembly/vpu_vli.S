@@ -36,14 +36,14 @@
     # Test 1: vli.all  m4, 0x3F80    (1.0 to the full BF16 register pair)
     # ================================================================
     VLI.ALL 4, 0x3F80
-    DELAY 150
+    DELAY 63
 
     LI    x8, 0
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 256
     VSTORE 5, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x0000
     DMA.STORE x3, x8, x2, 1
@@ -57,17 +57,17 @@
     # Test 2: vli.row  m4, 0x4000    (2.0 to row 0 of the full BF16 pair)
     # ================================================================
     VLI.ALL 4, 0x0000
-    DELAY 150
+    DELAY 63
 
     VLI.ROW 4, 0x4000
-    DELAY 150
+    DELAY 63
 
     LI    x8, 0
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 256
     VSTORE 5, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x0800
     DMA.STORE x3, x8, x2, 1
@@ -81,17 +81,17 @@
     # Test 3: vli.col  m5, 0x4040    (3.0 to first column of one register)
     # ================================================================
     VLI.ALL 4, 0x0000
-    DELAY 150
+    DELAY 63
 
     VLI.COL 5, 0x4040
-    DELAY 150
+    DELAY 31
 
     LI    x8, 0
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 256
     VSTORE 5, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x1000
     DMA.STORE x3, x8, x2, 1
@@ -105,17 +105,17 @@
     # Test 4: vli.one  m5, 0x4080    (4.0 to one element in one register)
     # ================================================================
     VLI.ALL 4, 0x0000
-    DELAY 150
+    DELAY 63
 
     VLI.ONE 5, 0x4080
-    DELAY 150
+    DELAY 31
 
     LI    x8, 0
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 256
     VSTORE 5, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x1800
     DMA.STORE x3, x8, x2, 1

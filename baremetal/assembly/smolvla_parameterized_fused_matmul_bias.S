@@ -91,9 +91,9 @@ output_tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Load B fp8 → VMEM[512] → m4 ──
     LI    x7, 512
@@ -101,7 +101,7 @@ output_tile_loop:
     DMA.WAIT  0
     LI    x7, 512
     VLOAD 4, x7, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load bias bf16 → VMEM[768..1279] → (m6, m7) ──
     LI    x9, 768
@@ -114,20 +114,20 @@ output_tile_loop:
 
     LI    x9, 768
     VLOAD 6, x9, 0
-    DELAY 40
+    DELAY 33
     VLOAD 7, x9, 8
-    DELAY 40
+    DELAY 33
 
     # ── Transpose B so MXU computes A @ B, not A @ B^T ──
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # ── Quantize A bf16 (m0,m1) → m8 fp8 via acc[1] roundtrip ──
     VMATPUSH.ACC.BF16.MXU0 1, 0
-    DELAY 80
+    DELAY 31
     SELI 0, 0x7F
     VMATPOP.FP8.MXU0 8, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
     BNE   x13, x0, matmul_mxu1
@@ -135,35 +135,35 @@ output_tile_loop:
 
     # ── MXU0 path: (m10,m11) = m8 @ m5 (= A @ B) ──
     VMATPUSH.W.MXU0 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 8, 0
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0 10, 0
-    DELAY 40
+    DELAY 31
     BEQ   x0, x0, matmul_done
     NOP
 
 matmul_mxu1:
     # ── MXU1 path ──
     VMATPUSH.W.MXU1 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 8, 0
-    DELAY 120
+    DELAY 34
     VMATPOP.BF16.MXU1 10, 0
-    DELAY 40
+    DELAY 31
 
 matmul_done:
 
     # ── Bias add: (m12, m13) = (m10, m11) + (m6, m7) ──
     VADD.BF16 12, 10, 6
-    DELAY 150
+    DELAY 64
 
     # ── Store (m12, m13) → VMEM[1280..1791] ──
     LI    x8, 1280
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     # ── DMA out: two halves → C[m,n] ──
     LI    x8, 1280

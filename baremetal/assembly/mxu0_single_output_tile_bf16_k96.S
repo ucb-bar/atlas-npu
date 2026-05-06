@@ -45,7 +45,7 @@
     DMA.WAIT  3
     LI    x6, 512
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
 
     # Weights[0] -> TRF 4 -> 5
     ADDI  x6, x0, 0
@@ -53,14 +53,14 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # Overlap-safe prologue push pair
     VMATPUSH.W.MXU0       0, 5
     VMATPUSH.ACC.FP8.MXU0 0, 8
-    DELAY 40
+    DELAY 31
 
     ADD   x17, x17, x12
     ADDI  x10, x10, 1
@@ -71,9 +71,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
     ADD   x17, x17, x12
     ADDI  x10, x10, 1
@@ -84,13 +84,13 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
     ADD   x16, x16, x12
 
     # Overlap-safe first compute/push
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 40
+    DELAY 94
 
     LI    x29, 1
 
@@ -107,9 +107,9 @@ preload_for_buf0:
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
     BEQ   x0, x0, do_matmul
     NOP
 
@@ -119,9 +119,9 @@ preload_for_buf1:
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
 do_matmul:
     ADD   x17, x17, x12
@@ -132,7 +132,7 @@ do_matmul:
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
     ADD   x16, x16, x12
 
     BEQ   x29, x0, matmul_buf0
@@ -141,14 +141,14 @@ do_matmul:
 matmul_buf1:
     VMATMUL.ACC.MXU0  0, 0, 1
     VMATPUSH.W.MXU0   0, 5
-    DELAY 40
+    DELAY 94
     BEQ   x0, x0, advance
     NOP
 
 matmul_buf0:
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 40
+    DELAY 94
 
 advance:
     XOR   x29, x29, x30
@@ -161,7 +161,7 @@ epilogue:
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
 
     BEQ   x29, x0, last_buf0
     NOP
@@ -175,17 +175,17 @@ last_buf0:
     VMATMUL.ACC.MXU0  0, 0, 0
 
 do_pop:
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0  2, 0
-    DELAY 40
+    DELAY 31
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
 
     LI    x9, 768
     VSTORE 3, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     DMA.STORE x23, x8, x24, 2

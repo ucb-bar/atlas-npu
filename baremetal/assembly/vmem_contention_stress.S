@@ -82,7 +82,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 3, x6, 0
-    DELAY 40
+    DELAY 33
 
     # A_vpu b0 → m8, b1 → m9 (register pair via flag 0/8)
     ADDI  x6, x0, 0
@@ -95,9 +95,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 9, x6, 8
-    DELAY 40
+    DELAY 33
 
     # B_vpu b0 → m10, b1 → m11
     ADDI  x6, x0, 0
@@ -110,9 +110,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 10, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 11, x6, 8
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 1: Pipelined DMA load — 4 channels, no intermediate waits
@@ -155,14 +155,14 @@
     # X0 → m0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # W0 (raw) → m1 → XLU transpose → m2
     LI    x7, 256
     VLOAD 1, x7, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # MXU0: push weights + zero bias.
     # Use non-accumulating MATMUL for this single-tile op so the compute
@@ -173,20 +173,20 @@
     # X1 → m6
     LI    x8, 512
     VLOAD 6, x8, 0
-    DELAY 40
+    DELAY 33
 
     # W1 (raw) → m1 (reuse) → XLU transpose → m7
     LI    x9, 768
     VLOAD 1, x9, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 1
-    DELAY 80
+    DELAY 64
 
     # MXU1: push weights + zero bias.
     # As above, the compute itself uses non-accumulating MATMUL.
     VMATPUSH.W.MXU1       0, 7
     VMATPUSH.ACC.FP8.MXU1 0, 3
-    DELAY 40 
+    DELAY 31 
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 3: Triple-unit compute — MXU0 + MXU1 + VPU concurrent
@@ -201,7 +201,7 @@
     VMATMUL.MXU0      0, 0, 0
     VMATMUL.MXU1      0, 6, 0
     VADD.BF16         12, 8, 10
-    DELAY 150
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 4: Pop MXU results
@@ -211,7 +211,7 @@
 
     VMATPOP.BF16.MXU0  4, 0
     VMATPOP.BF16.MXU1  14, 0
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 5: WRITE/WRITE SHARED-PORT BACKPRESSURE [WW-BP]
@@ -241,9 +241,9 @@
     # VSTORE writes m12 → VMEM[512], m13 → VMEM[768] (via flag 0/8)
     LI    x8, 512
     VSTORE 12, x8, 0              # m12 (add b0) → VMEM[512] — 33 cycles
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8              # m13 (add b1) → VMEM[768] — 33 cycles
-    DELAY 40
+    DELAY 33
 
     # DMA may still be running (extended by backpressure).  Wait.
     DMA.WAIT  0
@@ -273,10 +273,10 @@
     # Store C0 (m4,m5) to VMEM[1024], VMEM[1280] for next phase
     LI    x8, 1024
     VSTORE 4, x8, 0               # m4 (C0 lo) → VMEM[1024]
-    DELAY 40
+    DELAY 33
     LI    x9, 1280
     VSTORE 5, x9, 0               # m5 (C0 hi) → VMEM[1280]
-    DELAY 40
+    DELAY 33
 
     # DMA stores may have been stretched by the C0 VSTOREs.
     DMA.WAIT  0
@@ -306,7 +306,7 @@
     # Immediately start VLOAD — both read VMEM concurrently!
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0                 # m0 ← X2 from VMEM[0] — 33 cycles
-    DELAY 40
+    DELAY 33
 
     # Second pair: DMA.STORE C0 hi + VLOAD W2
     LI    x9, 1280
@@ -315,7 +315,7 @@
 
     LI    x7, 256
     VLOAD 1, x7, 0                 # m1 ← W2 (raw) from VMEM[256]
-    DELAY 40
+    DELAY 33
 
     # Wait for DMA stores (may be delayed by shared-port backpressure)
     DMA.WAIT  2
@@ -329,22 +329,22 @@
 
     # Transpose W2: m1 → XLU → m2
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # MXU0: push new weights + zero bias.
     # The chained second pass also uses non-accumulating MATMUL so it cannot
     # inherit stale psums from the earlier C0 run.
     VMATPUSH.W.MXU0       0, 2
     VMATPUSH.ACC.FP8.MXU0 0, 3
-    DELAY 40 
+    DELAY 31 
 
     # MXU0 compute C2 = X2 @ W2
     VMATMUL.MXU0      0, 0, 0
-    DELAY 200
+    DELAY 95
 
     # Pop C2 → m4,m5
     VMATPOP.BF16.MXU0  4, 0
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 9: Store remaining results — C1, C2 → DRAM
@@ -354,10 +354,10 @@
     # Store C1 (m14,m15) → VMEM → DRAM
     LI    x8, 512
     VSTORE 14, x8, 0              # m14 (C1 lo) → VMEM[512]
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 15, x9, 0              # m15 (C1 hi) → VMEM[768]
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3400
@@ -371,10 +371,10 @@
     # Store C2 (m4,m5) → VMEM → DRAM
     LI    x8, 512
     VSTORE 4, x8, 0               # m4 (C2 lo) → VMEM[512]
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 5, x9, 0               # m5 (C2 hi) → VMEM[768]
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x4400

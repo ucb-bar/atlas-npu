@@ -809,7 +809,7 @@ int main(void)
 
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
-    uint32_t status   = mmio_read32(CSR_STATUS);
+    uint32_t status   = mmio_read32(CSR_STATUS); 
 
     printf("  DBG0    = %u\\n", dbg0);
     printf("  mcycles = %u\\n", cycles);

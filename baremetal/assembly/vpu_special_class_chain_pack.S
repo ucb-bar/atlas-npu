@@ -66,47 +66,47 @@
     # Load scale register e3 from VMEM byte address 0x2400.
     LI    x15, 0x2400
     SELD  3, x15, 0
-    DELAY 1
+    DELAY 2
 
     # Load BF16 input pair into m40/m41. The VLOAD path is single-issue in the
     # current RTL, so the second load must wait for the first to drain.
     VLOAD 40, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 41, x6, 8
-    DELAY 40
+    DELAY 33
 
     # Unary math on the same input pair into disjoint destinations.
     VRECIP.BF16 42, 40
-    DELAY 150
+    DELAY 64
     VSQRT 44, 40
-    DELAY 150
+    DELAY 64
 
     # Consume both unary outputs in a true dependent binary op.
     VMUL.BF16 46, 42, 44
-    DELAY 150
+    DELAY 64
 
     # Quantize the product under the SELD-loaded scale.
     VFP8PACK 48, 46, 3
-    DELAY 150
+    DELAY 64
 
     # Spill all produced tensors back to VMEM.
     VSTORE 42, x7, 0
-    DELAY 40
+    DELAY 33
     VSTORE 43, x7, 8
-    DELAY 40
+    DELAY 33
 
     VSTORE 44, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 45, x8, 8
-    DELAY 40
+    DELAY 33
 
     VSTORE 46, x9, 0
-    DELAY 40
+    DELAY 33
     VSTORE 47, x9, 8
-    DELAY 40
+    DELAY 33
 
     VSTORE 48, x10, 0
-    DELAY 40
+    DELAY 33
 
     # Drain results to DRAM with serialized DMA traffic.
     DMA.STORE x22, x7, x12, 2

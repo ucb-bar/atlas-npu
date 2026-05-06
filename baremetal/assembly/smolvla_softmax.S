@@ -38,39 +38,39 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── (m2, m3) = rowmax(X) broadcast ──
     VREDMAX.ROW.BF16 2, 0
-    DELAY 150
+    DELAY 32
 
     # ── (m4, m5) = X - rowmax ──
     VSUB.BF16 4, 0, 2
-    DELAY 150
+    DELAY 64
 
     # ── (m6, m7) = exp(X - rowmax) ──
     VEXP 6, 4
-    DELAY 150
+    DELAY 64
 
     # ── (m8, m9) = rowsum(exp) broadcast ──
     VREDSUM.ROW.BF16 8, 6
-    DELAY 150
+    DELAY 37
 
     # ── (m10, m11) = 1 / rowsum ──
     VRECIP.BF16 10, 8
-    DELAY 150
+    DELAY 64
 
     # ── (m12, m13) = exp * inv_rowsum = Y ──
     VMUL.BF16 12, 6, 10
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

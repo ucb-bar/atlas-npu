@@ -39,9 +39,9 @@
     # VLOAD A → m0,m1
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Load Input B → VMEM[512..1023] ──
     LI    x7, 512               # VMEM[512]
@@ -56,21 +56,21 @@
     # VLOAD B → m2,m3
     LI    x7, 512
     VLOAD 2, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 3, x7, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 1: vadd.bf16  m4, m0, m2
     # ================================================================
     VADD.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000
@@ -85,13 +85,13 @@
     # Test 2: vsub.bf16  m4, m0, m2
     # ================================================================
     VSUB.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1800
@@ -106,13 +106,13 @@
     # Test 3: vmul.bf16  m4, m0, m2
     # ================================================================
     VMUL.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x2000
@@ -127,13 +127,13 @@
     # Test 4: vmin.bf16  m4, m0, m2
     # ================================================================
     VMIN.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x2800
@@ -148,13 +148,13 @@
     # Test 5: vmax.bf16  m4, m0, m2
     # ================================================================
     VMAX.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x3000

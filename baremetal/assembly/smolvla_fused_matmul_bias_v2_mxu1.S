@@ -43,7 +43,7 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load B fp8 → VMEM[256..511] → m4 ──
     LI    x7, 256
@@ -53,7 +53,7 @@
 
     LI    x7, 256
     VLOAD 4, x7, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load bias bf16 → VMEM[512..1023] → (m6, m7) ──
     LI    x9, 512
@@ -67,32 +67,32 @@
 
     LI    x9, 512
     VLOAD 6, x9, 0
-    DELAY 40
+    DELAY 33
     VLOAD 7, x9, 8
-    DELAY 40
+    DELAY 33
 
     # ── Transpose B so MXU computes A @ B, not A @ B^T ──
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # ── Matmul: (m10,m11) = m0 @ m5  (= A @ B^T^T = A @ B) ──
     VMATPUSH.W.MXU1  0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1     0, 0, 0
-    DELAY 120
+    DELAY 34
     VMATPOP.BF16.MXU1 10, 0
-    DELAY 40
+    DELAY 31
 
     # ── Bias add: (m12,m13) = (m10,m11) + (m6,m7) ──
     VADD.BF16 12, 10, 6
-    DELAY 150
+    DELAY 64
 
     # ── Store (m12,m13) → VMEM[1024..1535] → DRAM[0x1000..0x17FF] ──
     LI    x8, 1024
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000

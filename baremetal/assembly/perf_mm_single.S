@@ -51,9 +51,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: MXU0 weights — load W0 → m2, transpose → m3, push wslot 0
@@ -65,11 +65,11 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 2, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 3, 2
-    DELAY 80
+    DELAY 64
     VMATPUSH.W.MXU0 0, 3
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: MXU1 weights — load W1 → m4, transpose → m5, push wslot 0
@@ -81,11 +81,11 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
     VMATPUSH.W.MXU1 0, 5
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — reset perf counters, snapshot mcycles
@@ -105,7 +105,7 @@
     # Drain padding: SA 32x32 computeBusy ≈ 94 cycles, IPT
     # pipelineCuts={1} ≈ 33 cycles. 128 covers whichever topology is
     # wired to mxu0/mxu1 in AtlasCore, with margin.
-    DELAY 128
+    DELAY 34
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1

@@ -58,18 +58,18 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ---------- Tile0 / VEXP ----------
     VEXP  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x2000
     DMA.STORE x10, x9, x3, 1
@@ -77,12 +77,12 @@
 
     # ---------- Tile0 / VEXP2 ----------
     VEXP2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x2800
     DMA.STORE x10, x9, x3, 1
@@ -90,12 +90,12 @@
 
     # ---------- Tile0 / VSIN ----------
     VSIN  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x3000
     DMA.STORE x10, x9, x3, 1
@@ -103,12 +103,12 @@
 
     # ---------- Tile0 / VCOS ----------
     VCOS  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x3800
     DMA.STORE x10, x9, x3, 1
@@ -116,12 +116,12 @@
 
     # ---------- Tile0 / VTANH ----------
     VTANH 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x4000
     DMA.STORE x10, x9, x3, 1
@@ -129,12 +129,12 @@
 
     # ---------- Tile0 / VLOG2 ----------
     VLOG2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x4800
     DMA.STORE x10, x9, x3, 1
@@ -142,12 +142,12 @@
 
     # ---------- Tile0 / VSQRT ----------
     VSQRT 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x5000
     DMA.STORE x10, x9, x3, 1
@@ -155,12 +155,12 @@
 
     # ---------- Tile0 / VRECIP.BF16 ----------
     VRECIP.BF16 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x5800
     DMA.STORE x10, x9, x3, 1
@@ -176,18 +176,18 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ---------- Tile1 / VEXP ----------
     VEXP  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x6000
     DMA.STORE x10, x9, x3, 1
@@ -195,12 +195,12 @@
 
     # ---------- Tile1 / VEXP2 ----------
     VEXP2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x6800
     DMA.STORE x10, x9, x3, 1
@@ -208,12 +208,12 @@
 
     # ---------- Tile1 / VSIN ----------
     VSIN  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x7000
     DMA.STORE x10, x9, x3, 1
@@ -221,12 +221,12 @@
 
     # ---------- Tile1 / VCOS ----------
     VCOS  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x7800
     DMA.STORE x10, x9, x3, 1
@@ -234,12 +234,12 @@
 
     # ---------- Tile1 / VTANH ----------
     VTANH 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x8000
     DMA.STORE x10, x9, x3, 1
@@ -247,12 +247,12 @@
 
     # ---------- Tile1 / VLOG2 ----------
     VLOG2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x8800
     DMA.STORE x10, x9, x3, 1
@@ -260,12 +260,12 @@
 
     # ---------- Tile1 / VSQRT ----------
     VSQRT 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000
     DMA.STORE x10, x9, x3, 1
@@ -273,12 +273,12 @@
 
     # ---------- Tile1 / VRECIP.BF16 ----------
     VRECIP.BF16 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0x9800
     DMA.STORE x10, x9, x3, 1
@@ -294,18 +294,18 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ---------- Tile2 / VEXP ----------
     VEXP  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xA000
     DMA.STORE x10, x9, x3, 1
@@ -313,12 +313,12 @@
 
     # ---------- Tile2 / VEXP2 ----------
     VEXP2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xA800
     DMA.STORE x10, x9, x3, 1
@@ -326,12 +326,12 @@
 
     # ---------- Tile2 / VSIN ----------
     VSIN  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xB000
     DMA.STORE x10, x9, x3, 1
@@ -339,12 +339,12 @@
 
     # ---------- Tile2 / VCOS ----------
     VCOS  4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xB800
     DMA.STORE x10, x9, x3, 1
@@ -352,12 +352,12 @@
 
     # ---------- Tile2 / VTANH ----------
     VTANH 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xC000
     DMA.STORE x10, x9, x3, 1
@@ -365,12 +365,12 @@
 
     # ---------- Tile2 / VLOG2 ----------
     VLOG2 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xC800
     DMA.STORE x10, x9, x3, 1
@@ -378,12 +378,12 @@
 
     # ---------- Tile2 / VSQRT ----------
     VSQRT 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xD000
     DMA.STORE x10, x9, x3, 1
@@ -391,12 +391,12 @@
 
     # ---------- Tile2 / VRECIP.BF16 ----------
     VRECIP.BF16 4, 0
-    DELAY 160
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x9, 1024
     LI    x10, 0xD800
     DMA.STORE x10, x9, x3, 1

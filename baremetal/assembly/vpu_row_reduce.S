@@ -34,21 +34,21 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 1: vredsum.row.bf16  m4, m0
     # ================================================================
     VREDSUM.ROW.BF16 4, 0
-    DELAY 150
+    DELAY 37
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x0800
     DMA.STORE x3, x8, x2, 1
@@ -62,13 +62,13 @@
     # Test 2: vredmin.row.bf16  m4, m0
     # ================================================================
     VREDMIN.ROW.BF16 4, 0
-    DELAY 150
+    DELAY 32
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1000
     DMA.STORE x3, x8, x2, 1
@@ -82,13 +82,13 @@
     # Test 3: vredmax.row.bf16  m4, m0
     # ================================================================
     VREDMAX.ROW.BF16 4, 0
-    DELAY 150
+    DELAY 32
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1800
     DMA.STORE x3, x8, x2, 1

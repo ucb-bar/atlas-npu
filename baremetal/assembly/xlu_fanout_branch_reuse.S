@@ -42,20 +42,20 @@
     # Load A->m0 and B->m4.
     ADDI  x7, x0, 0
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
 
     LI    x7, 256
     VLOAD 4, x7, 0
-    DELAY 40
+    DELAY 33
 
     # Transpose B into m8.
     VTRPOSE.XLU 8, 4
-    DELAY 80
+    DELAY 64
 
     # Store transpose to VMEM and DRAM for scalar-observable branch predicate.
     LI    x8, 512
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 0x1000
     LI    x6, 512
@@ -65,25 +65,25 @@
     # Scalar reads first word of transposed tile from VMEM byte addr 2048.
     LI    x20, 2048
     LW    x21, x20, 0
-    DELAY 1
+    DELAY 2
 
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7
 
     # Use the same transposed bank as MXU0 weight.
     VMATPUSH.W.MXU0 0, 8
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 0, 0
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0 12, 0
-    DELAY 40
+    DELAY 31
 
     # Store BF16 result pair.
     LI    x8, 1024
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x12, 2048
     LI    x10, 0x1800

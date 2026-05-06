@@ -59,7 +59,7 @@
     VLOAD 53, x20, 0
     ADDI  x27, x27, 1      # must be skipped
 act_loaded:
-    DELAY 40
+    DELAY 32
 
     # Not-taken branch: delay-slot VLOAD must still execute, and fallthrough must occur.
     BEQ   x0, x29, weight_taken
@@ -70,41 +70,41 @@ act_loaded:
 weight_taken:
     ADDI  x25, x25, 1      # must stay zero
 weight_done:
-    DELAY 40
+    DELAY 32
 
     # JAL delay-slot XLU transpose into another cold upper bank.
     JAL   x1, xlu_done
     VTRPOSE.XLU 55, 54
     ADDI  x24, x24, 1      # must be skipped
 xlu_done:
-    DELAY 80
+    DELAY 64
 
     # JAL delay-slot MXU1 weight push from the transposed bank.
     JAL   x1, push_done
     VMATPUSH.W.MXU1 0, 55
     ADDI  x24, x24, 1      # must be skipped
 push_done:
-    DELAY 40
+    DELAY 31
 
     # JAL delay-slot MXU1 compute launch.
     JAL   x1, compute_done
     VMATMUL.MXU1 0, 53, 0
     ADDI  x24, x24, 1      # must be skipped
 compute_done:
-    DELAY 120
+    DELAY 34
 
     # JAL delay-slot MXU1 BF16 pop into m56/m57.
     JAL   x1, pop_done
     VMATPOP.BF16.MXU1 56, 0
     ADDI  x24, x24, 1      # must be skipped
 pop_done:
-    DELAY 40
+    DELAY 31
 
     # Spill both BF16 halves to contiguous VMEM, then DMA-store them back.
     VSTORE 56, x22, 0
-    DELAY 40
+    DELAY 33
     VSTORE 57, x22, 8
-    DELAY 40
+    DELAY 33
 
     DMA.STORE x13, x22, x14, 2
     DMA.WAIT  2

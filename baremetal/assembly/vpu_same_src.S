@@ -36,21 +36,21 @@
     # VLOAD A → m0,m1
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 1: vadd.bf16  m2, m0, m0
     # ================================================================
     VADD.BF16  2, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800
@@ -65,13 +65,13 @@
     # Test 2: vsub.bf16  m2, m0, m0
     # ================================================================
     VSUB.BF16  2, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x1000
@@ -86,13 +86,13 @@
     # Test 3: vmul.bf16  m2, m0, m0
     # ================================================================
     VMUL.BF16  2, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x1800
@@ -107,13 +107,13 @@
     # Test 4: vmin.bf16  m2, m0, m0
     # ================================================================
     VMIN.BF16  2, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x2000
@@ -128,13 +128,13 @@
     # Test 5: vmax.bf16  m2, m0, m0
     # ================================================================
     VMAX.BF16  2, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x2800

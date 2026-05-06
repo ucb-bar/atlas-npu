@@ -45,29 +45,29 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Softmax chain ──
     VREDMAX.ROW.BF16 2, 0
-    DELAY 150
+    DELAY 32
     VSUB.BF16 4, 0, 2
-    DELAY 150
+    DELAY 64
     VEXP 6, 4
-    DELAY 150
+    DELAY 64
     VREDSUM.ROW.BF16 8, 6
-    DELAY 150
+    DELAY 37
     VRECIP.BF16 10, 8
-    DELAY 150
+    DELAY 64
     VMUL.BF16 12, 6, 10
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20

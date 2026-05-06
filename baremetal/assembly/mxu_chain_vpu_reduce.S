@@ -98,16 +98,16 @@
     # VLOAD first batch
     ADDI  x6, x0, 0
     VLOAD 3, x6, 0                 # m3 ← zero bias
-    DELAY 40
+    DELAY 33
     LI    x7, 256
     VLOAD 8, x7, 0                 # m8 ← A_vpu b0
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     VLOAD 10, x8, 0                # m10 ← B_vpu b0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VLOAD 14, x9, 0                # m14 ← bias_vpu b0
-    DELAY 40
+    DELAY 33
 
     # Second round: bank1 data
     # ch0: A_vpu b1
@@ -131,13 +131,13 @@
 
     ADDI  x6, x0, 0
     VLOAD 9, x6, 0                 # m9 ← A_vpu b1
-    DELAY 40
+    DELAY 33
     LI    x7, 256
     VLOAD 11, x7, 0                # m11 ← B_vpu b1
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     VLOAD 15, x8, 0                # m15 ← bias_vpu b1
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE A: MXU0 computes Q = X @ WQ → acc 0 → FP8 pop → m4
@@ -150,9 +150,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # ── [a] MXU0 w-push + acc-push ──
     VMATPUSH.W.MXU0       0, 2
@@ -165,23 +165,23 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # MXU0 compute Q
     VMATMUL.ACC.MXU0  0, 0, 0
-    DELAY 120
+    DELAY 95
 
     # ── [d] MXU0 FP8 pop + VPU vmin (concurrent) ──
     # MXU0 pops acc 0 → m4 (FP8). VPU computes vmin on m8,m10 → m12.
     # Different functional units, different TRF banks. Safe.
     VMATPOP.FP8.MXU0  4, 0, 0
     VMIN.BF16         12, 8, 10
-    DELAY 150
+    DELAY 64
 
     # Store Q (m4) → DRAM scratch (need it for Phase C)
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     LI    x10, 0x2800
     DMA.STORE x10, x8, x12, 2
@@ -198,18 +198,18 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # ── [c] MXU1 w-push + acc-push ──
     VMATPUSH.W.MXU1       0, 2
     VMATPUSH.ACC.FP8.MXU1 0, 3
-    DELAY 35                          # ← wait for Slot A acc push + Slot B weight push
+    DELAY 31                          # ← wait for Slot A acc push + Slot B weight push
 
     # X is still in m0 (wasn't overwritten). Reuse for MXU1.
     VMATMUL.ACC.MXU1  0, 0, 0
-    DELAY 120
+    DELAY 34
 
     # ── [e] MXU1 FP8 pop + DMA store of VPU vmin result ──
     VMATPOP.FP8.MXU1  5, 0, 0
@@ -217,10 +217,10 @@
     # Store vmin result (m12,m13) while MXU1 pop runs
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 13, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3800
@@ -234,7 +234,7 @@
     # Store K (m5) → DRAM scratch
     LI    x8, 512
     VSTORE 5, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     LI    x10, 0x2C00
     DMA.STORE x10, x8, x12, 2
@@ -254,7 +254,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
 
     VMATPUSH.W.MXU0       0, 1    # K directly as weights
     VMATPUSH.ACC.FP8.MXU0 0, 3    # zero bias → acc 0
@@ -266,23 +266,23 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0                 # m0 ← Q (activations)
-    DELAY 40
+    DELAY 33
 
     # MXU0 compute S = Q @ K^T
     VMATMUL.ACC.MXU0  0, 0, 0
-    DELAY 120
+    DELAY 95
 
     # BF16 pop → m6,m7
     VMATPOP.BF16.MXU0  6, 0
-    DELAY 40
+    DELAY 31
 
     # Store scores m6,m7 → DRAM
     LI    x8, 512
     VSTORE 6, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 7, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3000
@@ -301,15 +301,15 @@
 # ═══════════════════════════════════════════════════════════════
 
     VADD.BF16  12, 6, 14          # m12,m13 ← S + bias_vpu
-    DELAY 150
+    DELAY 64
 
     # Store biased result
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 13, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x4000

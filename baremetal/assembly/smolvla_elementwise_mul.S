@@ -33,9 +33,9 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Load Input B → VMEM[512..1023] ──
     LI    x7, 512               # VMEM[512]
@@ -49,19 +49,19 @@
 
     LI    x7, 512
     VLOAD 2, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 3, x7, 8
-    DELAY 40
+    DELAY 33
 
     # ── Single pair op: (m4,m5) = (m0,m1) * (m2,m3) ──
     VMUL.BF16  4, 0, 2
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000

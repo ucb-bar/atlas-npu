@@ -71,21 +71,21 @@
 
     # Load BF16 pair into upper-mid banks.
     VLOAD 40, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 41, x7, 0
-    DELAY 40
+    DELAY 33
 
     # row_sum = broadcast(sum(row(input)))
     VREDSUM.ROW.BF16 44, 40
-    DELAY 150
+    DELAY 37
 
     # recip_sum = recip(row_sum)
     VRECIP.BF16 48, 44
-    DELAY 150
+    DELAY 64
 
     # normalized = input * recip_sum
     VMUL.BF16 52, 40, 48
-    DELAY 150
+    DELAY 64
 
     # Load pack scale from VMEM byte address 0x0800 into e0.
     LI    x18, 0x0800
@@ -94,17 +94,17 @@
 
     # packed = fp8pack(normalized, e0)
     VFP8PACK 56, 52, 0
-    DELAY 150
+    DELAY 64
 
     # Store BF16 normalized tensor pair to VMEM.
     VSTORE 52, x9, 0
-    DELAY 40
+    DELAY 33
     VSTORE 53, x10, 0
-    DELAY 40
+    DELAY 33
 
     # Store FP8 packed result to VMEM.
     VSTORE 56, x11, 0
-    DELAY 40
+    DELAY 33
 
     # Scalar-observable readback from BF16 output footprint, then branch on nonzero.
     # This is a read only; scalar scratch stores remain disjoint from DMA.STORE regions.

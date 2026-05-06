@@ -29,18 +29,18 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     VCOS 2, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

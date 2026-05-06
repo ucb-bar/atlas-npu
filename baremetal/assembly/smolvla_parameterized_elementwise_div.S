@@ -36,9 +36,9 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     ADD   x1, x21, x20
     LI    x7, 512
@@ -51,23 +51,23 @@ tile_loop:
 
     LI    x7, 512
     VLOAD 2, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 3, x7, 8
-    DELAY 40
+    DELAY 33
 
     # (m4, m5) = 1 / (m2, m3)   LUT unary → DELAY 300
     VRECIP.BF16 4, 2
-    DELAY 300
+    DELAY 64
 
     # (m6, m7) = (m0, m1) * (m4, m5)
     VMUL.BF16 6, 0, 4
-    DELAY 150
+    DELAY 64
 
     LI    x8, 1024
     VSTORE 6, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 7, x8, 8
-    DELAY 40
+    DELAY 33
 
     ADD   x3, x22, x20
     LI    x8, 1024

@@ -46,35 +46,35 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     VLI.ALL 2, 0xBF80
-    DELAY 150
+    DELAY 63
     VLI.ALL 4, 0x3F80
-    DELAY 150
+    DELAY 63
 
     VMUL.BF16  6, 0, 2
-    DELAY 150
+    DELAY 64
 
     VEXP 8, 6
-    DELAY 150
+    DELAY 64
 
     VADD.BF16 10, 8, 4
-    DELAY 150
+    DELAY 64
 
     VRECIP.BF16 12, 10
-    DELAY 150
+    DELAY 64
 
     VMUL.BF16 14, 0, 12
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 14, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 15, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

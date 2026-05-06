@@ -87,7 +87,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 10, x6, 0
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: Load VPU inputs (4-channel parallel DMA) [h]
@@ -120,16 +120,16 @@
 
     ADDI  x6, x0, 0
     VLOAD 12, x6, 0                # m12 ← A_vpu bank0
-    DELAY 40
+    DELAY 33
     LI    x7, 256
     VLOAD 13, x7, 0                # m13 ← A_vpu bank1
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     VLOAD 14, x8, 0                # m14 ← B_vpu bank0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VLOAD 15, x9, 0                # m15 ← B_vpu bank1
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # MXU0 PROLOGUE: Load W0_A (k=0), transpose, push weights + bias
@@ -142,9 +142,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 2, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 3, 2
-    DELAY 80
+    DELAY 64
 
     # ── [a] MXU0 w-push + acc-push ──
     VMATPUSH.W.MXU0       0, 3
@@ -157,9 +157,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # MXU1 PROLOGUE: Load W1_A (k=0), transpose, push weights + bias
@@ -172,9 +172,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
     # ── [b] MXU1 w-push + acc-push ──
     VMATPUSH.W.MXU1       0, 7
@@ -187,9 +187,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 9, 8
-    DELAY 80
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # K-TILE 0: Load X[:,0:32] → m0 and duplicate → m6 for MXU1
@@ -201,9 +201,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0                 # MXU0 activations slab 0
-    DELAY 40
+    DELAY 33
     VLOAD 6, x6, 0                 # MXU1 duplicate slab 0
-    DELAY 40
+    DELAY 33
 
     # ── [c]+[e]: MXU0 compute + w-push, MXU1 compute + w-push ──
     # MXU0 reads m0; MXU1 reads duplicated slab m6.
@@ -226,7 +226,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     # Need tile-0 matmuls to finish before issuing the tile-1 accumulate.
-    DELAY 120
+    DELAY 64
 
     ADDI  x6, x0, 0
     LI    x10, 0x0400             # DRAM 0x0400: X[:,32:64]
@@ -234,9 +234,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0                 # MXU0 activations slab 1
-    DELAY 40
+    DELAY 33
     VLOAD 8, x6, 0                 # MXU1 duplicate slab 1
-    DELAY 40
+    DELAY 33
 
     # ── [e]: Dual MXU concurrent compute, k-tile 1 ──
     # MXU0 reads m1; MXU1 reads duplicated slab m8.
@@ -250,7 +250,7 @@
     # m4,m5 held MXU0 W0_B weight data, now overwritten (already pushed)
 
     # Wait for MXU matmul pipelines to drain
-    DELAY 120
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # STORE VPU vsub result (m2,m3) — overlapped with MXU acc drain
@@ -258,10 +258,10 @@
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 3, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3C00
@@ -278,10 +278,10 @@
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 5, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x4400
@@ -301,7 +301,7 @@
     # ── [g]: concurrent pops on different units + acc buffers ──
     VMATPOP.BF16.MXU0  2, 0
     VMATPOP.BF16.MXU1  4, 0
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # STORE MXU0 result (m2,m3)
@@ -309,10 +309,10 @@
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 3, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x2C00
@@ -329,10 +329,10 @@
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 5, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3400
@@ -349,14 +349,14 @@
 # ═══════════════════════════════════════════════════════════════
 
     VSUB.BF16  6, 2, 4            # m6,m7 ← vsub(C0, C1)
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 6, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 7, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x4C00

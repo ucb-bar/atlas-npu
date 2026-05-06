@@ -44,17 +44,17 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Pack BF16 (m0, m1) → FP8 m4 via scale reg 0 ──
     VFP8PACK 4, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
 
     # ── DMA out: single 1024B write per tile ──
     ADD   x3, x22, x23

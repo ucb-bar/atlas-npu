@@ -35,7 +35,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load B_K0 → VMEM[256] → m4 → m5 ──
     LI    x7, 256
@@ -44,15 +44,15 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 4, x7, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # ── First K-tile: acc = A_K0 @ B_K0 ──
     VMATPUSH.W.MXU0 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 0, 0
-    DELAY 200
+    DELAY 95
 
     # ── Load A_K1 → VMEM[512] → m2 ──
     LI    x6, 512
@@ -61,7 +61,7 @@
     DMA.WAIT  0
     LI    x6, 512
     VLOAD 2, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load B_K1 → VMEM[768] → m6 → m7 ──
     LI    x7, 768
@@ -70,28 +70,28 @@
     DMA.WAIT  0
     LI    x7, 768
     VLOAD 6, x7, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 6
-    DELAY 80
+    DELAY 64
 
     # ── Second K-tile: acc += A_K1 @ B_K1 ──
     VMATPUSH.W.MXU0 0, 7
-    DELAY 40
+    DELAY 31
     VMATMUL.ACC.MXU0 0, 2, 0
-    DELAY 200
+    DELAY 95
 
     VMATPOP.BF16.MXU0 8, 0
-    DELAY 40
+    DELAY 31
 
     # ── Store m8 (cols 0-15) → VMEM[1024] → DRAM[0x1000] ──
     LI    x8, 1024
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
 
     # ── Store m9 (cols 16-31) → VMEM[1280] → DRAM[0x1400] ──
     LI    x9, 1280
     VSTORE 9, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000
