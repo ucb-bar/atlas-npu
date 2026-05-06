@@ -39,41 +39,41 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Constants: m2,m3 = -1.0   m4,m5 = +1.0 ──
     VLI.ALL 2, 0xBF80
-    DELAY 150
+    DELAY 63
     VLI.ALL 4, 0x3F80
-    DELAY 150
+    DELAY 63
 
     # ── m6,m7 = X * -1 ──
     VMUL.BF16  6, 0, 2
-    DELAY 150
+    DELAY 64
 
     # ── m8,m9 = exp(-X) ──
     VEXP 8, 6
-    DELAY 150
+    DELAY 64
 
     # ── m10,m11 = exp(-X) + 1 ──
     VADD.BF16 10, 8, 4
-    DELAY 150
+    DELAY 64
 
     # ── m12,m13 = 1 / (1 + exp(-X)) = sigmoid(X) ──
     VRECIP.BF16 12, 10
-    DELAY 150
+    DELAY 64
 
     # ── m14,m15 = X * sigmoid(X) = silu(X) ──
     VMUL.BF16 14, 0, 12
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 14, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 15, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

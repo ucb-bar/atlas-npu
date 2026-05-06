@@ -71,53 +71,53 @@ setup_done:
     # VLOAD all upper banks we intend to touch.
     ADDI  x10, x0, 0
     VLOAD 48, x10, 0         # A_fp8 -> m48
-    DELAY 40
+    DELAY 33
 
     ADDI  x10, x0, 256
     VLOAD 50, x10, 0         # B raw -> m50
-    DELAY 40
+    DELAY 33
 
     ADDI  x10, x0, 512
     VLOAD 58, x10, 0         # BF16 seed low -> m58
-    DELAY 40
+    DELAY 33
     VLOAD 59, x10, 8         # BF16 seed high -> m59
-    DELAY 40
+    DELAY 33
 
     # High-bank passthrough stores to ensure direct read+write coverage on m58/m59.
     ADDI  x11, x0, 1024
     VSTORE 58, x11, 0
-    DELAY 40
+    DELAY 33
     VSTORE 59, x11, 8
-    DELAY 40
+    DELAY 33
 
     # XLU transpose the raw FP8 weight tile from m50 into high bank m52.
     VTRPOSE.XLU 52, 50
-    DELAY 80
+    DELAY 64
 
     # MXU1 consumes upper-bank activation and transposed weight.
     VMATPUSH.W.MXU1 0, 52
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 48, 0
-    DELAY 120
+    DELAY 34
     VMATPOP.BF16.MXU1 60, 0
-    DELAY 40
+    DELAY 31
 
     # VPU post-process on upper BF16 pair.
     VRELU 62, 60
-    DELAY 150
+    DELAY 64
 
     # Store MXU BF16 result pair and VPU ReLU pair to VMEM.
     ADDI  x12, x0, 1536
     VSTORE 60, x12, 0
-    DELAY 40
+    DELAY 33
     VSTORE 61, x12, 8
-    DELAY 40
+    DELAY 33
 
     ADDI  x12, x0, 2048
     VSTORE 62, x12, 0
-    DELAY 40
+    DELAY 33
     VSTORE 63, x12, 8
-    DELAY 40
+    DELAY 33
 
     # Drain all checked regions to DRAM.
     LI    x13, 0x1000

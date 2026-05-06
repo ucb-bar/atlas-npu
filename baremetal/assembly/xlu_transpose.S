@@ -84,16 +84,16 @@
     # VLOAD VMEM[0] → TRF m0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # XLU transpose m0 → m1
     VTRPOSE.XLU 1, 0
-    DELAY 80
+    DELAY 64
 
     # VSTORE m1 → VMEM[word 256]
     LI    x7, 256
     VSTORE 1, x7, 0
-    DELAY 40
+    DELAY 33
 
     # DMA store VMEM[256] → DRAM[base+1024]
     LI    x7, 256

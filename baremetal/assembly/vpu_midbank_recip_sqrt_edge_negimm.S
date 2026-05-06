@@ -43,23 +43,23 @@
     # Negative-offset VLOAD into mid-bank MREGs.
     LI    x20, 0xDD00         # input_hi word address
     VLOAD 40, x20, -8         # -> VMEM word 0xDC00
-    DELAY 40
+    DELAY 33
     VLOAD 41, x20, 0          # -> VMEM word 0xDD00
-    DELAY 40
+    DELAY 33
 
     # Edge-class VPU approximators.
     VRECIP.BF16 42, 40
-    DELAY 150
+    DELAY 64
 
     VSQRT 44, 40
-    DELAY 150
+    DELAY 64
 
     # Spill recip result with negative-offset VSTORE, then DMA.STORE to DRAM.
     LI    x21, 0xE500         # recip_hi word address
     VSTORE 42, x21, -8        # -> VMEM word 0xE400
-    DELAY 40
+    DELAY 33
     VSTORE 43, x21, 0         # -> VMEM word 0xE500
-    DELAY 40
+    DELAY 33
 
     LI    x7,  0xE400         # recip_lo word address for DMA.STORE source
     LI    x11, 0x0800         # DRAM byte offset for recip output
@@ -69,9 +69,9 @@
     # Spill sqrt result with negative-offset VSTORE, then DMA.STORE to DRAM.
     LI    x22, 0xED00         # sqrt_hi word address
     VSTORE 44, x22, -8        # -> VMEM word 0xEC00
-    DELAY 40
+    DELAY 33
     VSTORE 45, x22, 0         # -> VMEM word 0xED00
-    DELAY 40
+    DELAY 33
 
     LI    x8,  0xEC00         # sqrt_lo word address for DMA.STORE source
     LI    x13, 0x1000         # DRAM byte offset for sqrt output

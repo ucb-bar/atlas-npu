@@ -77,14 +77,14 @@ output_tile_loop:
     # ── VLOAD A → m0, B → m4 ──
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     LI    x6, 256
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Transpose B → m5 (so MXU computes A @ B, not A @ B^T) ──
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
     BNE   x13, x0, matmul_mxu1
@@ -92,32 +92,32 @@ output_tile_loop:
 
     # ── MXU0 path: push weight + matmul + pop ──
     VMATPUSH.W.MXU0 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 0, 0
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0 2, 0
-    DELAY 40
+    DELAY 31
     BEQ   x0, x0, matmul_done
     NOP
 
 matmul_mxu1:
     # ── MXU1 path ──
     VMATPUSH.W.MXU1 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 0, 0
-    DELAY 120
+    DELAY 34
     VMATPOP.BF16.MXU1 2, 0
-    DELAY 40
+    DELAY 31
 
 matmul_done:
 
     # ── Store m2 (cols 0-15) → VMEM[512], m3 (cols 16-31) → VMEM[768] ──
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 768
     VSTORE 3, x8, 0
-    DELAY 40
+    DELAY 33
 
     # ── DMA out: C[m,n] two halves ──
     # C DRAM offset = (m*N_tiles + n) * TILE_BYTES_BF16 + 0x2000

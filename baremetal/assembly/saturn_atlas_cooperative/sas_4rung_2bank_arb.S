@@ -54,7 +54,7 @@ inner:
     # ── Bank 3 vector LSU (mreg 0) ──
     LI    x6,  98304
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Bank 4 scalar LSU: load byte 0, store to byte 8 (proves LW fired) ──
     LI    x16, 0x80000           # bank 4 byte 0 (VMEM-relative)
@@ -64,7 +64,7 @@ inner:
     DELAY 1
 
     VSTORE 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     DMA.WAIT 0
     DMA.WAIT 1
@@ -80,7 +80,7 @@ inner:
     # ── Bank 3 vector LSU (mreg 1) ──
     LI    x6,  98304
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Bank 4 scalar LSU: load byte 4, store to byte 12 ──
     LI    x16, 0x80000
@@ -90,7 +90,7 @@ inner:
     DELAY 1
 
     VSTORE 1, x6, 0
-    DELAY 40
+    DELAY 33
 
     DMA.WAIT 0
     DMA.WAIT 1

@@ -34,9 +34,9 @@
 
     # ── Invariant constants ──
     VLI.ALL 6, 0x3D00          # 1/32
-    DELAY 150
+    DELAY 63
     VLI.ALL 8, 0x3586          # eps = 1e-6
-    DELAY 150
+    DELAY 63
 
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
@@ -56,31 +56,31 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── RMS-norm chain ──
     VSQUARE.BF16 2, 0
-    DELAY 150
+    DELAY 64
     VREDSUM.ROW.BF16 4, 2
-    DELAY 150
+    DELAY 37
     VMUL.BF16 10, 4, 6         # mean(X^2) = sum * inv_dim
-    DELAY 150
+    DELAY 64
     VADD.BF16 12, 10, 8        # mean + eps
-    DELAY 150
+    DELAY 64
     VSQRT 14, 12               # sqrt(mean + eps)
-    DELAY 150
+    DELAY 64
     VRECIP.BF16 10, 14         # inv_rms (reuses m10,m11; m6,m7 stays as inv_dim)
-    DELAY 150
+    DELAY 64
     VMUL.BF16 12, 0, 10        # Y = X * inv_rms (reuses m12,m13)
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20

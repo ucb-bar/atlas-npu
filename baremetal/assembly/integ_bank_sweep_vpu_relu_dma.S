@@ -65,18 +65,18 @@
     DMA.WAIT 0
 
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     VRELU 2, 0
-    DELAY 150
+    DELAY 64
 
     LI    x7, 512            # output VMEM word base
     VSTORE 2, x7, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x7, 8
-    DELAY 40
+    DELAY 33
 
     LB    x20, x29, 0
     DELAY 2
@@ -109,18 +109,18 @@
     DMA.WAIT 2
 
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 5, x6, 8
-    DELAY 40
+    DELAY 33
 
     VRELU 6, 4
-    DELAY 150
+    DELAY 64
 
     LI    x7, 33280          # 0x20800 bytes / 4
     VSTORE 6, x7, 0
-    DELAY 40
+    DELAY 33
     VSTORE 7, x7, 8
-    DELAY 40
+    DELAY 33
 
     LB    x20, x29, 0
     DELAY 2
@@ -153,18 +153,18 @@
     DMA.WAIT 4
 
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 9, x6, 8
-    DELAY 40
+    DELAY 33
 
     VRELU 10, 8
-    DELAY 150
+    DELAY 64
 
     LI    x7, 66048          # 0x40800 bytes / 4
     VSTORE 10, x7, 0
-    DELAY 40
+    DELAY 33
     VSTORE 11, x7, 8
-    DELAY 40
+    DELAY 33
 
     LB    x20, x29, 0
     DELAY 2
@@ -197,18 +197,18 @@
     DMA.WAIT 6
 
     VLOAD 12, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 13, x6, 8
-    DELAY 40
+    DELAY 33
 
     VRELU 14, 12
-    DELAY 150
+    DELAY 64
 
     LI    x7, 98816          # 0x60800 bytes / 4
     VSTORE 14, x7, 0
-    DELAY 40
+    DELAY 33
     VSTORE 15, x7, 8
-    DELAY 40
+    DELAY 33
 
     LB    x20, x29, 0
     DELAY 2

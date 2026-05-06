@@ -26,9 +26,9 @@
 
     # ── Invariant constants (set once) ──
     VLI.ALL 2, 0xBF80          # -1.0
-    DELAY 150
+    DELAY 63
     VLI.ALL 4, 0x3F80          # +1.0
-    DELAY 150
+    DELAY 63
 
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
@@ -48,27 +48,27 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── silu chain ──
     VMUL.BF16  6, 0, 2         # -X
-    DELAY 150
+    DELAY 64
     VEXP 8, 6                  # exp(-X)
-    DELAY 150
+    DELAY 64
     VADD.BF16 10, 8, 4         # 1 + exp(-X)
-    DELAY 150
+    DELAY 64
     VRECIP.BF16 12, 10         # sigmoid(X)
-    DELAY 150
+    DELAY 64
     VMUL.BF16 14, 0, 12        # silu(X)
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 14, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 15, x8, 8
-    DELAY 40
+    DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20

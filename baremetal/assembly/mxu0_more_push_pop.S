@@ -59,19 +59,19 @@
     LI    x7, 768
     VLOAD 7, x7, 0
 
-    DELAY 40
+    DELAY 33
 
 # ── Push weights ──
     VMATPUSH.W.MXU0  0, 4
-    DELAY 40
+    DELAY 31
 
 # ── Push BF16 bias as accumulator seed (reads m6 + m7) ──
     VMATPUSH.ACC.BF16.MXU0  0, 6
-    DELAY 40
+    DELAY 31
 
 # ── Matmul with accumulate: y = (act × wgt^T) + acc ──
     VMATMUL.ACC.MXU0  0, 0, 0
-    DELAY 120
+    DELAY 95
 
 # ── Load E8M0 scale into scale register 0 ──
 #    0x7C = 124 → 2^(124-127) = 2^(-3) = 0.125
@@ -79,12 +79,12 @@
 
 # ── Pop as FP8 using scale register 0, accumulator 0 ──
     VMATPOP.FP8.MXU0  2, 0, 0
-    DELAY 40
+    DELAY 31
 
 # ── Store result: TRF m2 → VMEM[1024] → DRAM[4096] ──
     LI    x8, 1024
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 4096
     DMA.STORE x3, x8, x2, 1

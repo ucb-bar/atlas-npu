@@ -55,7 +55,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load K → VMEM[256] → m2 ──
     LI    x6, 256
@@ -64,7 +64,7 @@
     DMA.WAIT  0
     LI    x6, 256
     VLOAD 2, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load V → VMEM[512] → m4 ──
     LI    x6, 512
@@ -73,7 +73,7 @@
     DMA.WAIT  0
     LI    x6, 512
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load scale bank 0 → VMEM[768] → m6 ──
     LI    x6, 768
@@ -89,61 +89,61 @@
 
     LI    x6, 768
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 7, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Matmul 1: scores = Q @ K (push K^T) ──
     VTRPOSE.XLU 3, 2
-    DELAY 80
+    DELAY 64
     VMATPUSH.W.MXU0 0, 3
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 0, 0
-    DELAY 200
+    DELAY 95
     VMATPOP.BF16.MXU0 10, 0
-    DELAY 40
+    DELAY 31
 
     # ── Scale: (m12, m13) = scores * scale ──
     VMUL.BF16 12, 10, 6
-    DELAY 150
+    DELAY 64
 
     # ── Stable softmax ──
     VREDMAX.ROW.BF16 14, 12
-    DELAY 150
+    DELAY 32
     VSUB.BF16 16, 12, 14
-    DELAY 150
+    DELAY 64
     VEXP 18, 16
-    DELAY 150
+    DELAY 64
     VREDSUM.ROW.BF16 20, 18
-    DELAY 150
+    DELAY 37
     VRECIP.BF16 22, 20
-    DELAY 150
+    DELAY 64
     VMUL.BF16 24, 18, 22
-    DELAY 150
+    DELAY 64
 
     # ── Pack probs BF16 → FP8 (unit scale, permuted layout) ──
     SELI 0, 0x7F
     VFP8PACK 26, 24, 0
-    DELAY 150
+    DELAY 64
 
     # ── Matmul 2: out = packed_probs @ V (push V^T) ──
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
     VMATPUSH.W.MXU1 0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 26, 0
-    DELAY 200
+    DELAY 34
     VMATPOP.BF16.MXU1 28, 0
-    DELAY 40
+    DELAY 31
 
     # ── Store m28 (cols 0-15) → VMEM[1280] → DRAM[0x1400] ──
     LI    x8, 1280
     VSTORE 28, x8, 0
-    DELAY 40
+    DELAY 33
 
     # ── Store m29 (cols 16-31) → VMEM[1536] → DRAM[0x1800] ──
     VSTORE 29, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1280
     LI    x3, 0x1400

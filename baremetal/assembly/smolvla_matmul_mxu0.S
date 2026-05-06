@@ -30,7 +30,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ── Load A DRAM[0x000] → VMEM[256] → TRF m0 ──
     LI    x7, 256
@@ -39,28 +39,28 @@
     DMA.WAIT  0
     LI    x7, 256
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
 
     # ── Transpose B so MXU computes A @ B, not A @ B^T ──
     VTRPOSE.XLU 5, 4
-    DELAY 80
+    DELAY 64
 
     VMATPUSH.W.MXU0  0, 5
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0  0, 0, 0
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0  2, 0
-    DELAY 40
+    DELAY 31
 
     # ── Store m2 (cols 0-15) → VMEM[512] → DRAM[0x800] ──
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
 
     # ── Store m3 (cols 16-31) → VMEM[768] → DRAM[0xC00] ──
     LI    x9, 768
     VSTORE 3, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

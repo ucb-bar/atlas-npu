@@ -135,26 +135,26 @@
     # VMEM[0] → TRF m0 → VMEM[768]
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 768
     VSTORE 0, x8, 0
-    DELAY 40
+    DELAY 33
 
     # VMEM[256] → TRF m2 → VMEM[1024]
     LI    x7, 256
     VLOAD 2, x7, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
 
     # VMEM[512] → TRF m4 → VMEM[1280]
     LI    x7, 512
     VLOAD 4, x7, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 1280
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════════
 # Phase 3: Three concurrent stores — mix of early and late waits

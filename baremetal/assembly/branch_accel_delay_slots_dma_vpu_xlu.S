@@ -61,7 +61,7 @@
 beq_target:
     DMA.WAIT 0
     VLOAD 20, x6, 0         # m20 <- loaded FP8 tile
-    DELAY 40
+    DELAY 33
 
 # ----------------------------------------------------------------------
 # Case 2: not-taken BNE; the single delay slot writes m24 with a column-immediate pattern.
@@ -70,11 +70,11 @@ beq_target:
     BNE   x0, x0, bne_unreached
     VLI.COL 24, 0x3F80
 
-    DELAY 150
+    DELAY 31
     VTRPOSE.XLU 25, 24
-    DELAY 80
+    DELAY 64
     VSTORE 25, x10, 0       # store XLU output to VMEM[2048..3071]
-    DELAY 40
+    DELAY 33
     DMA.STORE x12, x10, x8, 1
     DMA.WAIT 1
     JAL   x0, after_bne_case
@@ -98,7 +98,7 @@ after_bne_case:
 
 helper_store:
 helper_body:
-    DELAY 40
+    DELAY 32
     DMA.STORE x11, x9, x8, 2
     DMA.WAIT 2
     JALR  x0, x1, 0

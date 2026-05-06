@@ -45,49 +45,49 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── (m2, m3) = X^2 (VSQUARE, not VMUL X,X — MRF bank has one read port) ──
     VSQUARE.BF16 2, 0
-    DELAY 150
+    DELAY 64
 
     # ── (m4, m5) = row-sum(X^2) broadcast ──
     VREDSUM.ROW.BF16 4, 2
-    DELAY 150
+    DELAY 37
 
     # ── Constants: inv_dim and eps ──
     VLI.ALL 6, 0x3D00
-    DELAY 150
+    DELAY 63
     VLI.ALL 8, 0x3586
-    DELAY 150
+    DELAY 63
 
     # ── (m10, m11) = sum * inv_dim = mean(X^2) ──
     VMUL.BF16 10, 4, 6
-    DELAY 150
+    DELAY 64
 
     # ── (m12, m13) = mean + eps ──
     VADD.BF16 12, 10, 8
-    DELAY 150
+    DELAY 64
 
     # ── (m14, m15) = sqrt(mean + eps) ──
     VSQRT 14, 12
-    DELAY 150
+    DELAY 64
 
     # ── (m4, m5) = 1 / sqrt(mean + eps) = inv_rms ──
     VRECIP.BF16 4, 14
-    DELAY 150
+    DELAY 64
 
     # ── (m6, m7) = X * inv_rms = Y ──
     VMUL.BF16 6, 0, 4
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 6, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 7, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

@@ -68,47 +68,47 @@
     # ------------------------------------------------------------------
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     ADDI  x6, x0, 256
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
 
     # ------------------------------------------------------------------
     # MXU1 matmul: C = A @ B
     # Generator preloads B^T because MXU computes act @ weight^T.
     # ------------------------------------------------------------------
     VMATPUSH.W.MXU1 0, 4
-    DELAY 40
+    DELAY 31
 
     VMATMUL.MXU1 0, 0, 0
-    DELAY 120
+    DELAY 34
 
     VMATPOP.BF16.MXU1 8, 0
-    DELAY 40
+    DELAY 31
 
     # ------------------------------------------------------------------
     # VPU post-processing and quantization round-trip
     # ------------------------------------------------------------------
     VRELU 12, 8
-    DELAY 150
+    DELAY 64
 
     VFP8PACK 16, 12, 0
-    DELAY 150
+    DELAY 64
 
     VFP8UNPACK 20, 16, 0
-    DELAY 150
+    DELAY 65
 
     # ------------------------------------------------------------------
     # Drain raw BF16 output to DRAM [0x1000..0x17FF]
     # ------------------------------------------------------------------
     ADDI  x6, x0, 1024
     VSTORE 8, x6, 0
-    DELAY 40
+    DELAY 33
 
     ADDI  x6, x0, 1280
     VSTORE 9, x6, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 4096
     ADDI  x6, x0, 1024
@@ -120,7 +120,7 @@
     # ------------------------------------------------------------------
     ADDI  x6, x0, 1536
     VSTORE 16, x6, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 6144
     ADDI  x6, x0, 1536
@@ -132,11 +132,11 @@
     # ------------------------------------------------------------------
     ADDI  x6, x0, 2048
     VSTORE 20, x6, 0
-    DELAY 40
+    DELAY 33
 
     ADDI  x6, x0, 2304
     VSTORE 21, x6, 0
-    DELAY 40
+    DELAY 33
 
     LI    x10, 8192
     ADDI  x6, x0, 2048

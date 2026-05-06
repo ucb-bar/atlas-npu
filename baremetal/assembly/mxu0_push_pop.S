@@ -25,23 +25,23 @@
     VLOAD 0, x7, 0
 
     # Wait for VLOAD m0 to fully populate before MXU reads activations.
-    DELAY 40
+    DELAY 33
 
     VMATPUSH.W.MXU0  0, 4
     # Wait for push into weight slot 0 to complete before launching compute.
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0  0, 0, 0
     # Wait for matmul pipeline to finish writing the accumulation buffer.
-    DELAY 120
+    DELAY 95
     VMATPOP.BF16.MXU0  2, 0
     # Wait for pop to finish writing m2/m3 before VSTORE reads m2.
-    DELAY 40
+    DELAY 31
 
     # VSTORE m2 → VMEM[512]
     LI    x8, 512
     VSTORE 2, x8, 0
     # Wait for VSTORE to finish before DMA reads VMEM[512].
-    DELAY 40
+    DELAY 33
 
     # DMA store VMEM[512] → DRAM[2048]
     LI    x8, 512

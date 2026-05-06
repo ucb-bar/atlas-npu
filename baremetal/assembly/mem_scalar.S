@@ -89,8 +89,7 @@
 
 # ── Test 9: SW then immediate LW (RAW hazard test) ──────
     LI    x10, 0xAABBCCDD
-    SW    x10, x8, 0
-    DELAY 2
+    SW    x10, x8, 0    
     LW    x9, x8, 0
     DELAY 2
     LI    x30, 0xAABBCCDD
@@ -101,7 +100,6 @@
 # ── Test 10: SB then LBU at same byte ───────────────────
     ADDI  x11, x0, 0x42
     SB    x11, x8, 1
-    DELAY 2
     LBU   x9, x8, 1
     DELAY 2
     ADDI  x30, x0, 0x42
@@ -111,8 +109,7 @@
 
 # ── Test 11: SH then LHU at byte 2 ──────────────────────
     LI    x12, 0x1234
-    SH    x12, x8, 2
-    DELAY 2
+    SH    x12, x8, 2    
     LHU   x9, x8, 2
     DELAY 2
     LI    x30, 0x1234

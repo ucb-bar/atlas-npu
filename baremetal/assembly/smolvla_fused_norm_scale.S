@@ -36,9 +36,9 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Load matrix → VMEM[512..1023] → (m2, m3) ──
     LI    x7, 512
@@ -52,28 +52,28 @@
 
     LI    x7, 512
     VLOAD 2, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 3, x7, 8
-    DELAY 40
+    DELAY 33
 
     # ── (m4, m5) = sqrt(variance) ──
     VSQRT 4, 0
-    DELAY 150
+    DELAY 64
 
     # ── (m6, m7) = 1 / sqrt(variance) = rsqrt(variance) ──
     VRECIP.BF16 6, 4
-    DELAY 150
+    DELAY 64
 
     # ── (m8, m9) = matrix * rsqrt(variance) ──
     VMUL.BF16 8, 2, 6
-    DELAY 150
+    DELAY 64
 
     # ── Store output → VMEM[1024..1535] → DRAM[0x1000..0x17FF] ──
     LI    x8, 1024
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 9, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000

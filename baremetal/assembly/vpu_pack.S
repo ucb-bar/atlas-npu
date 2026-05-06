@@ -42,9 +42,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
 # ================================================================
 # Test 1: vfp8pack  m4, m0 with scale reg 0
@@ -53,11 +53,11 @@
 # ================================================================
     SELI  0, 0x80
     VFP8PACK 4, 0, 0
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800
@@ -71,13 +71,13 @@
 # ================================================================
     SELI  1, 0x81
     VFP8UNPACK 8, 4, 1
-    DELAY 150
+    DELAY 65
 
     LI    x8, 1024
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 9, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x1000

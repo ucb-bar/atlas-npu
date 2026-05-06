@@ -86,40 +86,40 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
     VLOAD 2, x6, 16
-    DELAY 40
+    DELAY 33
     VLOAD 3, x6, 24
-    DELAY 40
+    DELAY 33
 
     # ── Quantize Q_lo (m0,m1) → m4 FP8 via acc[1] roundtrip ──
     VMATPUSH.ACC.BF16.MXU0 1, 0
-    DELAY 80
+    DELAY 31
     SELI 0, 0x7F                # E8M0 unit scale (2^0 = 1.0)
     VMATPOP.FP8.MXU0 4, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── Quantize Q_hi (m2,m3) → m5 FP8 ──
     VMATPUSH.ACC.BF16.MXU0 1, 2
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 5, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ────────────────────────────────────────────────────────────────────
     # Initialize persistent online-softmax state
     # ────────────────────────────────────────────────────────────────────
     VLI.ALL 6, 0x3E00       # scale = 0.125 (1/sqrt(64)) — fills (m6, m7)
-    DELAY 150
+    DELAY 63
     VLI.ALL 8, 0xC2C8       # m_prev = -100.0 BF16 (-inf init) — fills (m8, m9)
-    DELAY 150
+    DELAY 63
     VLI.ALL 10, 0x0000      # l_prev = 0 — fills (m10, m11)
-    DELAY 150
+    DELAY 63
     VLI.ALL 12, 0x0000      # O_left = 0 — fills (m12, m13)
-    DELAY 150
+    DELAY 63
     VLI.ALL 14, 0x0000      # O_right = 0 — fills (m14, m15)
-    DELAY 150
+    DELAY 63
 
     # ════════════════════════════════════════════════════════════════════
     # K TILE 0  (k_seq 0:32)
@@ -132,23 +132,23 @@
     DMA.WAIT  0
     LI    x6, 1024
     VLOAD 16, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 17, x6, 8
-    DELAY 40
+    DELAY 33
     VLOAD 18, x6, 16
-    DELAY 40
+    DELAY 33
     VLOAD 19, x6, 24
-    DELAY 40
+    DELAY 33
 
     # ── Quantize K_lo, K_hi to FP8 ──
     VMATPUSH.ACC.BF16.MXU0 1, 16
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 20, 0, 1
-    DELAY 40
+    DELAY 31
     VMATPUSH.ACC.BF16.MXU0 1, 18
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 21, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── Load V0_mlir: DRAM[0x3000..0x3FFF] → VMEM[2048..3071] → m22..m25 ──
     LI    x6, 2048
@@ -157,105 +157,105 @@
     DMA.WAIT  0
     LI    x6, 2048
     VLOAD 22, x6, 0         # V_top cols 0:16
-    DELAY 40
+    DELAY 33
     VLOAD 23, x6, 8         # V_top cols 16:32
-    DELAY 40
+    DELAY 33
     VLOAD 24, x6, 16        # V_bot cols 0:16
-    DELAY 40
+    DELAY 33
     VLOAD 25, x6, 24        # V_bot cols 16:32
-    DELAY 40
+    DELAY 33
 
     # ── Quantize V_top, V_bot to FP8 ──
     VMATPUSH.ACC.BF16.MXU0 1, 22
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 26, 0, 1
-    DELAY 40
+    DELAY 31
     VMATPUSH.ACC.BF16.MXU0 1, 24
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 27, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── Q @ K^T: scores = Q_lo @ K_lo^T + Q_hi @ K_hi^T ──
     VMATPUSH.W.MXU0 0, 20    # weight = K_lo FP8
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 4, 0     # acc[0] = Q_lo @ K_lo^T
-    DELAY 200
+    DELAY 95
     VMATPUSH.W.MXU0 0, 21    # weight = K_hi FP8
-    DELAY 40
+    DELAY 31
     VMATMUL.ACC.MXU0 0, 5, 0 # acc[0] += Q_hi @ K_hi^T
-    DELAY 200
+    DELAY 95
     VMATPOP.BF16.MXU0 28, 0  # (m28, m29) = scores BF16
-    DELAY 40
+    DELAY 31
 
     # ── Scale scores ──
     VMUL.BF16 30, 28, 6
-    DELAY 150
+    DELAY 64
 
     # ── tile_max = rowmax(scaled), broadcast across 32 cols ──
     VREDMAX.ROW.BF16 16, 30
-    DELAY 150
+    DELAY 32
 
     # ── m_new = max(m_prev, tile_max) ──
     VMAX.BF16 18, 8, 16
-    DELAY 150
+    DELAY 64
 
     # ── exp_diff = exp(m_prev - m_new) ──
     VSUB.BF16 20, 8, 18
-    DELAY 150
+    DELAY 64
     VEXP 20, 20
-    DELAY 150
+    DELAY 64
 
     # ── Rescale running output: O *= exp_diff ──
     VMUL.BF16 12, 12, 20
-    DELAY 150
+    DELAY 64
     VMUL.BF16 14, 14, 20
-    DELAY 150
+    DELAY 64
 
     # ── exp_s = exp(scaled - m_new) ──
     VSUB.BF16 22, 30, 18
-    DELAY 150
+    DELAY 64
     VEXP 22, 22
-    DELAY 150
+    DELAY 64
 
     # ── Quantize exp_s BF16 → FP8 via acc[1] roundtrip ──
     VMATPUSH.ACC.BF16.MXU0 1, 22
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 24, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── exp_s @ V_left:  weight = m26 (V_top FP8) ──
     VMATPUSH.W.MXU1 0, 26
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 24, 0
-    DELAY 200
+    DELAY 34
     VMATPOP.BF16.MXU1 28, 0   # (m28, m29) = vc_left BF16
-    DELAY 40
+    DELAY 31
 
     # ── exp_s @ V_right: weight = m27 (V_bot FP8) ──
     VMATPUSH.W.MXU1 0, 27
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 24, 0
-    DELAY 200
+    DELAY 34
     VMATPOP.BF16.MXU1 30, 0   # (m30, m31) = vc_right BF16
-    DELAY 40
+    DELAY 31
 
     # ── O += V contributions ──
     VADD.BF16 12, 12, 28
-    DELAY 150
+    DELAY 64
     VADD.BF16 14, 14, 30
-    DELAY 150
+    DELAY 64
 
     # ── l = exp_diff * l + rowsum(exp_s) ──
     VMUL.BF16 16, 20, 10
-    DELAY 150
+    DELAY 64
     VREDSUM.ROW.BF16 24, 22
-    DELAY 150
+    DELAY 37
     VADD.BF16 10, 16, 24
-    DELAY 150
+    DELAY 64
 
     # ── m_prev = m_new (pair-op VMOV copies both halves) ──
     VMOV 8, 18
-    DELAY 150
+    DELAY 64
 
     # ════════════════════════════════════════════════════════════════════
     # K TILE 1  (k_seq 32:64) — same body, K1 / V1 inputs
@@ -268,22 +268,22 @@
     DMA.WAIT  0
     LI    x6, 1024
     VLOAD 16, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 17, x6, 8
-    DELAY 40
+    DELAY 33
     VLOAD 18, x6, 16
-    DELAY 40
+    DELAY 33
     VLOAD 19, x6, 24
-    DELAY 40
+    DELAY 33
 
     VMATPUSH.ACC.BF16.MXU0 1, 16
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 20, 0, 1
-    DELAY 40
+    DELAY 31
     VMATPUSH.ACC.BF16.MXU0 1, 18
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 21, 0, 1
-    DELAY 40
+    DELAY 31
 
     # ── Load V1_mlir ──
     LI    x6, 2048
@@ -292,111 +292,111 @@
     DMA.WAIT  0
     LI    x6, 2048
     VLOAD 22, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 23, x6, 8
-    DELAY 40
+    DELAY 33
     VLOAD 24, x6, 16
-    DELAY 40
+    DELAY 33
     VLOAD 25, x6, 24
-    DELAY 40
+    DELAY 33
 
     VMATPUSH.ACC.BF16.MXU0 1, 22
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 26, 0, 1
-    DELAY 40
+    DELAY 31
     VMATPUSH.ACC.BF16.MXU0 1, 24
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 27, 0, 1
-    DELAY 40
+    DELAY 31
 
     VMATPUSH.W.MXU0 0, 20
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU0 0, 4, 0
-    DELAY 200
+    DELAY 95
     VMATPUSH.W.MXU0 0, 21
-    DELAY 40
+    DELAY 31
     VMATMUL.ACC.MXU0 0, 5, 0
-    DELAY 200
+    DELAY 95
     VMATPOP.BF16.MXU0 28, 0
-    DELAY 40
+    DELAY 31
 
     VMUL.BF16 30, 28, 6
-    DELAY 150
+    DELAY 64
     VREDMAX.ROW.BF16 16, 30
-    DELAY 150
+    DELAY 32
     VMAX.BF16 18, 8, 16
-    DELAY 150
+    DELAY 64
     VSUB.BF16 20, 8, 18
-    DELAY 150
+    DELAY 64
     VEXP 20, 20
-    DELAY 150
+    DELAY 64
 
     VMUL.BF16 12, 12, 20
-    DELAY 150
+    DELAY 64
     VMUL.BF16 14, 14, 20
-    DELAY 150
+    DELAY 64
 
     VSUB.BF16 22, 30, 18
-    DELAY 150
+    DELAY 64
     VEXP 22, 22
-    DELAY 150
+    DELAY 64
 
     VMATPUSH.ACC.BF16.MXU0 1, 22
-    DELAY 80
+    DELAY 31
     VMATPOP.FP8.MXU0 24, 0, 1
-    DELAY 40
+    DELAY 31
 
     VMATPUSH.W.MXU1 0, 26
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 24, 0
-    DELAY 200
+    DELAY 34
     VMATPOP.BF16.MXU1 28, 0
-    DELAY 40
+    DELAY 31
 
     VMATPUSH.W.MXU1 0, 27
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 24, 0
-    DELAY 200
+    DELAY 34
     VMATPOP.BF16.MXU1 30, 0
-    DELAY 40
+    DELAY 31
 
     VADD.BF16 12, 12, 28
-    DELAY 150
+    DELAY 64
     VADD.BF16 14, 14, 30
-    DELAY 150
+    DELAY 64
 
     VMUL.BF16 16, 20, 10
-    DELAY 150
+    DELAY 64
     VREDSUM.ROW.BF16 24, 22
-    DELAY 150
+    DELAY 37
     VADD.BF16 10, 16, 24
-    DELAY 150
+    DELAY 64
 
     VMOV 8, 18
-    DELAY 150
+    DELAY 64
 
     # ════════════════════════════════════════════════════════════════════
     # Normalize: O /= l
     # ════════════════════════════════════════════════════════════════════
     VRECIP.BF16 16, 10
-    DELAY 150
+    DELAY 64
     VMUL.BF16 12, 12, 16
-    DELAY 150
+    DELAY 64
     VMUL.BF16 14, 14, 16
-    DELAY 150
+    DELAY 64
 
     # ════════════════════════════════════════════════════════════════════
     # Store O → VMEM[3072..4095] → DRAM[0x6000]
     # ════════════════════════════════════════════════════════════════════
     LI    x8, 3072
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x8, 8
-    DELAY 40
+    DELAY 33
     VSTORE 14, x8, 16
-    DELAY 40
+    DELAY 33
     VSTORE 15, x8, 24
-    DELAY 40
+    DELAY 33
 
     LI    x8, 3072
     LI    x3, 0x6000

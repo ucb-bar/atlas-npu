@@ -78,7 +78,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 3, x6, 0
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 1: Prepare MXU0 weights — load W0, transpose, push
@@ -91,9 +91,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # ── OVERLAP [a]: MXU0 weight push + acc push ──
     # Slot B: push W0 transposed → MXU0 wbuf 0
@@ -113,9 +113,9 @@
     DMA.WAIT  1
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 7, 1
-    DELAY 80
+    DELAY 64
 
     # ── OVERLAP [b]: MXU1 weight push + acc push ──
     VMATPUSH.W.MXU1       0, 7
@@ -155,16 +155,16 @@
     # VLOAD X0 → m0, X1 → m6, A_vpu_b0 → m8, B_vpu_b0 → m10
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0                 # m0 ← X0
-    DELAY 40
+    DELAY 33
     LI    x7, 256
     VLOAD 6, x7, 0                 # m6 ← X1
-    DELAY 40
+    DELAY 33
     LI    x8, 512
     VLOAD 8, x8, 0                 # m8 ← A_vpu bank0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VLOAD 10, x9, 0                # m10 ← B_vpu bank0
-    DELAY 40
+    DELAY 33
 
     # Second round: load VPU bank1 data
     # Channel 0: A_vpu bank1 → VMEM[0]
@@ -182,10 +182,10 @@
 
     ADDI  x6, x0, 0
     VLOAD 9, x6, 0                 # m9 ← A_vpu bank1
-    DELAY 40
+    DELAY 33
     LI    x7, 256
     VLOAD 11, x7, 0                # m11 ← B_vpu bank1
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 4: TRIPLE UNIT CONCURRENT COMPUTE
@@ -206,7 +206,7 @@
     # Wait for all three to complete
     # MXU matmul pipeline: ~120 cycles
     # VPU add: ~150 cycles
-    DELAY 150
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 5: MXU0 pop + VPU mul (overlapped)
@@ -221,7 +221,7 @@
     # ── OVERLAP [d]: MXU0 pop + VPU mul ──
     VMATPOP.BF16.MXU0 4, 0
     VMUL.BF16         8, 8, 10      # overwrite m8,m9 with mul result
-    DELAY 150
+    DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 6: MXU1 pop + store VPU add result
@@ -235,10 +235,10 @@
     # Store VPU add result: m12 → VMEM[512], m13 → VMEM[768]
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 13, x9, 0
-    DELAY 40
+    DELAY 33
 
     # DMA store VPU add bank0 and bank1
     LI    x8, 512
@@ -258,10 +258,10 @@
 
     LI    x8, 512
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 9, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x3C00              # DRAM: mul bank0
@@ -280,10 +280,10 @@
 
     LI    x8, 512
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 5, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x2400              # DRAM: C0 lo
@@ -302,10 +302,10 @@
 
     LI    x8, 512
     VSTORE 14, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 15, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x2C00              # DRAM: C1 lo
@@ -326,15 +326,15 @@
 
     # ── OVERLAP [g]: VPU cross-unit compute ──
     VADD.BF16  12, 4, 14
-    DELAY 150
+    DELAY 64
 
     # Store F = vadd(C0, C1)
     LI    x8, 512
     VSTORE 12, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x9, 768
     VSTORE 13, x9, 0
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x10, 0x4400              # DRAM: sum bank0

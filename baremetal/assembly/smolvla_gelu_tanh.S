@@ -38,57 +38,57 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Constants ──
     VLI.ALL 2, 0x3D37          # 0.044715
-    DELAY 150
+    DELAY 63
     VLI.ALL 4, 0x3F4C          # sqrt(2/pi)
-    DELAY 150
+    DELAY 63
     VLI.ALL 6, 0x3F80          # 1.0
-    DELAY 150
+    DELAY 63
     VLI.ALL 8, 0x3F00          # 0.5
-    DELAY 150
+    DELAY 63
 
     # ── m10,m11 = X^3 ──
     VCUBE.BF16 10, 0
-    DELAY 150
+    DELAY 64
 
     # ── m12,m13 = 0.044715 * X^3 ──
     VMUL.BF16 12, 2, 10
-    DELAY 150
+    DELAY 64
 
     # ── m10,m11 = X + 0.044715 * X^3 ──
     VADD.BF16 10, 0, 12
-    DELAY 150
+    DELAY 64
 
     # ── m12,m13 = sqrt(2/pi) * (X + 0.044715 * X^3) ──
     VMUL.BF16 12, 4, 10
-    DELAY 150
+    DELAY 64
 
     # ── m10,m11 = tanh(...) ──
     VTANH 10, 12
-    DELAY 150
+    DELAY 64
 
     # ── m12,m13 = 1 + tanh(...) ──
     VADD.BF16 12, 6, 10
-    DELAY 150
+    DELAY 64
 
     # ── m14,m15 = 0.5 * (1 + tanh(...)) ──
     VMUL.BF16 14, 8, 12
-    DELAY 150
+    DELAY 64
 
     # ── m10,m11 = X * 0.5*(1+tanh(...)) = GELU(X) ──
     VMUL.BF16 10, 0, 14
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 10, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 11, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 512
     LI    x3, 0x0800

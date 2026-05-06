@@ -25,13 +25,13 @@
 
     # ── Invariant constants ──
     VLI.ALL 2, 0x3D37          # 0.044715
-    DELAY 150
+    DELAY 63
     VLI.ALL 4, 0x3F4C          # sqrt(2/pi)
-    DELAY 150
+    DELAY 63
     VLI.ALL 6, 0x3F80          # 1.0
-    DELAY 150
+    DELAY 63
     VLI.ALL 8, 0x3F00          # 0.5
-    DELAY 150
+    DELAY 63
 
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
@@ -51,33 +51,33 @@ tile_loop:
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── GELU tanh chain ──
     VCUBE.BF16 10, 0           # X^3
-    DELAY 150
+    DELAY 64
     VMUL.BF16 12, 2, 10        # 0.044715 * X^3
-    DELAY 150
+    DELAY 64
     VADD.BF16 10, 0, 12        # X + 0.044715 * X^3
-    DELAY 150
+    DELAY 64
     VMUL.BF16 12, 4, 10        # sqrt(2/pi) * (...)
-    DELAY 150
+    DELAY 64
     VTANH 10, 12               # tanh(...)
-    DELAY 150
+    DELAY 64
     VADD.BF16 12, 6, 10        # 1 + tanh(...)
-    DELAY 150
+    DELAY 64
     VMUL.BF16 14, 8, 12        # 0.5 * (1 + tanh(...))
-    DELAY 150
+    DELAY 64
     VMUL.BF16 10, 0, 14        # GELU(X)
-    DELAY 150
+    DELAY 64
 
     LI    x8, 512
     VSTORE 10, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 11, x8, 8
-    DELAY 40
+    DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20

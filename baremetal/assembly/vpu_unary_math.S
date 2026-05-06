@@ -30,9 +30,9 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ── Macro-like store pattern: result in m4,m5 → VMEM[1024] → DRAM[x3] ──
     # Each block: VPU op, delay, 2×VSTORE, 2×DMA.STORE
@@ -41,12 +41,12 @@
     # Test 1: vexp
     # ================================================================
     VEXP 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x0800
     DMA.STORE x3, x8, x2, 1
@@ -60,12 +60,12 @@
     # Test 2: vexp2
     # ================================================================
     VEXP2 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1000
     DMA.STORE x3, x8, x2, 1
@@ -79,12 +79,12 @@
     # Test 3: vsin
     # ================================================================
     VSIN 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1800
     DMA.STORE x3, x8, x2, 1
@@ -98,12 +98,12 @@
     # Test 4: vcos
     # ================================================================
     VCOS 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x2000
     DMA.STORE x3, x8, x2, 1
@@ -117,12 +117,12 @@
     # Test 5: vtanh
     # ================================================================
     VTANH 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x2800
     DMA.STORE x3, x8, x2, 1
@@ -136,12 +136,12 @@
     # Test 6: vlog2
     # ================================================================
     VLOG2 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x3000
     DMA.STORE x3, x8, x2, 1
@@ -155,12 +155,12 @@
     # Test 7: vsqrt
     # ================================================================
     VSQRT 4, 0
-    DELAY 150
+    DELAY 64
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x3800
     DMA.STORE x3, x8, x2, 1

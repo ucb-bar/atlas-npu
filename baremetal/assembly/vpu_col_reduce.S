@@ -34,21 +34,21 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 1: vredsum.bf16  m4, m0
     # ================================================================
     VREDSUM.BF16 4, 0
-    DELAY 250
+    DELAY 128
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x0800
     DMA.STORE x3, x8, x2, 1
@@ -61,21 +61,21 @@
     # Reload A (VPU may have consumed it)
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 2: vredmin.bf16  m4, m0
     # ================================================================
     VREDMIN.BF16 4, 0
-    DELAY 250
+    DELAY 128
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1000
     DMA.STORE x3, x8, x2, 1
@@ -88,21 +88,21 @@
     # Reload A
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x6, 8
-    DELAY 40
+    DELAY 33
 
     # ================================================================
     # Test 3: vredmax.bf16  m4, m0
     # ================================================================
     VREDMAX.BF16 4, 0
-    DELAY 250
+    DELAY 128
 
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
     LI    x8, 1024
     LI    x3, 0x1800
     DMA.STORE x3, x8, x2, 1

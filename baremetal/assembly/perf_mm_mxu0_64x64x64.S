@@ -93,7 +93,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # A01 → m1
     ADDI  x6, x0, 0
@@ -102,7 +102,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
 
     # A10 → m2
     ADDI  x6, x0, 0
@@ -111,7 +111,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 2, x6, 0
-    DELAY 40
+    DELAY 33
 
     # A11 → m3
     ADDI  x6, x0, 0
@@ -120,7 +120,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 3, x6, 0
-    DELAY 40
+    DELAY 33
 
     # B00_T → m4
     ADDI  x6, x0, 0
@@ -129,7 +129,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 4, x6, 0
-    DELAY 40
+    DELAY 33
 
     # B01_T → m5
     ADDI  x6, x0, 0
@@ -138,7 +138,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 5, x6, 0
-    DELAY 40
+    DELAY 33
 
     # B10_T → m6
     ADDI  x6, x0, 0
@@ -147,7 +147,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 6, x6, 0
-    DELAY 40
+    DELAY 33
 
     # B11_T → m7
     ADDI  x6, x0, 0
@@ -156,7 +156,7 @@
     DMA.WAIT  0
     ADDI  x6, x0, 0
     VLOAD 7, x6, 0
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — snapshot start cycle
@@ -169,36 +169,36 @@
     # K=0
     VMATPUSH.W.MXU0   0, 4            # wslot0 ← B00_T
     VMATMUL.MXU0      0, 0, 0         # M0: acc0 = A00 · B00         (overwrite)
-    DELAY 30
+    DELAY 95
     VMATPUSH.W.MXU0   1, 5            # wslot1 ← B01_T
     VMATMUL.MXU0      1, 0, 1         # M1: acc1 = A00 · B01         (overwrite)
-    DELAY 30
+    DELAY 95
     # K=1
     VMATPUSH.W.MXU0   0, 6            # wslot0 ← B10_T
     VMATMUL.ACC.MXU0  0, 1, 0         # M2: acc0 += A01 · B10        (acc, reuse acc0)
-    DELAY 30
+    DELAY 95
     VMATPUSH.W.MXU0   1, 7            # wslot1 ← B11_T
     VMATMUL.ACC.MXU0  1, 1, 1         # M3: acc1 += A01 · B11        (acc, reuse acc1)
-    DELAY 29                          # tighter than stride 33 — POP m8 fires at T_M2+64
+    DELAY 95                          # tighter than stride 33 — POP m8 fires at T_M2+64
 
 # ── Phase A → B: pop A's results, start Phase B on the same accSels ──
 
     VMATPOP.FP8.MXU0  8, 0, 0         # m8 ← acc0  (C00 = M0+M2)
     VMATPUSH.W.MXU0   0, 4            # wslot0 ← B00_T (Phase B K=0)
     VMATMUL.MXU0      0, 2, 0         # M4: acc0 = A10 · B00         (overwrite)
-    DELAY 29                          # wait until T_M3+64 for POP acc1
+    DELAY 95                          # wait until T_M3+64 for POP acc1
     VMATPOP.FP8.MXU0  9, 0, 1         # m9 ← acc1  (C01 = M1+M3)
     VMATPUSH.W.MXU0   1, 5            # wslot1 ← B01_T (Phase B K=0)
     VMATMUL.MXU0      1, 2, 1         # M5: acc1 = A10 · B01         (overwrite)
-    DELAY 30
+    DELAY 95
 
 # ── Phase B K=1: accumulate ──
     VMATPUSH.W.MXU0   0, 6            # wslot0 ← B10_T
     VMATMUL.ACC.MXU0  0, 3, 0         # M6: acc0 += A11 · B10
-    DELAY 30
+    DELAY 95
     VMATPUSH.W.MXU0   1, 7            # wslot1 ← B11_T
     VMATMUL.ACC.MXU0  1, 3, 1         # M7: acc1 += A11 · B11
-    DELAY 29                          # wait until T_M6+64 for POP acc0
+    DELAY 95                          # wait until T_M6+64 for POP acc0
 
     VMATPOP.FP8.MXU0  10, 0, 0        # m10 ← acc0 (C10 = M4+M6)
     DELAY 31                          # wait until T_M7+64 for POP acc1
@@ -218,7 +218,7 @@
     # C00 (m8) → DRAM 0x2000
     LI    x8, 0
     VSTORE 8, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x2000
     DMA.STORE x3, x8, x12, 1
@@ -227,7 +227,7 @@
     # C01 (m9) → DRAM 0x2400
     LI    x8, 0
     VSTORE 9, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x2400
     DMA.STORE x3, x8, x12, 1
@@ -236,7 +236,7 @@
     # C10 (m10) → DRAM 0x2800
     LI    x8, 0
     VSTORE 10, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x2800
     DMA.STORE x3, x8, x12, 1
@@ -245,7 +245,7 @@
     # C11 (m11) → DRAM 0x2C00
     LI    x8, 0
     VSTORE 11, x8, 0
-    DELAY 40
+    DELAY 33
     LI    x8, 0
     LI    x3, 0x2C00
     DMA.STORE x3, x8, x12, 1

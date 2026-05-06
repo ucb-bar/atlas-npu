@@ -23,8 +23,7 @@
 
 # Byte 31: signed and unsigned byte loads from the top byte of the line.
     LI    x10, 0x81
-    SB    x10, x8, 31
-    DELAY 2
+    SB    x10, x8, 31    
     LBU   x9, x8, 31
     DELAY 2
     LI    x30, 0x81
@@ -40,7 +39,6 @@
 # Halfword at byte 28: positive sign bit.
     LI    x11, 0x7F80
     SH    x11, x8, 28
-    DELAY 2
     LH    x9, x8, 28
     DELAY 2
     LI    x30, 0x7F80
@@ -50,8 +48,7 @@
 
 # Halfword at byte 26: negative sign bit.
     LI    x12, 0x8001
-    SH    x12, x8, 26
-    DELAY 2
+    SH    x12, x8, 26    
     LH    x9, x8, 26
     DELAY 2
     LI    x30, 0xFFFF8001
@@ -67,7 +64,6 @@
 # Word at byte 20: upper-half word lane.
     LI    x13, 0xA1B2C3D4
     SW    x13, x8, 20
-    DELAY 2
     LW    x9, x8, 20
     DELAY 2
     LI    x30, 0xA1B2C3D4

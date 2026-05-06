@@ -45,50 +45,50 @@
     # VLOAD input pair into m40/m41
     ADDI  x7, x0, 0
     VLOAD 40, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 41, x7, 8
-    DELAY 40
+    DELAY 33
 
     # VSQRT input -> m42/m43
     VSQRT 42, 40
-    DELAY 150
+    DELAY 64
 
     # VRECIP input -> m44/m45
     VRECIP.BF16 44, 40
-    DELAY 150
+    DELAY 64
 
     # VLOG2 input -> m46/m47
     VLOG2 46, 40
-    DELAY 150
+    DELAY 64
 
     # VEXP2(log2(x)) -> m48/m49
     VEXP2 48, 46
-    DELAY 150
+    DELAY 64
 
     # Store all result pairs back to VMEM
     LI    x8, 512
     VSTORE 42, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 43, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1024
     VSTORE 44, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 45, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 1536
     VSTORE 46, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 47, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x8, 2048
     VSTORE 48, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 49, x8, 8
-    DELAY 40
+    DELAY 33
 
     # Scalar-observable read from stored exp2(log2(x)) result.
     # The first packed word at byte 8192 is legitimately zero because the
@@ -96,7 +96,7 @@
     # VMEM byte address = 2048 words * 4 bytes/word = 8192.
     LI    x20, 8192
     LW    x21, x20, 4
-    DELAY 1
+    DELAY 2
     BEQ   x21, x0, fail
     NOP
     ADDI  x28, x28, 1

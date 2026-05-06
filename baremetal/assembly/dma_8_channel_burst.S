@@ -113,19 +113,19 @@
     # X → m0
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    DELAY 40
+    DELAY 33
 
     # W → m1 → XLU → m2
     LI    x6, 256
     VLOAD 1, x6, 0
-    DELAY 40
+    DELAY 33
     VTRPOSE.XLU 2, 1
-    DELAY 80
+    DELAY 64
 
     # bias → m3
     LI    x6, 512
     VLOAD 3, x6, 0
-    DELAY 40
+    DELAY 33
 
     # Push MXU0 weights + bias
     VMATPUSH.W.MXU0       0, 2
@@ -134,16 +134,16 @@
     # A_vpu pair → m8,m9 (from VMEM[768], flag 0/8)
     LI    x6, 768
     VLOAD 8, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 9, x6, 8
-    DELAY 40
+    DELAY 33
 
     # B_vpu pair → m10,m11 (from VMEM[1280], flag 0/8)
     LI    x6, 1280
     VLOAD 10, x6, 0
-    DELAY 40
+    DELAY 33
     VLOAD 11, x6, 8
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 3: MXU0 + VPU compute
@@ -151,10 +151,10 @@
 
     VMATMUL.ACC.MXU0  0, 0, 0
     VADD.BF16         12, 8, 10
-    DELAY 150
+    DELAY 64
 
     VMATPOP.BF16.MXU0  4, 0
-    DELAY 40
+    DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 4: VSTORE results to VMEM (overwrite input slots 0–3)
@@ -163,17 +163,17 @@
     # C0 lo → VMEM[0], C0 hi → VMEM[256]
     ADDI  x6, x0, 0
     VSTORE 4, x6, 0
-    DELAY 40
+    DELAY 33
     LI    x6, 256
     VSTORE 5, x6, 0
-    DELAY 40
+    DELAY 33
 
     # add b0 → VMEM[512], add b1 → VMEM[768]
     LI    x6, 512
     VSTORE 12, x6, 0
-    DELAY 40
+    DELAY 33
     VSTORE 13, x6, 8
-    DELAY 40
+    DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 5: 8-CHANNEL DMA.STORE BURST [8ST]

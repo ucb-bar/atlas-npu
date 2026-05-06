@@ -42,42 +42,42 @@ loop:
 
     ADDI  x7, x0, 0
     VLOAD 0, x7, 0
-    DELAY 40
+    DELAY 33
     VLOAD 1, x7, 8
-    DELAY 40
+    DELAY 33
 
     VREDSUM.ROW.BF16 2, 0
-    DELAY 150
+    DELAY 37
 
     LI    x8, 512
     VSTORE 2, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 3, x8, 8
-    DELAY 40
+    DELAY 33
 
     # Scalar predicate from row-sum footprint.
     LI    x20, 2048
     LW    x21, x20, 0
-    DELAY 1
+    DELAY 2
 
     BLT   x21, x0, use_mov
     ADDI  x29, x0, 3
 
     VRELU 4, 2
-    DELAY 150
+    DELAY 64
     JAL   x0, store_iter
     NOP
 
 use_mov:
     VMOV  4, 2
-    DELAY 150
+    DELAY 64
 
 store_iter:
     LI    x8, 1024
     VSTORE 4, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 5, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x6, 1024
     DMA.STORE x17, x6, x12, 1

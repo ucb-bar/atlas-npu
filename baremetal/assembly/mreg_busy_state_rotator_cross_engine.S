@@ -42,41 +42,41 @@
     # Load into separated MREG regions.
     ADDI  x7, x0, 0
     VLOAD 24, x7, 0
-    DELAY 40
+    DELAY 33
 
     LI    x7, 256
     VLOAD 40, x7, 0
-    DELAY 40
+    DELAY 33
 
     # XLU transpose in upper bank region.
     VTRPOSE.XLU 56, 40
-    DELAY 80
+    DELAY 64
 
     # MXU1 consume low-bank activation + upper-bank transposed weight.
     VMATPUSH.W.MXU1 0, 56
-    DELAY 40
+    DELAY 31
     VMATMUL.MXU1 0, 24, 0
-    DELAY 120
+    DELAY 34
     VMATPOP.BF16.MXU1 32, 0
-    DELAY 40
+    DELAY 31
 
     # Post-process with VPU into another bank pair.
     VRELU 48, 32
-    DELAY 150
+    DELAY 64
 
     # Store raw BF16 result.
     LI    x8, 512
     VSTORE 32, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 33, x8, 8
-    DELAY 40
+    DELAY 33
 
     # Store relu BF16 result.
     LI    x8, 1024
     VSTORE 48, x8, 0
-    DELAY 40
+    DELAY 33
     VSTORE 49, x8, 8
-    DELAY 40
+    DELAY 33
 
     LI    x12, 2048
     LI    x10, 0x1000
