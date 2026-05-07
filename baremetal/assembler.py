@@ -787,7 +787,7 @@ int main(void)
     }}
 
     if (fail) {{
-        printf("FAIL: %d IMEM mismatches\\n", fail);
+        printf("*** FAILED *** (IMEM mismatch — %d words)\\n", fail);
         return 1;
     }}
     printf("IMEM readback OK\\n");
@@ -817,7 +817,7 @@ int main(void)
     printf("  status  = 0x%08x\\n", status);
 
     if (dbg0 == 0) {{
-        printf("FAIL: Atlas core did not complete (timeout)\\n");
+        printf("*** FAILED *** (timeout — Atlas core did not complete)\\n");
         return 1;
     }}
 """
@@ -836,7 +836,7 @@ int main(void)
         if perf_threshold is not None:
             out += f"""
     if (dbg1_cycles == 0) {{
-        printf("FAIL: {test_name} — dbg1_cycles == 0, program never banked mcycles delta into CSR_DBG1\\n");
+        printf("*** FAILED *** ({test_name} — dbg1_cycles == 0)\\n");
         return 1;
     }}
 """
@@ -850,7 +850,7 @@ int main(void)
 """
             if perf_threshold is not None:
                 out += f"""        if (util < {perf_threshold}u) {{
-            printf("FAIL: {test_name} — util_mxu0 %u%% below threshold %u%%\\n",
+            printf("*** FAILED *** ({test_name} — util_mxu0 %u%% below threshold %u%%)\\n",
                    util, (unsigned){perf_threshold});
             return 1;
         }}
@@ -866,7 +866,7 @@ int main(void)
 """
             if perf_threshold is not None:
                 out += f"""        if (util < {perf_threshold}u) {{
-            printf("FAIL: {test_name} — util_mxu1 %u%% below threshold %u%%\\n",
+            printf("*** FAILED *** ({test_name} — util_mxu1 %u%% below threshold %u%%)\\n",
                    util, (unsigned){perf_threshold});
             return 1;
         }}
@@ -889,21 +889,21 @@ int main(void)
     }}
 
     if (fail) {{
-        printf("FAIL: %d DRAM mismatches\\n", fail);
+        printf("*** FAILED *** (DRAM mismatch — %d words)\\n", fail);
         return 1;
     }}
 
-    printf("PASS: {test_name} — all DRAM checks passed\\n");
+    printf("*** PASSED *** ({test_name} — all DRAM checks passed)\\n");
     return 0;
 }}
 """
     else:
         out += f"""
     if (dbg0 == 1) {{
-        printf("PASS: {test_name} passed\\n");
+        printf("*** PASSED *** ({test_name})\\n");
         return 0;
     }} else {{
-        printf("FAIL: {test_name} test %u failed\\n", dbg0);
+        printf("*** FAILED *** ({test_name} dbg0=%u)\\n", dbg0);
         return 1;
     }}
 }}
