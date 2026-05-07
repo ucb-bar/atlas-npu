@@ -58,7 +58,7 @@ loop:
     # Scalar predicate from row-sum footprint.
     LI    x20, 2048
     LW    x21, x20, 0
-    DELAY 2
+    DELAY 1
 
     BLT   x21, x0, use_mov
     ADDI  x29, x0, 3

@@ -78,7 +78,7 @@
 
     LI    x6, 32768
     VLOAD 1, x6, 0
-    DELAY 33
+    DELAY 32
 
 # ──────────────────────────────────────────────────────────────
 # PHASE 1: scalar stores + VLOAD(tile_A) + VSTORE(m1 -> out_store_1)
@@ -100,7 +100,7 @@
 
     LI    x6, 163840
     VSTORE 0, x6, 0
-    DELAY 33
+    DELAY 32
 
 # ──────────────────────────────────────────────────────────────
 # PHASE 2: scalar loads + VLOAD(tile_C) + VSTORE(m1 -> out_store_2)
@@ -122,7 +122,7 @@
 
     LI    x6, 131328
     VSTORE 2, x6, 0
-    DELAY 33
+    DELAY 32
 
     SW    x14, x30, 0
     SW    x15, x30, 4

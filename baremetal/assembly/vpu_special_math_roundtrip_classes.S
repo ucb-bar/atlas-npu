@@ -96,7 +96,7 @@
     # VMEM byte address = 2048 words * 4 bytes/word = 8192.
     LI    x20, 8192
     LW    x21, x20, 4
-    DELAY 2
+    DELAY 1
     BEQ   x21, x0, fail
     NOP
     ADDI  x28, x28, 1
