@@ -90,7 +90,7 @@
     # Overlap-safe first compute/push
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 94
+    DELAY 40
 
     LI    x29, 1
 
@@ -141,14 +141,14 @@ do_matmul:
 matmul_buf1:
     VMATMUL.ACC.MXU0  0, 0, 1
     VMATPUSH.W.MXU0   0, 5
-    DELAY 94
+    DELAY 40
     BEQ   x0, x0, advance
     NOP
 
 matmul_buf0:
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 94
+    DELAY 40
 
 advance:
     XOR   x29, x29, x30

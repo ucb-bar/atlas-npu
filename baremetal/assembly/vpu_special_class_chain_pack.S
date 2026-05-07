@@ -66,7 +66,7 @@
     # Load scale register e3 from VMEM byte address 0x2400.
     LI    x15, 0x2400
     SELD  3, x15, 0
-    DELAY 2
+    DELAY 1
 
     # Load BF16 input pair into m40/m41. The VLOAD path is single-issue in the
     # current RTL, so the second load must wait for the first to drain.

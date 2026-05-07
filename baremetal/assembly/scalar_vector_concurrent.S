@@ -87,7 +87,7 @@
     SW    x27, x17, 4              # stage2 word 1 = CAFE
     SW    x27, x18, 0              # stage3 word 0 = CAFE
     SW    x28, x18, 4              # stage3 word 1 = DEAD
-    DELAY 33
+    DELAY 26
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 2: VSTORE m0 + scalar loads
@@ -107,7 +107,7 @@
     DELAY 2
     LW    x25, x17, 0              # stage2 word 0 = DEAD
     DELAY 2
-    DELAY 33
+    DELAY 22
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 3: VLOAD m1 + scalar stores from Phase 2 readback
@@ -121,7 +121,7 @@
     SW    x24, x17, 12             # stage2 word 3 = CAFE
     SW    x25, x18, 8              # stage3 word 2 = DEAD
     SW    x21, x18, 12             # stage3 word 3 = tile_B word 0
-    DELAY 33
+    DELAY 27
 
     VTRPOSE.XLU 2, 1
     LW    x26, x16, 8              # read stage1 word 2 = tile_B word 0
@@ -144,7 +144,7 @@
     SW    x23, x16, 20             # stage1 word 5 = tile_W word 0
     SW    x22, x17, 20             # stage2 word 5 = tile_B word 1
     SW    x24, x18, 20             # stage3 word 5 = CAFE
-    DELAY 33
+    DELAY 29
 
     VMATPUSH.W.MXU0       0, 2
     VMATPUSH.ACC.FP8.MXU0 0, 3
@@ -175,7 +175,7 @@
     DELAY 2
     LW    x25, x17, 24             # read stage2 word 6 = DEAD
     DELAY 2
-    DELAY 33
+    DELAY 28
 
     LI    x6, 98304
     VSTORE 5, x6, 0                # C0 hi -> bias region
@@ -183,7 +183,7 @@
     DELAY 2
     LW    x19, x16, 24             # read stage1 word 6 = tile_B word 0
     DELAY 2
-    DELAY 33
+    DELAY 28
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 6: DMA.STORE outputs

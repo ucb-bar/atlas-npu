@@ -65,7 +65,7 @@
     # Scalar reads first word of transposed tile from VMEM byte addr 2048.
     LI    x20, 2048
     LW    x21, x20, 0
-    DELAY 2
+    DELAY 1
 
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7

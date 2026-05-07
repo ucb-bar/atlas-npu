@@ -61,7 +61,7 @@
     # Scalar reads first BF16 pair word of the stored rowsum tile.
     LI    x20, 2048          # byte address of VMEM word base 512
     LW    x21, x20, 0
-    DELAY 2
+    DELAY 1
 
     # Generator makes row 0 sum positive, so branch to relu_path is deterministic.
     BLT   x21, x0, neg_path

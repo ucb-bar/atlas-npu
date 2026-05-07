@@ -152,28 +152,28 @@
 # ── Phase A: C00 (acc0) and C10 (acc1), both built from B00, B10 ──
 
     VMATPUSH.W.MXU1   0, 4          # cyc 1: wslot 0 ← B00 (for M0, M1); p1Push 2..32
-    DELAY 31                        # cyc 2..32 — M0 fires on PUSH's last p1Push cycle
+    DELAY 30                        # cyc 2..32 — M0 fires on PUSH's last p1Push cycle
                                     # (cyc 33), valid per strict pushWActive check
                                     # (wbuf[col 31] latched at posedge 34, just in time
                                     # for M0's first feed at cyc 34).
 
     VMATMUL.MXU1      0, 0, 0       # cyc 33: M0  acc0 = A00·B00
     VMATPUSH.W.MXU1   1, 6          # cyc 34: wslot 1 ← B10 (for M2, M3); p1Push 35..66
-    DELAY 31                        # cyc 35..64
+    DELAY 29                        # cyc 35..64
 
     VMATMUL.MXU1      1, 2, 0       # cyc 65: M1  acc1 = A10·B00  [stride 32, same wslot]
-    DELAY 34                        # cyc 66..96
+    DELAY 30                        # cyc 66..96
 
     VMATMUL.ACC.MXU1  0, 1, 1       # cyc 97: M2  acc0 += A01·B10  [stride 32, wslot 1]
     VMATPUSH.W.MXU1   0, 5          # cyc 98: wslot 0 ← B01 (for M4, M5); p1Push 99..130
-    DELAY 31                        # cyc 99..128
+    DELAY 29                        # cyc 99..128
 
     VMATMUL.ACC.MXU1  1, 3, 1       # cyc 129: M3 acc1 += A11·B10  [stride 32, same wslot]
                                     # M3 reads wslot 1 = B10 cycles 130..161.
                                     # PUSH wslot 1 ← B11 must wait until M3 fully releases
                                     # wslot 1 (cycle ≥ 162, after M4 takes p0Comp).
     VMATPOP.FP8.MXU1  8, 0, 0       # cyc 130: m8 ← acc0 (C00 final)
-    DELAY 31                        # cyc 131..160
+    DELAY 29                        # cyc 131..160
 
 # ── Phase B: C01 (acc0) and C11 (acc1), both built from B01, B11 ──
 
@@ -182,13 +182,13 @@
                                     # Safe — M3 finished reading wslot 1 at cyc 161;
                                     # M4 reads wslot 0, doesn't touch wslot 1.
     VMATPOP.FP8.MXU1  10, 0, 1      # cyc 163: m10 ← acc1 (C10 final); w0Idl at 163
-    DELAY 31                        # cyc 164..192
+    DELAY 28                        # cyc 164..192
 
     VMATMUL.MXU1      1, 2, 0       # cyc 193: M5  acc1 = A10·B01  [stride 32, same wslot]
-    DELAY 34                        # cyc 194..224
+    DELAY 30                        # cyc 194..224
 
     VMATMUL.ACC.MXU1  0, 1, 1       # cyc 225: M6  acc0 += A01·B11 [stride 32, wslot 1]
-    DELAY 34                        # cyc 226..256
+    DELAY 30                        # cyc 226..256
 
     VMATMUL.ACC.MXU1  1, 3, 1       # cyc 257: M7  acc1 += A11·B11 [stride 32, same wslot]
     VMATPOP.FP8.MXU1  9, 0, 0       # cyc 258: m9 ← acc0 (C01 final)

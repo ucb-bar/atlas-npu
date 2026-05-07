@@ -63,7 +63,7 @@
     # Overlap-safe prologue push pair
     VMATPUSH.W.MXU0       0, 5
     VMATPUSH.ACC.FP8.MXU0 0, 8
-    DELAY 94
+    DELAY 40
 
     ADD   x17, x17, x12
     ADDI  x10, x10, 1
@@ -97,7 +97,7 @@
     # Overlap-safe first compute/push
     VMATMUL.ACC.MXU0  0, 0, 0
     VMATPUSH.W.MXU0   1, 7
-    DELAY 94
+    DELAY 40
 
     LI    x29, 1             # next matmul uses wbuf 1
 
@@ -162,7 +162,7 @@ matmul_buf1:
     # Matmul with wbuf 1 + push pre-loaded weights to wbuf 0
     VMATMUL.ACC.MXU0  0, 0, 1      # Slot A: acc 0, acts TRF 0, wbuf 1
     VMATPUSH.W.MXU0   0, 5         # Slot B: wbuf 0 ← TRF 5  (OVERLAPPED)
-    DELAY 94
+    DELAY 40
     BEQ   x0, x0, advance
     NOP
 
@@ -170,7 +170,7 @@ matmul_buf0:
     # Matmul with wbuf 0 + push pre-loaded weights to wbuf 1
     VMATMUL.ACC.MXU0  0, 0, 0      # Slot A: acc 0, acts TRF 0, wbuf 0
     VMATPUSH.W.MXU0   1, 7         # Slot B: wbuf 1 ← TRF 7  (OVERLAPPED)
-    DELAY 94
+    DELAY 40
 
 advance:
     XOR   x29, x29, x30            # toggle buffer
