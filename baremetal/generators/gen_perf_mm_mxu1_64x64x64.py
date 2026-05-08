@@ -3,7 +3,7 @@
 gen_perf_mm_mxu1_64x64x64.py
 
 Preload + golden generator for perf_mm_mxu1_64x64x64.S — a single-MXU
-(M=64, K=64, N=64) tiled FP8 matmul performance test that uses only
+(M=64, N=64, K=64) tiled FP8 matmul performance test that uses only
 MXU1. Pass/fail is determined by comparing the DRAM output against the
 golden SA model; utilization is reported (including a cycle-bracketed
 `util_timed` from a scalar CSRR snapshot) but not gated.

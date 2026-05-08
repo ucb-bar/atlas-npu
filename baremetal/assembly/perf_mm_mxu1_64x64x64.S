@@ -1,4 +1,4 @@
-# perf_mm_mxu1_64x64x64.S — single-MXU (M=64, K=64, N=64) tiled matmul perf test
+# perf_mm_mxu1_64x64x64.S — single-MXU (M=64, N=64, K=64) tiled matmul perf test
 # @TIMEOUT 400000
 # @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_perf_mm_mxu1_64x64x64.py 500
@@ -40,13 +40,14 @@
 #   cycle  99: PUSH wslot 0 ← B01   (for M4+M5, overlaps M2+M3 feed)
 #   cycle 132: PUSH wslot 1 ← B11   (for M6+M7, overlaps M4+M5 feed)
 #
-# Total measured region: 292 cycles. Util = 256/292 ≈ 87.7%.
-# Theoretical floor: 292 cycles for this routine. We're AT the floor.
+# Total measured region: 291 cycles. Util = 256/291 ≈ 88.0%.
+# Theoretical floor: 291 cycles for this routine. We're AT the floor.
 # Breakdown: initial PUSH (32 cyc, with M0 firing on PUSH's last p1Push
 # cycle thanks to the strict pushWActive check) + matmul chain (224 cyc,
 # 7 back-to-back stride-32 transitions) + M7 feed (32 cyc, but cmd-wise
 # only +1 cycle for M7 dispatch) + WriteP0 drain between final POPs
-# (32 cyc) + POP C11 dispatch + CSRR = 292.
+# (32 cyc, post-w0LastCycle collapse — POP→POP stride 32, was 33) + POP
+# C11 dispatch + CSRR = 291.
 #
 # Tiling, MREG allocation, DRAM layout — same as MXU0 perf test.
 #
@@ -192,16 +193,18 @@
 
     VMATMUL.ACC.MXU1  1, 3, 1       # cyc 257: M7  acc1 += A11·B11 [stride 32, same wslot]
     VMATPOP.FP8.MXU1  9, 0, 0       # cyc 258: m9 ← acc0 (C01 final)
-    DELAY 31                        # cyc 259..290 — wait for WriteP0 to drain POP C01
+    DELAY 30                        # cyc 259..289 — POP→POP stride 32 (post-w0LastCycle
+                                    # collapse: w0Boundary fires on the cycle row 31 writes,
+                                    # letting next POP latch back-to-back with no bubble).
 
-    VMATPOP.FP8.MXU1  11, 0, 1      # cyc 291: m11 ← acc1 (C11 final)
+    VMATPOP.FP8.MXU1  11, 0, 1      # cyc 290: m11 ← acc1 (C11 final)
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
 # Note: CSRR x21 fires right after POP C11 issue, NOT after POP C11 fully
 # drains to MREG. Convention matches MXU0 perf test.
 # ═══════════════════════════════════════════════════════════════
-    CSRR  x21, 0xC00                # cyc 292
+    CSRR  x21, 0xC00                # cyc 291
     SUB   x22, x21, x20
     CSRW  x22, 0xC11
 
