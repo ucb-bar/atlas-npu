@@ -9,13 +9,25 @@ import atlas.mxu.{MxuOp, MxuCmd, ComputeReq, WeightWriteReq,
 
 /** Port-aligned concurrent sequencer for the systolic-array MXU.
   *
-  * Architecture: one FSM per matrix-register-file port —
+  * Architecture: one engine per matrix-register-file port —
   *   ReadP0  (mreg read port 0):  compute issue, single-port push, BF16 lo half
   *   ReadP1  (mreg read port 1):  single-port push, BF16 hi half
   *   WriteP0 (mreg write port 0): pop FP8, pop BF16 lo half
   *   WriteP1 (mreg write port 1): pop BF16 hi half
   *
-  * Plus one SA pipeline tracker (separate from any port FSM): a small ring
+  * Each port-engine is a tiny "cmd register + row counter + boundary" instead
+  * of an explicit FSM enum. The state of a port at any cycle is just
+  * `(cmdValid, cmd, row)`; the boundary predicate
+  *
+  *   <port>Boundary = !<port>CmdValid || ((<port>Row + 1.U) >= rowLimit(op))
+  *
+  * captures both "fully idle" and "on the last useful cycle of the current op"
+  * in a single signal. Every accept gate uses `<port>Boundary`, which means a
+  * new cmd targeting a port can be latched on the same cycle the previous op
+  * is wrapping up — no idle bubble between back-to-back same-port cmds. This
+  * applies uniformly to compute→compute, push→push, and pop→pop chains.
+  *
+  * Plus one SA pipeline tracker (separate from any port engine): a small ring
   * buffer of in-flight compute metadata `{accSel, rowsWritten}`. The head
   * advances on every `coreOut.valid`; the entry pops when all `tileRows`
   * writebacks land. The same FIFO drives both writeback routing (where does
@@ -156,39 +168,53 @@ class SystolicArraySequencer(
   val isPop        = isPopFP8 || isPopBF16
 
   // ==========================================================================
-  // FSM state declarations
+  // Per-port engines — (cmdValid, cmd, row) replaces the old state enum.
+  //
+  //   The "row" register iterates from 0 up to the per-op row limit
+  //   (cols for PushWeight, tileRows for everything else). When `row + 1`
+  //   reaches the limit, the port is at its boundary — either a new cmd is
+  //   latched (back-to-back) or `cmdValid` deasserts.
   // ==========================================================================
 
   // ReadP0 — mreg read port 0
-  val (p0Idle :: p0Push :: p0BF16Lo :: p0Comp :: Nil) = Enum(4)
-  val p0State   = RegInit(p0Idle)
-  val p0Cmd     = Reg(new MxuCmd(mregP.mregIdBits))
-  val p0Row     = Reg(UInt(rowCountW.W))
-  val p0NextRow = Reg(UInt(rowCountW.W))
+  val p0CmdValid = RegInit(false.B)
+  val p0Cmd      = Reg(new MxuCmd(mregP.mregIdBits))
+  val p0Row      = Reg(UInt(rowCountW.W))
 
   // ReadP1 — mreg read port 1
-  val (p1Idle :: p1Push :: p1BF16Hi :: Nil) = Enum(3)
-  val p1State   = RegInit(p1Idle)
-  val p1Cmd     = Reg(new MxuCmd(mregP.mregIdBits))
-  val p1Row     = Reg(UInt(rowCountW.W))
-  val p1NextRow = Reg(UInt(rowCountW.W))
+  val p1CmdValid = RegInit(false.B)
+  val p1Cmd      = Reg(new MxuCmd(mregP.mregIdBits))
+  val p1Row      = Reg(UInt(rowCountW.W))
 
   // WriteP0 — mreg write port 0
-  val (w0Idle :: w0PopFP8 :: w0PopBF16Lo :: Nil) = Enum(3)
-  val w0State = RegInit(w0Idle)
-  val w0Cmd   = Reg(new MxuCmd(mregP.mregIdBits))
-  val w0Row   = Reg(UInt(rowCountW.W))
+  val w0CmdValid = RegInit(false.B)
+  val w0Cmd      = Reg(new MxuCmd(mregP.mregIdBits))
+  val w0Row      = Reg(UInt(rowCountW.W))
 
   // WriteP1 — mreg write port 1
-  val (w1Idle :: w1PopBF16Hi :: Nil) = Enum(2)
-  val w1State = RegInit(w1Idle)
-  val w1Cmd   = Reg(new MxuCmd(mregP.mregIdBits))
-  val w1Row   = Reg(UInt(rowCountW.W))
+  val w1CmdValid = RegInit(false.B)
+  val w1Cmd      = Reg(new MxuCmd(mregP.mregIdBits))
+  val w1Row      = Reg(UInt(rowCountW.W))
 
-  val p0Idl = p0State === p0Idle
-  val p1Idl = p1State === p1Idle
-  val w0Idl = w0State === w0Idle
-  val w1Idl = w1State === w1Idle
+  // Per-port row limit. PushWeight pushes one wbuf column per cycle for
+  // p.cols cycles; everything else iterates over tileRows.
+  private def rowLimitFor(op: MxuOp.Type): UInt =
+    Mux(op === MxuOp.PushWeight, p.cols.U, tileRows.U)
+
+  // Boundary predicate — true on cycles where the port can accept a new cmd:
+  // either it's idle (!cmdValid) or this is the last useful cycle of the
+  // currently-running op (row + 1 has reached the row limit).
+  val p0Boundary = !p0CmdValid || ((p0Row + 1.U) >= rowLimitFor(p0Cmd.op))
+  val p1Boundary = !p1CmdValid || ((p1Row + 1.U) >= rowLimitFor(p1Cmd.op))
+  val w0Boundary = !w0CmdValid || ((w0Row + 1.U) >= tileRows.U)  // pop is always tileRows
+  val w1Boundary = !w1CmdValid || ((w1Row + 1.U) >= tileRows.U)
+
+  // Op classifiers — valid only when <port>CmdValid; replace state-enum reads.
+  val p0IsCompute = p0CmdValid && ((p0Cmd.op === MxuOp.Matmul) || (p0Cmd.op === MxuOp.MatmulAcc))
+  val p0IsPushW   = p0CmdValid && (p0Cmd.op === MxuOp.PushWeight)
+  val p0IsPushAcc = p0CmdValid && (p0Cmd.op === MxuOp.PushAccFP8)
+  val p0IsBF16    = p0CmdValid && (p0Cmd.op === MxuOp.PushAccBF16)
+  val p1IsBF16    = p1CmdValid && (p1Cmd.op === MxuOp.PushAccBF16)
 
   // ==========================================================================
   // SA Pipeline Tracker — in-flight FIFO
@@ -249,8 +275,13 @@ class SystolicArraySequencer(
   //
   //   The dispatcher is the single point that decides routing and gates
   //   commands behind hazards.  Every accepted cmd flows into exactly the
-  //   FSM(s) it belongs to.  Push prefers ReadP1 to keep ReadP0 free for
-  //   compute; falls back to ReadP0 if ReadP1 is busy.
+  //   port-engine(s) it belongs to.  Push prefers ReadP1 to keep ReadP0 free
+  //   for compute; falls back to ReadP0 if ReadP1 is busy.
+  //
+  //   Back-to-back issue: every accept gate uses `<port>Boundary` instead of
+  //   `<port>Idl`, which means a new cmd can be latched on the same cycle the
+  //   previous op's last useful work happens. No idle bubble between same-
+  //   port back-to-back cmds. This applies to compute, push, and pop alike.
   // ==========================================================================
 
   // Shared hazard for any op that touches a same-buffer accumulator
@@ -260,14 +291,14 @@ class SystolicArraySequencer(
   val pushWHazard    = !wbufReady(cmdWslot)
 
   // Per-target-FSM accept signals.
-  val acceptCompute  = io.cmd.valid && isCompute    && p0Idl && !computeHazard
-  val acceptPushP1   = io.cmd.valid && isPush       && p1Idl &&
+  val acceptCompute  = io.cmd.valid && isCompute    && p0Boundary && !computeHazard
+  val acceptPushP1   = io.cmd.valid && isPush       && p1Boundary &&
                        Mux(isPushW, !pushWHazard, !accReuseHazard)
-  val acceptPushP0   = io.cmd.valid && isPush       && !p1Idl && p0Idl &&
+  val acceptPushP0   = io.cmd.valid && isPush       && !p1Boundary && p0Boundary &&
                        Mux(isPushW, !pushWHazard, !accReuseHazard)
-  val acceptBF16Push = io.cmd.valid && isPushBF16   && p0Idl && p1Idl && !accReuseHazard
-  val acceptPopFP8   = io.cmd.valid && isPopFP8     && w0Idl && !accReuseHazard
-  val acceptPopBF16  = io.cmd.valid && isPopBF16    && w0Idl && w1Idl && !accReuseHazard
+  val acceptBF16Push = io.cmd.valid && isPushBF16   && p0Boundary && p1Boundary && !accReuseHazard
+  val acceptPopFP8   = io.cmd.valid && isPopFP8     && w0Boundary && !accReuseHazard
+  val acceptPopBF16  = io.cmd.valid && isPopBF16    && w0Boundary && w1Boundary && !accReuseHazard
 
   // ==========================================================================
   // Hazard / structural assertions (debug only — do not gate execution).
@@ -279,8 +310,8 @@ class SystolicArraySequencer(
     "SA: compute issued while in-flight tracker is full")
   assert(!(io.cmd.valid && isCompute && accReuseHazard),
     "SA: compute issued before previous compute's row-0 writeback on same accSel")
-  assert(!(io.cmd.valid && isCompute && !p0Idl),
-    "SA: compute issued while ReadP0 is busy")
+  assert(!(io.cmd.valid && isCompute && !p0Boundary),
+    "SA: compute issued while ReadP0 is busy and not on its last feed cycle")
 
   assert(!(io.cmd.valid && isPushW && pushWHazard),
     "SA: PushWeight issued before previous matmul on same wslot has drained")
@@ -289,14 +320,14 @@ class SystolicArraySequencer(
   assert(!(io.cmd.valid && isPushBF16 && accReuseHazard),
     "SA: PushAccBF16 issued before previous compute's row-0 writeback")
 
-  assert(!(io.cmd.valid && isPushBF16 && !(p0Idl && p1Idl)),
+  assert(!(io.cmd.valid && isPushBF16 && !(p0Boundary && p1Boundary)),
     "SA: PushAccBF16 issued while ReadP0 or ReadP1 is busy")
-  assert(!(io.cmd.valid && isPush && !(p0Idl || p1Idl)),
+  assert(!(io.cmd.valid && isPush && !(p0Boundary || p1Boundary)),
     "SA: Push issued while both Read ports are busy")
 
-  assert(!(io.cmd.valid && isPopFP8 && !w0Idl),
-    "SA: PopAccFP8 issued while WriteP0 is busy")
-  assert(!(io.cmd.valid && isPopBF16 && !(w0Idl && w1Idl)),
+  assert(!(io.cmd.valid && isPopFP8 && !w0Boundary),
+    "SA: PopAccFP8 issued while WriteP0 is busy and not on its last write cycle")
+  assert(!(io.cmd.valid && isPopBF16 && !(w0Boundary && w1Boundary)),
     "SA: PopAccBF16 issued while WriteP0 or WriteP1 is busy")
   assert(!(io.cmd.valid && isPop && accReuseHazard),
     "SA: Pop issued before previous compute's row-0 writeback")
@@ -306,20 +337,20 @@ class SystolicArraySequencer(
   val popMregId2 = io.cmd.bits.mregId + 1.U
 
   val mregBankConflictPop = io.cmd.valid && isPop && (
-    (!p0Idl && (popMregId === p0Cmd.mregId)) ||
-    (!p1Idl && (popMregId === p1Cmd.mregId)) ||
+    (p0CmdValid && (popMregId === p0Cmd.mregId)) ||
+    (p1CmdValid && (popMregId === p1Cmd.mregId)) ||
     (isPopBF16 && (
-      (!p0Idl && (popMregId2 === p0Cmd.mregId)) ||
-      (!p1Idl && (popMregId2 === p1Cmd.mregId))
+      (p0CmdValid && (popMregId2 === p0Cmd.mregId)) ||
+      (p1CmdValid && (popMregId2 === p1Cmd.mregId))
     ))
   )
 
   val mregBankConflictPush = io.cmd.valid && (isPush || isPushBF16) && (
-    (!w0Idl && (io.cmd.bits.mregId === w0Cmd.mregId)) ||
-    (!w1Idl && (io.cmd.bits.mregId === w1Cmd.mregId)) ||
+    (w0CmdValid && (io.cmd.bits.mregId === w0Cmd.mregId)) ||
+    (w1CmdValid && (io.cmd.bits.mregId === w1Cmd.mregId)) ||
     (isPushBF16 && (
-      (!w0Idl && ((io.cmd.bits.mregId + 1.U) === w0Cmd.mregId)) ||
-      (!w1Idl && ((io.cmd.bits.mregId + 1.U) === w1Cmd.mregId))
+      (w0CmdValid && ((io.cmd.bits.mregId + 1.U) === w0Cmd.mregId)) ||
+      (w1CmdValid && ((io.cmd.bits.mregId + 1.U) === w1Cmd.mregId))
     ))
   )
 
@@ -356,9 +387,6 @@ class SystolicArraySequencer(
     io.accStoreReadEn      := true.B
   }
 
-  private def pushRowLimit(op: MxuOp.Type): UInt =
-    Mux(op === MxuOp.PushWeight, p.cols.U, tileRows.U)
-
   // Drive the per-row push outputs for the row whose mreg response just
   // arrived.  PushWeight writes one weight-buffer column; PushAccFP8
   // dequantizes and drives one accBuf load.
@@ -378,55 +406,20 @@ class SystolicArraySequencer(
   }
 
   // ==========================================================================
-  // ReadP0 FSM — mreg read port 0
+  // ReadP0 engine — mreg read port 0
   //
-  //   States: idle / push (single-port) / bf16 lo half / compute issue.
-  //   Idle accepts compute, single-port push (when ReadP1 is busy), or BF16
-  //   push (alongside ReadP1).  Each non-idle state streams 32 mreg reads
-  //   and processes their responses.
+  //   Handles compute issue, single-port push (FP8 acc or weight, when ReadP1
+  //   is busy), and BF16 push lo half. Each iteration drives port outputs
+  //   based on (p0Cmd.op, p0Row), then either advances the counter (issuing
+  //   the next row's read) or — at the boundary — yields to a new accept.
   // ==========================================================================
 
-  switch(p0State) {
-    is(p0Idle) {
-      when(acceptCompute) {
-        p0Cmd := io.cmd.bits
-        issueP0Read(io.cmd.bits.mregId, 0.U)
-        driveP0AccRead(io.cmd.bits, 0.U)
-        p0Row     := 0.U
-        p0NextRow := 1.U
-        p0State   := p0Comp
-
-      }.elsewhen(acceptPushP0) {
-        p0Cmd := io.cmd.bits
-        issueP0Read(io.cmd.bits.mregId, 0.U)
-        p0Row     := 0.U
-        p0NextRow := 1.U
-        p0State   := p0Push
-
-      }.elsewhen(acceptBF16Push) {
-        p0Cmd := io.cmd.bits
-        issueP0Read(io.cmd.bits.mregId, 0.U)
-        p0Row     := 0.U
-        p0NextRow := 1.U
-        p0State   := p0BF16Lo
-      }
-    }
-
-    is(p0Push) {
+  when(p0CmdValid) {
+    when(p0Cmd.op === MxuOp.PushWeight || p0Cmd.op === MxuOp.PushAccFP8) {
       processPushRow(p0Cmd, p0Row, io.mregReadResp0.bits)
-
-      when(p0NextRow >= pushRowLimit(p0Cmd.op)) {
-        p0State := p0Idle
-      }.otherwise {
-        issueP0Read(p0Cmd.mregId, p0NextRow)
-        p0Row     := p0Row + 1.U
-        p0NextRow := p0NextRow + 1.U
-      }
-    }
-
-    is(p0BF16Lo) {
+    }.elsewhen(p0Cmd.op === MxuOp.PushAccBF16) {
       // Combine lo (this port's response) with hi (ReadP1's response) and
-      // drive a single accLoadReq.  Both FSMs run in lockstep on identical
+      // drive a single accLoadReq.  Both engines run in lockstep on identical
       // counters, so io.mregReadResp1 here is the hi half for the same row.
       val lo = io.mregReadResp0.bits
       val hi = io.mregReadResp1.bits
@@ -439,168 +432,174 @@ class SystolicArraySequencer(
       io.accLoadReq.bits.accSel := p0Cmd.accSel
       io.accLoadReq.bits.rowIdx := p0Row(rowBits - 1, 0)
       io.accLoadReq.bits.data   := bf16Row
-
-      when(p0NextRow >= tileRows.U) {
-        p0State := p0Idle
-      }.otherwise {
-        issueP0Read(p0Cmd.mregId, p0NextRow)
-        p0Row     := p0Row + 1.U
-        p0NextRow := p0NextRow + 1.U
-      }
-    }
-
-    is(p0Comp) {
+    }.elsewhen(p0Cmd.op === MxuOp.Matmul || p0Cmd.op === MxuOp.MatmulAcc) {
       // Drive compute beat for row p0Row arriving this cycle.
       io.compute.valid             := true.B
       io.compute.bits.act          := unpackRow(io.mregReadResp0.bits, p.inT.ieeeWidth, p.rows)
       io.compute.bits.psum         := io.accComputeReadData
       io.compute.bits.accumulate   := (p0Cmd.op === MxuOp.MatmulAcc)
       io.compute.bits.weightBufSel := p0Cmd.weightSlot
+    }
 
-      when(p0NextRow >= tileRows.U) {
-        p0State := p0Idle
-      }.otherwise {
-        issueP0Read(p0Cmd.mregId, p0NextRow)
-        driveP0AccRead(p0Cmd, p0NextRow)
-        p0Row     := p0Row + 1.U
-        p0NextRow := p0NextRow + 1.U
+    when(!p0Boundary) {
+      issueP0Read(p0Cmd.mregId, p0Row + 1.U)
+      when(p0Cmd.op === MxuOp.Matmul || p0Cmd.op === MxuOp.MatmulAcc) {
+        driveP0AccRead(p0Cmd, p0Row + 1.U)
       }
+      p0Row := p0Row + 1.U
+    }
+  }
+
+  when(p0Boundary) {
+    when(acceptCompute) {
+      p0Cmd      := io.cmd.bits
+      p0Row      := 0.U
+      p0CmdValid := true.B
+      issueP0Read(io.cmd.bits.mregId, 0.U)
+      driveP0AccRead(io.cmd.bits, 0.U)
+    }.elsewhen(acceptPushP0) {
+      p0Cmd      := io.cmd.bits
+      p0Row      := 0.U
+      p0CmdValid := true.B
+      issueP0Read(io.cmd.bits.mregId, 0.U)
+    }.elsewhen(acceptBF16Push) {
+      p0Cmd      := io.cmd.bits
+      p0Row      := 0.U
+      p0CmdValid := true.B
+      issueP0Read(io.cmd.bits.mregId, 0.U)
+    }.otherwise {
+      p0CmdValid := false.B
     }
   }
 
   // ==========================================================================
-  // ReadP1 FSM — mreg read port 1
+  // ReadP1 engine — mreg read port 1
   //
-  //   States: idle / push (single-port) / BF16 hi half.  No compute support.
-  //   BF16 hi half runs in lockstep with ReadP0's `p0BF16Lo`.
+  //   Handles single-port push (preferred over ReadP0) and BF16 push hi half.
+  //   No compute support. BF16 hi half runs in lockstep with ReadP0.
   // ==========================================================================
 
-  switch(p1State) {
-    is(p1Idle) {
-      when(acceptPushP1) {
-        p1Cmd := io.cmd.bits
-        issueP1Read(io.cmd.bits.mregId, 0.U)
-        p1Row     := 0.U
-        p1NextRow := 1.U
-        p1State   := p1Push
-
-      }.elsewhen(acceptBF16Push) {
-        p1Cmd := io.cmd.bits
-        issueP1Read(io.cmd.bits.mregId + 1.U, 0.U)
-        p1Row     := 0.U
-        p1NextRow := 1.U
-        p1State   := p1BF16Hi
-      }
-    }
-
-    is(p1Push) {
+  when(p1CmdValid) {
+    when(p1Cmd.op === MxuOp.PushWeight || p1Cmd.op === MxuOp.PushAccFP8) {
       processPushRow(p1Cmd, p1Row, io.mregReadResp1.bits)
-
-      when(p1NextRow >= pushRowLimit(p1Cmd.op)) {
-        p1State := p1Idle
-      }.otherwise {
-        issueP1Read(p1Cmd.mregId, p1NextRow)
-        p1Row     := p1Row + 1.U
-        p1NextRow := p1NextRow + 1.U
-      }
     }
+    // BF16 hi half: no body output here — p0 drives the combined accLoadReq.
 
-    is(p1BF16Hi) {
-      // Stream hi-half mreg reads in lockstep with ReadP0.  ReadP0 drives
-      // the combined accLoadReq using io.mregReadResp1 (this port's
-      // response).
-      when(p1NextRow >= tileRows.U) {
-        p1State := p1Idle
-      }.otherwise {
-        issueP1Read(p1Cmd.mregId + 1.U, p1NextRow)
-        p1Row     := p1Row + 1.U
-        p1NextRow := p1NextRow + 1.U
-      }
+    when(!p1Boundary) {
+      // For BF16 push, p1 reads from mregId+1 (hi bank); for single-port
+      // pushes, p1 reads from mregId.
+      val readId = Mux(p1Cmd.op === MxuOp.PushAccBF16,
+                       p1Cmd.mregId + 1.U,
+                       p1Cmd.mregId)
+      issueP1Read(readId, p1Row + 1.U)
+      p1Row := p1Row + 1.U
+    }
+  }
+
+  when(p1Boundary) {
+    when(acceptPushP1) {
+      p1Cmd      := io.cmd.bits
+      p1Row      := 0.U
+      p1CmdValid := true.B
+      issueP1Read(io.cmd.bits.mregId, 0.U)
+    }.elsewhen(acceptBF16Push) {
+      p1Cmd      := io.cmd.bits
+      p1Row      := 0.U
+      p1CmdValid := true.B
+      issueP1Read(io.cmd.bits.mregId + 1.U, 0.U)
+    }.otherwise {
+      p1CmdValid := false.B
     }
   }
 
   // ==========================================================================
-  // WriteP0 FSM — mreg write port 0
+  // WriteP0 engine — mreg write port 0
   //
-  //   States: idle / pop FP8 / pop BF16 lo half.  Drives accStoreAddr/En for
-  //   both FP8 and BF16 pops; the latter runs in lockstep with WriteP1 for
-  //   the hi half.
+  //   Handles FP8 pop and BF16 lo pop.  Drives accStoreAddr/En for both.
+  //   BF16 pop runs in lockstep with WriteP1 for the hi half.
   // ==========================================================================
 
-  switch(w0State) {
-    is(w0Idle) {
-      when(acceptPopFP8) {
-        w0Cmd := io.cmd.bits
-        issueAccStoreRead(io.cmd.bits, 0.U)
-        w0Row   := 0.U
-        w0State := w0PopFP8
-
-      }.elsewhen(acceptPopBF16) {
-        w0Cmd := io.cmd.bits
-        issueAccStoreRead(io.cmd.bits, 0.U)
-        w0Row   := 0.U
-        w0State := w0PopBF16Lo
-      }
-    }
-
-    is(w0PopFP8) {
+  when(w0CmdValid) {
+    when(w0Cmd.op === MxuOp.PopAccFP8) {
       val fp8Row = quantBank(io.accStoreData, w0Cmd.scaleE8M0)
       io.mregWriteReq0.valid       := true.B
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
       io.mregWriteReq0.bits.data   := packMregRow(fp8Row.map(_(7, 0)))
-
-      when(w0Row + 1.U >= tileRows.U) {
-        w0State := w0Idle
-      }.otherwise {
-        issueAccStoreRead(w0Cmd, w0Row + 1.U)
-        w0Row := w0Row + 1.U
-      }
-    }
-
-    is(w0PopBF16Lo) {
+    }.elsewhen(w0Cmd.op === MxuOp.PopAccBF16) {
       io.mregWriteReq0.valid       := true.B
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
       io.mregWriteReq0.bits.data   := packMregRow(io.accStoreData.take(16).map(_(15, 0)))
+    }
 
-      when(w0Row + 1.U >= tileRows.U) {
-        w0State := w0Idle
-      }.otherwise {
-        issueAccStoreRead(w0Cmd, w0Row + 1.U)
-        w0Row := w0Row + 1.U
-      }
+    when(!w0Boundary) {
+      issueAccStoreRead(w0Cmd, w0Row + 1.U)
+      w0Row := w0Row + 1.U
+    }
+  }
+
+  when(w0Boundary) {
+    when(acceptPopFP8) {
+      w0Cmd      := io.cmd.bits
+      w0Row      := 0.U
+      w0CmdValid := true.B
+      issueAccStoreRead(io.cmd.bits, 0.U)
+    }.elsewhen(acceptPopBF16) {
+      w0Cmd      := io.cmd.bits
+      w0Row      := 0.U
+      w0CmdValid := true.B
+      issueAccStoreRead(io.cmd.bits, 0.U)
+    }.otherwise {
+      w0CmdValid := false.B
     }
   }
 
   // ==========================================================================
-  // WriteP1 FSM — mreg write port 1
+  // WriteP1 engine — mreg write port 1
   //
-  //   States: idle / pop BF16 hi half (lockstep with WriteP0).
+  //   Handles only BF16 pop hi half (lockstep with WriteP0).
   // ==========================================================================
 
-  switch(w1State) {
-    is(w1Idle) {
-      when(acceptPopBF16) {
-        w1Cmd   := io.cmd.bits
-        w1Row   := 0.U
-        w1State := w1PopBF16Hi
-      }
-    }
+  when(w1CmdValid) {
+    // Only PopAccBF16 ever lands on w1 — drive hi half (reads io.accStoreData
+    // driven by WriteP0).
+    io.mregWriteReq1.valid       := true.B
+    io.mregWriteReq1.bits.mregId := w1Cmd.mregId + 1.U
+    io.mregWriteReq1.bits.row    := w1Row
+    io.mregWriteReq1.bits.data   := packMregRow(io.accStoreData.drop(16).map(_(15, 0)))
 
-    is(w1PopBF16Hi) {
-      // Hi half of the BF16 pop; reads io.accStoreData (driven by WriteP0).
-      io.mregWriteReq1.valid       := true.B
-      io.mregWriteReq1.bits.mregId := w1Cmd.mregId + 1.U
-      io.mregWriteReq1.bits.row    := w1Row
-      io.mregWriteReq1.bits.data   := packMregRow(io.accStoreData.drop(16).map(_(15, 0)))
-
-      when(w1Row + 1.U >= tileRows.U) {
-        w1State := w1Idle
-      }.otherwise {
-        w1Row := w1Row + 1.U
-      }
+    when(!w1Boundary) {
+      w1Row := w1Row + 1.U
     }
+  }
+
+  when(w1Boundary) {
+    when(acceptPopBF16) {
+      w1Cmd      := io.cmd.bits
+      w1Row      := 0.U
+      w1CmdValid := true.B
+    }.otherwise {
+      w1CmdValid := false.B
+    }
+  }
+
+  // ==========================================================================
+  // BF16 lockstep verification — debug-only assertions
+  //
+  //   By construction, both halves of a BF16 op enter and tick in lockstep
+  //   because both engines latch on the same accept cycle and both increment
+  //   on the same `!boundary` predicate. These assertions catch any future
+  //   regression that breaks the invariant.
+  // ==========================================================================
+
+  when(p0IsBF16 && p1IsBF16) {
+    assert(p0Row === p1Row,                "SA: BF16 push p0/p1 row counters out of sync")
+    assert(p0Cmd.accSel === p1Cmd.accSel,  "SA: BF16 push p0/p1 accSel mismatch")
+  }
+  when(w0CmdValid && w1CmdValid && (w0Cmd.op === MxuOp.PopAccBF16)) {
+    assert(w0Row === w1Row,                "SA: BF16 pop w0/w1 row counters out of sync")
+    assert(w0Cmd.accSel === w1Cmd.accSel,  "SA: BF16 pop w0/w1 accSel mismatch")
   }
 
   // ==========================================================================
@@ -656,20 +655,20 @@ class SystolicArraySequencer(
   // Busy / active outputs
   // ==========================================================================
 
-  io.compBusy    := (p0State === p0Comp) || anyComputeInFlight
-  io.pushBusy    := (p0State === p0Push) || (p0State === p0BF16Lo) || !p1Idl
-  io.popBusy     := !w0Idl || !w1Idl
+  io.compBusy    := p0IsCompute || anyComputeInFlight
+  io.pushBusy    := (p0CmdValid && !p0IsCompute) || p1CmdValid
+  io.popBusy     := w0CmdValid || w1CmdValid
   io.dataBusy    := io.pushBusy || io.popBusy
   io.computeBusy := io.compBusy
 
   // ── Active mreg bank reports ──
-  io.activeReads(0).valid := !p0Idl
+  io.activeReads(0).valid := p0CmdValid
   io.activeReads(0).bits  := p0Cmd.mregId
-  io.activeReads(1).valid := !p1Idl
-  io.activeReads(1).bits  := Mux(p1State === p1BF16Hi, p1Cmd.mregId + 1.U, p1Cmd.mregId)
+  io.activeReads(1).valid := p1CmdValid
+  io.activeReads(1).bits  := Mux(p1IsBF16, p1Cmd.mregId + 1.U, p1Cmd.mregId)
 
-  io.activeWrites(0).valid := !w0Idl
+  io.activeWrites(0).valid := w0CmdValid
   io.activeWrites(0).bits  := w0Cmd.mregId
-  io.activeWrites(1).valid := !w1Idl
+  io.activeWrites(1).valid := w1CmdValid
   io.activeWrites(1).bits  := w1Cmd.mregId + 1.U
 }

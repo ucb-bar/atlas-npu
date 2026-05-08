@@ -1,4 +1,4 @@
-# perf_mm_mxu0_64x64x64.S — single-MXU (M=64, K=64, N=64) tiled matmul perf test
+# perf_mm_mxu0_64x64x64.S — single-MXU (M=64, N=64, K=64) tiled matmul perf test
 # @TIMEOUT 400000
 # @DRAM_BASE 0x00000001
 # @PYTHON_GEN gen_perf_mm_mxu0_64x64x64.py 500
@@ -20,25 +20,32 @@
 #   total MACs for this test = 8 * 32768 = 262144 (declared via
 #   @PERF_MACS_MXU0).
 #
-# Cadence: dense same-wslot push+matmul pairs at 33-cycle stride
-# (PUSH+MATMUL+DELAY 30; DELAY N stalls N+1 cycles, so 1+1+31 = 33).
-# Each (PUSH.W to wslot W) is immediately followed by (MATMUL reading
-# wslot W) in the next scalar issue cycle. Push lane j writes
-# weightSlot{0,1}(j) register at clock edge T_push+1+j; MATMUL's PE(0,j)
-# reads weightSlot combinationally at T_M+1+j = T_push+2+j → exactly
-# 1-cycle margin from the WeightBuffer's register write→read latency.
+# Cadence: dense same-wslot push+matmul pairs at 32-cycle stride
+# (PUSH+MATMUL+DELAY 29; DELAY N stalls N+1 cycles, so 1+1+30 = 32).
+# Post-FSM-collapse, the SA accepts back-to-back compute via p0Boundary
+# (a new compute fires on the cycle the previous compute finishes its
+# last feed beat — no idle bubble). Push lane j writes weightSlot{0,1}(j)
+# register at clock edge T_push+1+j; MATMUL's PE(0,j) reads weightSlot
+# combinationally at T_M+1+j = T_push+2+j → exactly 1-cycle margin from
+# the WeightBuffer's register write→read latency.
 #
-# Same-accSel MATMUL reuse spacing is 66 cycles (stride 33 × 2 accSels).
-# The new sequencer's per-row drainAccConflict requires T_new ≥
-# T_M_prev + 64 (SA pipeline depth 62 + SRAM settle 1 + 1-cycle scalar
-# issue → cmd at T_M+64 reads accBuf at T_M+65 which sees the new row 0
-# settled at edge T_M+63→T_M+64). 66 clears the bound with 2-cycle
-# margin. POP same-accSel obeys the same rule:
-#   POP acc0 (C00) at T_M2+64 = 132.
-#   POP acc1 (C01) at T_M3+64 = 165.
-#   POP acc0 (C10) at T_M6+64 = 264.
-#   POP acc1 (C11) at T_M7+64 = 297.
-# Total measured region: 297 cycles.
+# Same-accSel MATMUL reuse spacing is 64 cycles (stride 32 × 2 accSels) —
+# at the drainAccConflict floor: T_new ≥ T_M_prev + 64 (SA pipeline
+# depth 62 + SRAM settle 1 + 1-cycle scalar issue → cmd at T_M+64 reads
+# accBuf at T_M+65 which sees the new row 0 settled at edge T_M+63 →
+# T_M+64). POP same-accSel obeys the same rule:
+#   POP acc0 (C00) at T_M2+64 = 130.
+#   POP acc1 (C01) at T_M3+64 = 162  (POP→POP stride 32 from POP acc0,
+#                                      post-w0LastCycle collapse).
+#   POP acc0 (C10) at T_M6+64 = 259.
+#   POP acc1 (C11) at T_M7+64 = 291  (POP→POP stride 32).
+# Total measured region: 291 cycles. Util = 256/291 ≈ 88.0%.
+#
+# Phase A→B optimization: each PUSH for the next-phase weights fires INSIDE
+# the drainAcc-gap DELAY (BEFORE the POP) rather than after. This frees the
+# slot right after the POP for back-to-back matmul issue, saving 1 cycle on
+# the M3→M4 transition (and shifting all of Phase B + final POPs 1 cycle
+# earlier).
 #
 # Tiling (output-stationary over K):
 #   C00 = A00·B00 + A01·B10     C01 = A00·B01 + A01·B11
@@ -164,45 +171,53 @@
     CSRR  x20, 0xC00                # x20 = cycle count at start
 
 # ── Phase A: compute C00 (→acc0) and C01 (→acc1), K-stationary ──
-# Pattern: (push wK, matmul accN wK, DELAY 32) — same-wslot back-to-back.
+# Pattern: (push wK, matmul accN wK, DELAY 29) — back-to-back matmul stride
+# 32 (post-FSM-collapse: SA gained back-to-back compute via p0Boundary).
+# Same-accSel reuse stride is 64 cycles (= drainAccConflict minimum).
 
     # K=0
-    VMATPUSH.W.MXU0   0, 4            # wslot0 ← B00_T
-    VMATMUL.MXU0      0, 0, 0         # M0: acc0 = A00 · B00         (overwrite)
-    DELAY 30
-    VMATPUSH.W.MXU0   1, 5            # wslot1 ← B01_T
-    VMATMUL.MXU0      1, 0, 1         # M1: acc1 = A00 · B01         (overwrite)
-    DELAY 30
+    VMATPUSH.W.MXU0   0, 4            # cyc 1: wslot0 ← B00_T
+    VMATMUL.MXU0      0, 0, 0         # cyc 2: M0  acc0 = A00·B00      (overwrite)
+    DELAY 29                          # cyc 3..32
+    VMATPUSH.W.MXU0   1, 5            # cyc 33: wslot1 ← B01_T
+    VMATMUL.MXU0      1, 0, 1         # cyc 34: M1  acc1 = A00·B01     [stride 32 from M0]
+    DELAY 29                          # cyc 35..64
     # K=1
-    VMATPUSH.W.MXU0   0, 6            # wslot0 ← B10_T
-    VMATMUL.ACC.MXU0  0, 1, 0         # M2: acc0 += A01 · B10        (acc, reuse acc0)
-    DELAY 30
-    VMATPUSH.W.MXU0   1, 7            # wslot1 ← B11_T
-    VMATMUL.ACC.MXU0  1, 1, 1         # M3: acc1 += A01 · B11        (acc, reuse acc1)
-    DELAY 29                          # tighter than stride 33 — POP m8 fires at T_M2+64
+    VMATPUSH.W.MXU0   0, 6            # cyc 65: wslot0 ← B10_T (cd[0]=0 ✓)
+    VMATMUL.ACC.MXU0  0, 1, 0         # cyc 66: M2  acc0 += A01·B10    [stride 32, same-accSel
+                                      #              stride 64 from M0 = drainAcc minimum]
+    DELAY 29                          # cyc 67..96
+    VMATPUSH.W.MXU0   1, 7            # cyc 97: wslot1 ← B11_T (cd[1]=0 ✓)
+    VMATMUL.ACC.MXU0  1, 1, 1         # cyc 98: M3  acc1 += A01·B11    [stride 32, drainAcc 64]
+    DELAY 29                          # cyc 99..128
 
-# ── Phase A → B: pop A's results, start Phase B on the same accSels ──
+# ── Phase A → B: pre-PUSH next-phase weights INSIDE the drainAcc gap, then
+#                 POP, then back-to-back matmul. Saves the cycle that POP+PUSH
+#                 between matmuls would otherwise cost.
 
-    VMATPOP.FP8.MXU0  8, 0, 0         # m8 ← acc0  (C00 = M0+M2)
-    VMATPUSH.W.MXU0   0, 4            # wslot0 ← B00_T (Phase B K=0)
-    VMATMUL.MXU0      0, 2, 0         # M4: acc0 = A10 · B00         (overwrite)
-    DELAY 29                          # wait until T_M3+64 for POP acc1
-    VMATPOP.FP8.MXU0  9, 0, 1         # m9 ← acc1  (C01 = M1+M3)
-    VMATPUSH.W.MXU0   1, 5            # wslot1 ← B01_T (Phase B K=0)
-    VMATMUL.MXU0      1, 2, 1         # M5: acc1 = A10 · B01         (overwrite)
-    DELAY 30
+    VMATPUSH.W.MXU0   0, 4            # cyc 129: wslot0 ← B00_T (Phase B K=0; cd[0]=0 at 129 ✓)
+    VMATPOP.FP8.MXU0  8, 0, 0         # cyc 130: m8 ← acc0 (C00 = M0+M2); drainAcc T_M2+64
+    VMATMUL.MXU0      0, 2, 0         # cyc 131: M4  acc0 = A10·B00 (overwrite)
+                                      #   stride 33 from M3 (was 34); PUSH+2=131 ≤ 131 ✓
+    DELAY 28                          # cyc 132..160 — POP m9 fires at T_M3+64 = 162
+    VMATPUSH.W.MXU0   1, 5            # cyc 161: wslot1 ← B01_T (cd[1]=0 at 161 ✓)
+    VMATPOP.FP8.MXU0  9, 0, 1         # cyc 162: m9 ← acc1 (C01); POP→POP stride 32 ✓
+    VMATMUL.MXU0      1, 2, 1         # cyc 163: M5  acc1 = A10·B01
+                                      #   stride 32 from M4 (back-to-back via p0Boundary) ✓
+    DELAY 29                          # cyc 164..193
 
 # ── Phase B K=1: accumulate ──
-    VMATPUSH.W.MXU0   0, 6            # wslot0 ← B10_T
-    VMATMUL.ACC.MXU0  0, 3, 0         # M6: acc0 += A11 · B10
-    DELAY 30
-    VMATPUSH.W.MXU0   1, 7            # wslot1 ← B11_T
-    VMATMUL.ACC.MXU0  1, 3, 1         # M7: acc1 += A11 · B11
-    DELAY 29                          # wait until T_M6+64 for POP acc0
+    VMATPUSH.W.MXU0   0, 6            # cyc 194: wslot0 ← B10_T (cd[0]=0 ✓)
+    VMATMUL.ACC.MXU0  0, 3, 0         # cyc 195: M6  acc0 += A11·B10   [stride 32, drainAcc[0] 64]
+    DELAY 29                          # cyc 196..225
+    VMATPUSH.W.MXU0   1, 7            # cyc 226: wslot1 ← B11_T (cd[1]=0 ✓)
+    VMATMUL.ACC.MXU0  1, 3, 1         # cyc 227: M7  acc1 += A11·B11   [stride 32, drainAcc[1] 64]
+    DELAY 30                          # cyc 228..258 — POP m10 fires at T_M6+64 = 259
 
-    VMATPOP.FP8.MXU0  10, 0, 0        # m10 ← acc0 (C10 = M4+M6)
-    DELAY 31                          # wait until T_M7+64 for POP acc1
-    VMATPOP.FP8.MXU0  11, 0, 1        # m11 ← acc1 (C11 = M5+M7)
+    VMATPOP.FP8.MXU0  10, 0, 0        # cyc 259: m10 ← acc0 (C10 = M4+M6)
+    DELAY 30                          # cyc 260..290 — POP→POP stride 32 (post-w0LastCycle
+                                      # collapse) AND T_M7+64 = 291 reached at cyc 291
+    VMATPOP.FP8.MXU0  11, 0, 1        # cyc 291: m11 ← acc1 (C11 = M5+M7)
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
