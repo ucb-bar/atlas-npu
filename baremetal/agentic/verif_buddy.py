@@ -46,7 +46,7 @@ DEFAULT_COVERAGE_THRESHOLD = 90.0
 DEFAULT_LLM_TIMEOUT_S = 30 * 60
 COVERAGE_DIRNAME = "coverage"
 COVERAGE_ANALYZER_PATH = BAREMETAL_DIR / "coverage_analyzer.py"
-RUN_ASM_TESTS_PATH = BAREMETAL_DIR / "run_asm_tests.sh"
+RUN_ASM_TESTS_PATH = AGENTIC_DIR / "run_asm_tests.sh"
 GENERATED_SRC_DIRNAME = "generated-src"
 SIM_FAIL_MARKERS = (
     "*** FAILED ***",
@@ -1284,6 +1284,171 @@ def condense_coverage_report_for_prompt(
     return condensed
 
 
+# ---------------------------------------------------------------------------
+# Per-slot coverage gating helpers
+# ---------------------------------------------------------------------------
+
+COVERAGE_METRIC_KEYS: tuple[str, ...] = (
+    "score",
+    "line",
+    "cond",
+    "toggle",
+    "fsm",
+    "branch",
+)
+
+# Metrics smaller than this absolute delta are treated as noise (URG itself
+# only prints two decimals; a sub-0.005% wiggle is round-trip noise, not real
+# coverage). Anything above the epsilon is a real, observable improvement.
+COVERAGE_IMPROVEMENT_EPS: float = 1e-3
+
+
+_COVERAGE_SUMMARY_BLOCKS: tuple[str, ...] = (
+    "ATLAS TILE SUBTREE SUMMARY",
+    "OVERALL COVERAGE SUMMARY",
+)
+
+
+def _empty_coverage_metrics() -> dict[str, float | None]:
+    return {key: None for key in COVERAGE_METRIC_KEYS}
+
+
+def parse_coverage_summary_metrics(report_text: str) -> dict[str, float | None]:
+    """Extract the top-level SCORE/LINE/COND/TOGGLE/FSM/BRANCH metrics from
+    a `coverage_analyzer.py` text report.
+
+    The analyzer emits either an "ATLAS TILE SUBTREE SUMMARY" block (when the
+    target Atlas tile instance is found in the URG report) or an "OVERALL
+    COVERAGE SUMMARY" block (the legacy fall-back). We try each in turn and
+    return whichever one populates first; a key with no measurable percentage
+    in the chosen block is left as `None`.
+    """
+
+    metrics = _empty_coverage_metrics()
+    if not report_text:
+        return metrics
+
+    for marker in _COVERAGE_SUMMARY_BLOCKS:
+        idx = report_text.find(marker)
+        if idx == -1:
+            continue
+        # Each summary block is at most ~12 short lines; cap the window so we
+        # never accidentally pull metrics from the per-instance table below.
+        block = report_text[idx : idx + 1200]
+        candidate = _empty_coverage_metrics()
+        for key, label in (
+            ("score", "SCORE"),
+            ("line", "LINE"),
+            ("cond", "COND"),
+            ("toggle", "TOGGLE"),
+            ("fsm", "FSM"),
+            ("branch", "BRANCH"),
+        ):
+            m = re.search(rf"^\s*{label}\s*:\s*(-?\d+(?:\.\d+)?)\s*%", block, re.MULTILINE)
+            if m:
+                try:
+                    candidate[key] = float(m.group(1))
+                except ValueError:
+                    candidate[key] = None
+        if any(v is not None for v in candidate.values()):
+            return candidate
+
+    return metrics
+
+
+def coverage_metrics_improved(
+    baseline: dict[str, float | None] | None,
+    candidate: dict[str, float | None] | None,
+    *,
+    eps: float = COVERAGE_IMPROVEMENT_EPS,
+) -> dict[str, object]:
+    """Return whether `candidate` strictly improves `baseline` on any metric.
+
+    URG aggregation is monotonic: merging a new `.vdb` into the union can
+    only hold or increase each metric. So an "improvement" here is any
+    metric whose value strictly exceeds the baseline by more than `eps`.
+    A candidate that ties the baseline on every metric contributed nothing
+    and should be rejected.
+
+    The result is a structured dict so callers can both gate (boolean) and
+    log (per-metric deltas + improved-key set).
+    """
+
+    baseline = baseline or _empty_coverage_metrics()
+    candidate = candidate or _empty_coverage_metrics()
+
+    deltas: dict[str, float | None] = {}
+    improved_keys: list[str] = []
+    for key in COVERAGE_METRIC_KEYS:
+        b = baseline.get(key)
+        c = candidate.get(key)
+        if b is None and c is None:
+            deltas[key] = None
+            continue
+        if b is None:
+            delta = c if c is not None else 0.0
+        elif c is None:
+            delta = -b
+        else:
+            delta = c - b
+        deltas[key] = delta
+        if delta is not None and delta > eps:
+            improved_keys.append(key)
+
+    # If neither side has any populated metric, we cannot make a meaningful
+    # decision — treat that as "not improved" so the caller can fall back on
+    # whatever permissive policy it wants. The caller knows the full context.
+    any_signal = any(
+        baseline.get(k) is not None or candidate.get(k) is not None
+        for k in COVERAGE_METRIC_KEYS
+    )
+
+    return {
+        "improved": bool(improved_keys),
+        "improved_keys": improved_keys,
+        "deltas": deltas,
+        "had_signal": any_signal,
+    }
+
+
+def format_coverage_delta_for_log(
+    baseline: dict[str, float | None] | None,
+    candidate: dict[str, float | None] | None,
+    deltas: dict[str, float | None] | None = None,
+) -> str:
+    """Render a fixed-width before -> after (Δ) table for one coverage delta.
+
+    Used both in CLI logs and inside the per-slot JSON record so a human can
+    eyeball exactly which metric a test moved (and by how much) when they are
+    debugging why a test was accepted or rejected by the coverage gate.
+    """
+
+    baseline = baseline or _empty_coverage_metrics()
+    candidate = candidate or _empty_coverage_metrics()
+    if deltas is None:
+        deltas = coverage_metrics_improved(baseline, candidate)["deltas"]
+
+    fmt_pct = lambda v: f"{v:6.2f}%" if isinstance(v, (int, float)) else "    --"
+    fmt_dlt = lambda v: f"{v:+.4f}" if isinstance(v, (int, float)) else "  --"
+
+    lines: list[str] = []
+    for key, label in (
+        ("score", "SCORE"),
+        ("line", "LINE"),
+        ("cond", "COND"),
+        ("toggle", "TOGGLE"),
+        ("fsm", "FSM"),
+        ("branch", "BRANCH"),
+    ):
+        b = baseline.get(key)
+        c = candidate.get(key)
+        d = deltas.get(key) if isinstance(deltas, dict) else None
+        lines.append(
+            f"  {label:<6}: {fmt_pct(b)} -> {fmt_pct(c)}  (Δ {fmt_dlt(d)})"
+        )
+    return "\n".join(lines)
+
+
 def build_analyzer_system_prompt(
     rules: dict[str, object] | None = None,
 ) -> str:
@@ -2347,11 +2512,17 @@ def try_build_and_run_single_test(
     sim_config: str = DEFAULT_SIM_CONFIG,
     run_timeout_s: int = 0,
     attempt_idx: int = 0,
+    gen_coverage: bool = False,
 ) -> dict[str, object]:
     """Build + simulate a single published test, capturing every stage.
 
     ``test`` must be the single-element result of
     ``publish_planner_results_to_baremetal([...])``.
+
+    When ``gen_coverage`` is true, the VCS invocation is run with
+    ``GEN_COVERAGE=1`` so a per-test ``.vdb`` is produced as a side effect.
+    The coverage gate (``evaluate_test_coverage_contribution``) consumes
+    that ``.vdb`` to decide whether to keep the test.
 
     Returns a structured dict suitable both for logging and for feeding into
     the next fix-prompt::
@@ -2522,18 +2693,25 @@ def try_build_and_run_single_test(
         return result
 
     # ------------------------------------------------------------------
-    # Stage 5: VCS simulation (no coverage — that's a one-shot at the end)
+    # Stage 5: VCS simulation. When ``gen_coverage`` is on, we add
+    # ``GEN_COVERAGE=1`` so the same run that decides pass/fail also
+    # produces the per-test ``.vdb`` consumed by the coverage gate.
     # ------------------------------------------------------------------
     vcs_dir = (chipyard_root / vcs_dir_relpath).resolve()
     if not vcs_dir.is_dir():
         raise FileNotFoundError(f"VCS directory does not exist: {vcs_dir}")
-    make_cmd = [
-        "make", "run-binary",
-        f"BINARY={binary_path}",
-        f"CONFIG={sim_config}",
-        "LOADMEM=1",
-    ]
-    print(f"       [attempt {attempt_idx}] Simulating {name} in VCS...")
+    make_cmd = ["make", "run-binary"]
+    if gen_coverage:
+        make_cmd.append("GEN_COVERAGE=1")
+    make_cmd.extend(
+        [
+            f"BINARY={binary_path}",
+            f"CONFIG={sim_config}",
+            "LOADMEM=1",
+        ]
+    )
+    cov_label = " (with GEN_COVERAGE=1)" if gen_coverage else ""
+    print(f"       [attempt {attempt_idx}] Simulating {name} in VCS{cov_label}...")
     timeout = run_timeout_s if run_timeout_s > 0 else None
     rc, sim_output = _stream_command(make_cmd, vcs_dir, timeout_s=timeout)
     _record(rc, make_cmd, vcs_dir, sim_output)
@@ -2779,6 +2957,160 @@ def generate_vcs_coverage_report(
     summary["status"] = "passed"
     summary["reason"] = "coverage_report_generated"
     return summary
+
+
+def _test_vdb_path(
+    *,
+    chipyard_root: Path,
+    sim_config: str,
+    test_name: str,
+    vcs_dir_relpath: str = VCS_DIR_RELPATH,
+) -> Path:
+    """Return the per-test ``.vdb`` directory that VCS produces under
+    ``GEN_COVERAGE=1`` for binary ``atlas_<test_name>.riscv``.
+
+    The make rule names the database after the binary stem, so this is the
+    same scheme used by ``run_asm_tests.sh`` and by the coverage backfill
+    helpers above. Resolving it once means every coverage gating decision in
+    the loop talks about the same on-disk artifact.
+    """
+
+    vcs_dir = (chipyard_root / vcs_dir_relpath).resolve()
+    coverage_root = _coverage_root_for_sim_config(vcs_dir, sim_config)
+    return coverage_root / f"atlas_{test_name}.vdb"
+
+
+def _remove_test_vdb(
+    *,
+    chipyard_root: Path,
+    sim_config: str,
+    test_name: str,
+    vcs_dir_relpath: str = VCS_DIR_RELPATH,
+) -> Path | None:
+    """Best-effort delete of a single test's ``.vdb`` directory.
+
+    Used to keep the coverage state clean when we reject a test (either for a
+    failing simulation or for contributing zero coverage). Returns the path
+    we removed, or ``None`` if there was nothing to remove or the delete
+    failed (we never raise from cleanup).
+    """
+
+    vdb_path = _test_vdb_path(
+        chipyard_root=chipyard_root,
+        sim_config=sim_config,
+        test_name=test_name,
+        vcs_dir_relpath=vcs_dir_relpath,
+    )
+    if vdb_path.exists() and vdb_path.is_dir():
+        try:
+            shutil.rmtree(vdb_path)
+            return vdb_path
+        except OSError:
+            return None
+    return None
+
+
+def evaluate_test_coverage_contribution(
+    *,
+    test_name: str,
+    chipyard_root: Path,
+    output_dir: Path,
+    sim_config: str,
+    vcs_dir_relpath: str,
+    baseline_metrics: dict[str, float | None],
+    coverage_threshold: float,
+    slot: int,
+    attempt_idx: int,
+    label_prefix: str = "slot_cov",
+) -> dict[str, object]:
+    """Aggregate URG with this test's ``.vdb`` included and decide whether it
+    moved any of the top-level Atlas-tile coverage metrics.
+
+    The simulation phase (``try_build_and_run_single_test`` with
+    ``gen_coverage=True``) is responsible for producing the per-test
+    ``.vdb``; this function only does the post-sim aggregation + diff.
+
+    Returns a structured record:
+        {
+          "ok": bool,                   # aggregation succeeded
+          "improved": bool,             # at least one metric strictly above eps
+          "improved_keys": [..],
+          "metrics": {score,line,...} | None,
+          "deltas":  {score,line,...} | None,
+          "delta_pretty": str | None,
+          "had_signal": bool,
+          "coverage_summary": <generate_vcs_coverage_report dict>,
+          "analysis_path": str | None,
+        }
+
+    The caller is expected to:
+      * roll ``metrics`` forward as the new baseline if it accepts the test;
+      * call ``_remove_test_vdb`` if it rejects the test, so the next slot's
+        aggregation does not silently include this candidate.
+    """
+
+    label = f"slot{slot:02d}_attempt{attempt_idx:02d}_{test_name}"
+    cov_summary = generate_vcs_coverage_report(
+        chipyard_root=chipyard_root,
+        output_dir=output_dir,
+        sim_config=sim_config,
+        vcs_dir_relpath=vcs_dir_relpath,
+        coverage_threshold=coverage_threshold,
+        report_dir_name=f"{label_prefix}/{label}/cov_overall",
+        analysis_filename=f"{label_prefix}/{label}/coverage_analysis.txt",
+        log_prefix=f"{label_prefix}_{label}",
+    )
+
+    if cov_summary["status"] != "passed":
+        return {
+            "ok": False,
+            "improved": False,
+            "improved_keys": [],
+            "metrics": None,
+            "deltas": None,
+            "delta_pretty": None,
+            "had_signal": False,
+            "coverage_summary": cov_summary,
+            "analysis_path": cov_summary.get("analysis_path"),
+            "reason": (
+                f"coverage_aggregation_failed:{cov_summary.get('reason', 'unknown')}"
+            ),
+        }
+
+    analysis_path = Path(str(cov_summary["analysis_path"]))
+    try:
+        analysis_text = analysis_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {
+            "ok": False,
+            "improved": False,
+            "improved_keys": [],
+            "metrics": None,
+            "deltas": None,
+            "delta_pretty": None,
+            "had_signal": False,
+            "coverage_summary": cov_summary,
+            "analysis_path": str(analysis_path),
+            "reason": f"coverage_analysis_unreadable:{exc}",
+        }
+
+    metrics = parse_coverage_summary_metrics(analysis_text)
+    improvement = coverage_metrics_improved(baseline_metrics, metrics)
+    deltas = improvement["deltas"] if isinstance(improvement, dict) else None
+    delta_pretty = format_coverage_delta_for_log(baseline_metrics, metrics, deltas)
+
+    return {
+        "ok": True,
+        "improved": bool(improvement.get("improved")),
+        "improved_keys": list(improvement.get("improved_keys", [])),
+        "metrics": metrics,
+        "deltas": deltas,
+        "delta_pretty": delta_pretty,
+        "had_signal": bool(improvement.get("had_signal")),
+        "coverage_summary": cov_summary,
+        "analysis_path": str(analysis_path),
+        "reason": "coverage_improved" if improvement.get("improved") else "coverage_unchanged",
+    }
 
 
 def run_vcs_binaries(
@@ -3027,18 +3359,40 @@ def run_incremental_generation_loop(
     max_fix_attempts: int,
     run_timeout_s: int,
     llm_timeout_s: int,
+    baseline_coverage_metrics: dict[str, float | None] | None = None,
+    coverage_threshold: float = DEFAULT_COVERAGE_THRESHOLD,
+    coverage_gating_enabled: bool = True,
 ) -> dict[str, object]:
-    """Generate + validate tests one at a time.
+    """Generate + validate tests one at a time, gated by measured coverage.
 
-    For each of ``num_tests`` slots, ask the planner for exactly one test, then
-    publish/build/simulate it. If it fails, send a fix prompt that carries the
-    failing artifacts + the error-log tail, up to ``max_fix_attempts`` times
-    (initial + retries). Each accepted test becomes visible context for every
-    subsequent planner call, so the model deliberately complements — not
-    duplicates — its own siblings.
+    For each of ``num_tests`` slots:
 
-    Returns a summary dict with ``accepted``, ``skipped``, and ``per_slot``
-    entries suitable for writing to disk.
+    1. Ask the planner for exactly one test, then publish/build/simulate it
+       under ``GEN_COVERAGE=1`` (the same sim run produces the per-test
+       ``.vdb`` we feed to the coverage gate).
+    2. If the simulation fails, send a fix prompt that carries the failing
+       artifacts + the error-log tail, up to ``max_fix_attempts`` times
+       (initial + retries). This is the existing correctness retry loop.
+    3. If the simulation passes, run URG + ``coverage_analyzer.py`` over the
+       full ``.vdb`` set including this test, parse the top-level Atlas-tile
+       coverage metrics, and compare against the rolling baseline. The test
+       is **accepted** only if it strictly improves at least one metric —
+       otherwise its on-disk artifacts and ``.vdb`` are removed and we move
+       on to the next slot (no fix retry, since "test runs but adds nothing"
+       is not a correctness bug for the LLM to fix).
+    4. Each accepted test rolls the baseline metrics forward, so the next
+       slot's gate compares against the cumulative coverage of every test
+       already accepted in this session.
+
+    ``baseline_coverage_metrics`` is the coverage state captured *before*
+    this loop started (typically from the handwritten-test backfill). When
+    ``coverage_gating_enabled`` is false (or the baseline is missing), the
+    gate degrades to "always accept any sim-passing test" so the legacy
+    behavior is preserved for callers that have not yet wired baseline
+    metrics in.
+
+    Returns a summary dict with ``accepted``, ``skipped``, ``per_slot``
+    entries plus the final ``current_coverage_metrics`` after the loop.
     """
 
     planner_system = build_planner_system_prompt(rules=assets.rules)
@@ -3049,9 +3403,19 @@ def run_incremental_generation_loop(
         path.stem for path in ASSEMBLY_DIR.glob("*.S")
     )
 
+    # Rolling coverage baseline. Each accepted test updates this so the next
+    # slot's gate compares against the union of (handwritten suite) ∪ (every
+    # test accepted earlier in this session). Coverage is monotonic, so this
+    # is well-defined even when the analyzer cannot parse a metric (we keep
+    # the previous value rather than regressing it to None).
+    current_coverage_metrics: dict[str, float | None] = dict(
+        baseline_coverage_metrics or _empty_coverage_metrics()
+    )
+
     accepted: list[dict[str, object]] = []  # full published-test dicts
     accepted_for_prompt: list[dict[str, str]] = []  # {name, description}
     skipped: list[dict[str, object]] = []
+    rejected_for_no_coverage: list[dict[str, object]] = []
     per_slot_records: list[dict[str, object]] = []
 
     for slot in range(num_tests):
@@ -3085,6 +3449,8 @@ def run_incremental_generation_loop(
         last_result: dict | None = None
         attempts_log: list[dict[str, object]] = []
         success = False
+        coverage_eval: dict[str, object] | None = None
+        coverage_rejected = False
 
         for attempt_idx in range(max_fix_attempts):
             if attempt_idx == 0 or candidate is None:
@@ -3224,27 +3590,118 @@ def run_incremental_generation_loop(
                 sim_config=sim_config,
                 run_timeout_s=run_timeout_s,
                 attempt_idx=attempt_idx,
+                gen_coverage=coverage_gating_enabled,
             )
-            attempts_log.append(
-                {
-                    "attempt": attempt_idx,
-                    "stage": stage_label,
-                    "name": name,
-                    "ok": bool(result["ok"]),
-                    "phase": str(result["phase"]),
-                    "reason": str(result["reason"]),
-                }
-            )
+            attempt_record: dict[str, object] = {
+                "attempt": attempt_idx,
+                "stage": stage_label,
+                "name": name,
+                "ok": bool(result["ok"]),
+                "phase": str(result["phase"]),
+                "reason": str(result["reason"]),
+            }
             last_result = result
 
-            if result["ok"]:
-                print(f"       [slot {slot:02d}] ACCEPTED {name} on attempt {attempt_idx}.")
+            if not result["ok"]:
+                attempts_log.append(attempt_record)
+                print(
+                    f"       [slot {slot:02d}] attempt {attempt_idx} failed "
+                    f"in phase={result['phase']} reason={result['reason']}."
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # Sim passed. Run the coverage gate before accepting.
+            # ---------------------------------------------------------
+            print(
+                f"       [slot {slot:02d}] {name} passed sim on attempt "
+                f"{attempt_idx}; evaluating coverage contribution..."
+            )
+
+            if not coverage_gating_enabled:
+                attempt_record["coverage_gate"] = "disabled"
+                attempts_log.append(attempt_record)
+                print(
+                    f"       [slot {slot:02d}] coverage gating disabled; "
+                    f"ACCEPTED {name} on attempt {attempt_idx}."
+                )
                 success = True
                 break
-            print(
-                f"       [slot {slot:02d}] attempt {attempt_idx} failed "
-                f"in phase={result['phase']} reason={result['reason']}."
+
+            coverage_eval = evaluate_test_coverage_contribution(
+                test_name=name,
+                chipyard_root=chipyard_root,
+                output_dir=output_dir,
+                sim_config=sim_config,
+                vcs_dir_relpath=vcs_dir_relpath,
+                baseline_metrics=current_coverage_metrics,
+                coverage_threshold=coverage_threshold,
+                slot=slot,
+                attempt_idx=attempt_idx,
             )
+
+            attempt_record["coverage_gate"] = {
+                "ok": bool(coverage_eval.get("ok")),
+                "improved": bool(coverage_eval.get("improved")),
+                "improved_keys": list(coverage_eval.get("improved_keys") or []),
+                "metrics": coverage_eval.get("metrics"),
+                "deltas": coverage_eval.get("deltas"),
+                "reason": coverage_eval.get("reason"),
+                "analysis_path": coverage_eval.get("analysis_path"),
+            }
+            attempts_log.append(attempt_record)
+
+            if not coverage_eval.get("ok"):
+                # Aggregation itself failed (e.g. urg crashed). We do NOT
+                # silently accept the test in this case — surface it as a
+                # rejected slot so the operator sees it and re-runs. The
+                # post-loop cleanup branch handles vdb + artifact teardown.
+                reason = str(coverage_eval.get("reason", "coverage_gate_failed"))
+                print(
+                    f"       [slot {slot:02d}] coverage gate FAILED for {name}: "
+                    f"{reason}. Moving to next slot."
+                )
+                last_result = {
+                    "phase": "coverage_gate",
+                    "reason": reason,
+                    "log_tail": reason,
+                }
+                coverage_rejected = True
+                break
+
+            delta_pretty = str(coverage_eval.get("delta_pretty") or "")
+            if delta_pretty:
+                print(delta_pretty)
+
+            if coverage_eval.get("improved"):
+                improved_keys = ", ".join(coverage_eval.get("improved_keys") or [])
+                print(
+                    f"       [slot {slot:02d}] ACCEPTED {name} on attempt "
+                    f"{attempt_idx}: coverage improved on [{improved_keys}]."
+                )
+                success = True
+                break
+
+            # Sim passed but coverage didn't move. Per design, we do NOT
+            # retry — "test runs but adds zero coverage" is not a
+            # correctness bug for the LLM to fix; it's a planning/coverage
+            # issue. Cleanup of artifacts + vdb happens in the post-loop
+            # branch below so it is identical to the "all attempts failed"
+            # path and we don't double-print "removed 0 artifacts".
+            print(
+                f"       [slot {slot:02d}] REJECTED {name} on attempt "
+                f"{attempt_idx}: sim passed but coverage did not improve. "
+                "Moving to next slot."
+            )
+            last_result = {
+                "phase": "coverage_gate",
+                "reason": "coverage_unchanged",
+                "log_tail": delta_pretty
+                or "Test ran successfully but did not increase any top-level "
+                "coverage metric over the rolling baseline.",
+            }
+            coverage_rejected = True
+            break
 
         if success and candidate is not None and published_entry is not None:
             accepted.append(published_entry)
@@ -3255,6 +3712,20 @@ def run_incremental_generation_loop(
                 }
             )
             forbidden_names.add(str(candidate["name"]))
+
+            # Roll the rolling baseline forward using whatever metrics the
+            # gate measured. Keep the previous value for any metric the
+            # analyzer left as None so we never silently regress.
+            new_metrics_record: dict[str, float | None] | None = None
+            if isinstance(coverage_eval, dict) and coverage_eval.get("metrics"):
+                new_metrics = coverage_eval["metrics"]
+                if isinstance(new_metrics, dict):
+                    for key in COVERAGE_METRIC_KEYS:
+                        new_value = new_metrics.get(key)
+                        if new_value is not None:
+                            current_coverage_metrics[key] = new_value
+                    new_metrics_record = dict(new_metrics)
+
             per_slot_records.append(
                 {
                     "slot": slot,
@@ -3262,35 +3733,103 @@ def run_incremental_generation_loop(
                     "name": str(candidate["name"]),
                     "description": str(candidate.get("description", "")),
                     "attempts": attempts_log,
+                    "coverage_after": dict(current_coverage_metrics),
+                    "coverage_measured_this_slot": new_metrics_record,
+                    "coverage_improved_keys": (
+                        list(coverage_eval.get("improved_keys") or [])
+                        if isinstance(coverage_eval, dict)
+                        else []
+                    ),
                 }
             )
         else:
-            # Exhausted all fix attempts. Revert any on-disk pollution so the
-            # next slot's planner context stays clean.
+            # Exhausted all fix attempts (or rejected by the coverage gate).
+            # Revert any on-disk pollution so the next slot's planner context
+            # stays clean, and drop the per-test ``.vdb`` so it does not
+            # taint the next slot's coverage delta.
             revert_name = str(candidate["name"]) if candidate is not None else None
+            removed_artifacts: list[Path] = []
+            removed_vdb: Path | None = None
             if revert_name:
-                removed = unpublish_single_test(revert_name)
-                print(
-                    f"       [slot {slot:02d}] SKIPPED {revert_name}; "
-                    f"removed {len(removed)} artifact(s)."
+                removed_artifacts = unpublish_single_test(revert_name)
+                removed_vdb = _remove_test_vdb(
+                    chipyard_root=chipyard_root,
+                    sim_config=sim_config,
+                    test_name=revert_name,
+                    vcs_dir_relpath=vcs_dir_relpath,
                 )
-            skipped.append(
-                {
-                    "slot": slot,
-                    "name": revert_name,
-                    "attempts": attempts_log,
-                    "last_phase": str(last_result.get("phase")) if last_result else None,
-                    "last_reason": str(last_result.get("reason")) if last_result else None,
-                }
-            )
+
+            outcome = "rejected_no_coverage" if coverage_rejected else "skipped"
+            if coverage_rejected:
+                rejected_for_no_coverage.append(
+                    {
+                        "slot": slot,
+                        "name": revert_name,
+                        "attempts": attempts_log,
+                        "last_phase": str(last_result.get("phase")) if last_result else None,
+                        "last_reason": str(last_result.get("reason")) if last_result else None,
+                        "coverage_eval": (
+                            {
+                                "improved": bool(coverage_eval.get("improved")),
+                                "improved_keys": list(
+                                    coverage_eval.get("improved_keys") or []
+                                ),
+                                "metrics": coverage_eval.get("metrics"),
+                                "deltas": coverage_eval.get("deltas"),
+                                "reason": coverage_eval.get("reason"),
+                            }
+                            if isinstance(coverage_eval, dict)
+                            else None
+                        ),
+                    }
+                )
+                if revert_name:
+                    print(
+                        f"       [slot {slot:02d}] {outcome.upper()} {revert_name}; "
+                        f"removed {len(removed_artifacts)} artifact(s)"
+                        + (f" + .vdb at {removed_vdb}" if removed_vdb else "")
+                        + "."
+                    )
+            else:
+                skipped.append(
+                    {
+                        "slot": slot,
+                        "name": revert_name,
+                        "attempts": attempts_log,
+                        "last_phase": str(last_result.get("phase")) if last_result else None,
+                        "last_reason": str(last_result.get("reason")) if last_result else None,
+                    }
+                )
+                if revert_name:
+                    print(
+                        f"       [slot {slot:02d}] SKIPPED {revert_name}; "
+                        f"removed {len(removed_artifacts)} artifact(s)"
+                        + (f" + .vdb at {removed_vdb}" if removed_vdb else "")
+                        + "."
+                    )
+
             per_slot_records.append(
                 {
                     "slot": slot,
-                    "outcome": "skipped",
+                    "outcome": outcome,
                     "name": revert_name,
                     "attempts": attempts_log,
                     "last_phase": str(last_result.get("phase")) if last_result else None,
                     "last_reason": str(last_result.get("reason")) if last_result else None,
+                    "coverage_after": dict(current_coverage_metrics),
+                    "coverage_eval": (
+                        {
+                            "improved": bool(coverage_eval.get("improved")),
+                            "improved_keys": list(
+                                coverage_eval.get("improved_keys") or []
+                            ),
+                            "metrics": coverage_eval.get("metrics"),
+                            "deltas": coverage_eval.get("deltas"),
+                            "reason": coverage_eval.get("reason"),
+                        }
+                        if isinstance(coverage_eval, dict)
+                        else None
+                    ),
                 }
             )
 
@@ -3298,6 +3837,11 @@ def run_incremental_generation_loop(
         "requested": num_tests,
         "accepted_count": len(accepted),
         "skipped_count": len(skipped),
+        "rejected_no_coverage_count": len(rejected_for_no_coverage),
+        "coverage_gating_enabled": coverage_gating_enabled,
+        "coverage_threshold": coverage_threshold,
+        "baseline_coverage_metrics": dict(baseline_coverage_metrics or _empty_coverage_metrics()),
+        "current_coverage_metrics": dict(current_coverage_metrics),
         "accepted": [
             {
                 "name": str(t["name"]),
@@ -3308,11 +3852,20 @@ def run_incremental_generation_loop(
             for t in accepted
         ],
         "skipped": skipped,
+        "rejected_no_coverage": rejected_for_no_coverage,
         "per_slot": per_slot_records,
     }
     summary_path = output_dir / "incremental_generation_summary.json"
     _write_json(summary_path, summary)
-    print(f"\nIncremental loop complete: {len(accepted)} accepted, {len(skipped)} skipped.")
+    print(
+        f"\nIncremental loop complete: {len(accepted)} accepted, "
+        f"{len(rejected_for_no_coverage)} rejected for zero coverage, "
+        f"{len(skipped)} skipped (other failures)."
+    )
+    if coverage_gating_enabled:
+        baseline_in = dict(baseline_coverage_metrics or _empty_coverage_metrics())
+        print("Coverage rolled forward across the session:")
+        print(format_coverage_delta_for_log(baseline_in, current_coverage_metrics))
     print(f"Summary written to {summary_path}")
 
     return {
@@ -3320,6 +3873,8 @@ def run_incremental_generation_loop(
         "summary_path": summary_path,
         "accepted_tests": accepted,  # list of published-test dicts ready for run_vcs_binaries
         "accepted_for_prompt": accepted_for_prompt,
+        "current_coverage_metrics": dict(current_coverage_metrics),
+        "rejected_for_no_coverage": rejected_for_no_coverage,
     }
 
 
@@ -3493,6 +4048,21 @@ def main() -> int:
         )
         print(f"       Prompt-safe coverage summary: {analyzer_cov_prompt_path}")
 
+    # Parse the top-level Atlas-tile coverage metrics out of the baseline
+    # report. These are the rolling thresholds the per-slot coverage gate
+    # compares against; each accepted test rolls them forward.
+    baseline_metrics = parse_coverage_summary_metrics(baseline_coverage_text_full)
+    print("       Baseline coverage metrics (rolling gate starts here):")
+    print(format_coverage_delta_for_log(_empty_coverage_metrics(), baseline_metrics))
+    _write_json(
+        args.output_dir / "baseline_coverage_metrics.json",
+        {
+            "metrics": baseline_metrics,
+            "source": str(baseline_coverage["analysis_path"]),
+            "improvement_eps": COVERAGE_IMPROVEMENT_EPS,
+        },
+    )
+
     analysis_path = args.analysis_file if args.analysis_file.exists() else None
     if analysis_path is not None:
         print(f"\n[3/{n_steps}] Using existing analysis file...")
@@ -3545,6 +4115,9 @@ def main() -> int:
         max_fix_attempts=args.max_fix_attempts,
         run_timeout_s=args.run_timeout_s,
         llm_timeout_s=args.llm_timeout_s,
+        baseline_coverage_metrics=baseline_metrics,
+        coverage_threshold=args.coverage_threshold,
+        coverage_gating_enabled=True,
     )
     accepted_tests = loop_result["accepted_tests"]
     loop_summary = loop_result["summary"]
@@ -3599,13 +4172,23 @@ def main() -> int:
 
     print(f"\n[6/{n_steps}] Writing summary...")
     print(
-        f"       Slots attempted : {loop_summary['requested']}"
+        f"       Slots attempted          : {loop_summary['requested']}"
     )
     print(
-        f"       Accepted        : {loop_summary['accepted_count']}"
+        f"       Accepted                 : {loop_summary['accepted_count']}"
     )
     print(
-        f"       Skipped         : {loop_summary['skipped_count']}"
+        f"       Rejected (no coverage)   : {loop_summary.get('rejected_no_coverage_count', 0)}"
+    )
+    print(
+        f"       Skipped (other failures) : {loop_summary['skipped_count']}"
+    )
+    print("\nRolling coverage progression (baseline -> after loop):")
+    print(
+        format_coverage_delta_for_log(
+            loop_summary.get("baseline_coverage_metrics"),
+            loop_summary.get("current_coverage_metrics"),
+        )
     )
     print("\nCoverage outputs:")
     print(f"  baseline summary: {baseline_coverage_path}")
