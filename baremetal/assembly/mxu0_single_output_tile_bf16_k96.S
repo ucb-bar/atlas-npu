@@ -1,7 +1,7 @@
 # mxu0_single_output_tile_bf16_k96.S — C_tile = A_tile @ B_tile + bias (K=96)
 #                                       weight double-buffer with overlap
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu0_single_output_tile_bf16_k96.py 42 1
 #
 # K=96 (3 tiles) diagnostic variant: loop body executes exactly ONCE.
@@ -30,13 +30,13 @@
     LI    x10, 0
     LI    x11, 3             # total K tiles (K=96 / 32 = 3)
     LI    x12, 1024          # bytes per tile
-    LI    x16, 0             # act DRAM offset
-    LI    x17, 3072          # wgt DRAM offset  (0x00C00)
-    LI    x18, 6144          # bias DRAM offset (0x01800)
-    LI    x23, 7168          # result DRAM offset (0x01C00)
+    LI    x16, 0x90000000    # act DRAM offset (FPGA base + 0)
+    LI    x17, 0x90000C00    # wgt DRAM offset (FPGA base + 0x00C00)
+    LI    x18, 0x90001800    # bias DRAM offset (FPGA base + 0x01800)
+    LI    x23, 0x90001C00    # result DRAM offset (FPGA base + 0x01C00)
     LI    x24, 1024          # result bytes per bank
     LI    x30, 1             # const 1
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
 
     # Bias -> TRF 8

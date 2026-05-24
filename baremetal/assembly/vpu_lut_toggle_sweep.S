@@ -1,6 +1,6 @@
 # vpu_lut_toggle_sweep.S — mantissa/exponent-diverse VPU unary math sweep
 # @TIMEOUT 200000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_lut_toggle_sweep.py
 #
 # Coverage intent (directly targets atlasTile_coverage_report.md findings):
@@ -43,7 +43,7 @@
 #   m4,m5  VPU result pair
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 2048           # 2 KiB per tile / output
     LI    x3, 2048           # same, used for DMA.STOREs
@@ -52,7 +52,7 @@
 # TILE 0 — mantissa sweep, clustered exponent
 # ======================================================================
     ADDI  x6, x0, 0          # VMEM word addr 0
-    LI    x1, 0x0000         # DRAM byte 0x0000
+    LI    x1, 0x90000000  # DRAM byte 0x0000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -71,7 +71,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -84,7 +84,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -97,7 +97,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -110,7 +110,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -123,7 +123,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -136,7 +136,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -149,7 +149,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -162,7 +162,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x5800
+    LI    x10, 0x90005800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -170,7 +170,7 @@
 # TILE 1 — mid-range values, mixed sign
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x0800
+    LI    x1, 0x90000800
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -189,7 +189,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x6000
+    LI    x10, 0x90006000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -202,7 +202,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x6800
+    LI    x10, 0x90006800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -215,7 +215,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x7000
+    LI    x10, 0x90007000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -228,7 +228,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x7800
+    LI    x10, 0x90007800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -241,7 +241,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x8000
+    LI    x10, 0x90008000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -254,7 +254,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x8800
+    LI    x10, 0x90008800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -267,7 +267,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x9000
+    LI    x10, 0x90009000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -280,7 +280,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x9800
+    LI    x10, 0x90009800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -288,7 +288,7 @@
 # TILE 2 — wide exponent sweep
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x1000
+    LI    x1, 0x90001000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -307,7 +307,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xA000
+    LI    x10, 0x9000A000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -320,7 +320,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xA800
+    LI    x10, 0x9000A800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -333,7 +333,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xB000
+    LI    x10, 0x9000B000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -346,7 +346,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xB800
+    LI    x10, 0x9000B800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -359,7 +359,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xC000
+    LI    x10, 0x9000C000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -372,7 +372,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xC800
+    LI    x10, 0x9000C800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -385,7 +385,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xD000
+    LI    x10, 0x9000D000
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 
@@ -398,7 +398,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xD800
+    LI    x10, 0x9000D800
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT  1
 

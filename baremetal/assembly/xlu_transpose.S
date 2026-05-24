@@ -1,6 +1,6 @@
 # xlu_transpose.S — XLU transpose with functional correctness checks
 # @TIMEOUT 20000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 #
 # VMEM layout: tile 0 at word 0, tile 1 at word 256
 
@@ -71,13 +71,13 @@
 # @CHECK_DRAM 63 0x0000000000000000000000000000000000000000000000000000000041312111
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
     LI    x2, 1024           # tile bytes
 
     # DMA load source → VMEM[word 0]
     ADDI  x6, x0, 0         # VMEM word 0
-    ADDI  x1, x0, 0         # DRAM offset 0
+    LI    x1, 0x90000000  # DRAM offset 0
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -97,7 +97,7 @@
 
     # DMA store VMEM[256] → DRAM[base+1024]
     LI    x7, 256
-    LI    x3, 1024
+    LI    x3, 0x90000400
     DMA.STORE x3, x7, x2, 1
     DMA.WAIT  1
 

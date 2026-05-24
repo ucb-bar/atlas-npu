@@ -3,7 +3,7 @@
 #   C[32,32] = A[:,0:32]  @ B[0:32,:]      (VMATMUL.MXU0     → reset acc)
 #            + A[:,32:64] @ B[32:64,:]     (VMATMUL.ACC.MXU0 → accumulate)
 # @TIMEOUT 40000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_matmul_k_chain_mxu0.py
 #
 # Each B tile is XLU-transposed before being pushed to the weight slot
@@ -24,13 +24,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load A_K0 → VMEM[0] → m0 ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -39,7 +39,7 @@
 
     # ── Load B_K0 → VMEM[256] → m4 → m5 ──
     LI    x7, 256
-    LI    x1, 2048
+    LI    x1, 0x90000800
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 256
@@ -56,7 +56,7 @@
 
     # ── Load A_K1 → VMEM[512] → m2 ──
     LI    x6, 512
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 512
@@ -65,7 +65,7 @@
 
     # ── Load B_K1 → VMEM[768] → m6 → m7 ──
     LI    x7, 768
-    LI    x1, 3072
+    LI    x1, 0x90000C00
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 768
@@ -94,12 +94,12 @@
     DELAY 33
 
     LI    x8, 1024
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
     LI    x9, 1280
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x9, x2, 1
     DMA.WAIT  1
 

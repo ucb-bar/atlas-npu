@@ -1,6 +1,6 @@
 # perf_mm_dual_128x128x128.S — dual-MXU (M=N=K=128) FP8 matmul perf test
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_mm_dual_128x128x128.py 500
 # @PERF_REPORT
 # @PERF_MACS_MXU0 1048576
@@ -118,7 +118,7 @@
 #   B^T @ 0x4000 + (4k + j) * 0x400   →   0x4000..0x7C00
 #   C   @ 0x8000 + (4i + j) * 0x400   →   0x8000..0xBC00
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127                    # scale reg 0 = 0x7F -> unit scale
@@ -129,7 +129,7 @@
 
     # A[0,0] -> m0
     ADDI  x6, x0, 0
-    LI    x10, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -138,7 +138,7 @@
 
     # A[0,1] -> m1
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -147,7 +147,7 @@
 
     # A[0,2] -> m2
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -156,7 +156,7 @@
 
     # A[0,3] -> m3
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -165,7 +165,7 @@
 
     # A[1,0] -> m4
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -174,7 +174,7 @@
 
     # A[1,1] -> m5
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -183,7 +183,7 @@
 
     # A[1,2] -> m6
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -192,7 +192,7 @@
 
     # A[1,3] -> m7
     ADDI  x6, x0, 0
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -201,7 +201,7 @@
 
     # A[2,0] -> m8
     ADDI  x6, x0, 0
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -210,7 +210,7 @@
 
     # A[2,1] -> m9
     ADDI  x6, x0, 0
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -219,7 +219,7 @@
 
     # A[2,2] -> m10
     ADDI  x6, x0, 0
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -228,7 +228,7 @@
 
     # A[2,3] -> m11
     ADDI  x6, x0, 0
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -237,7 +237,7 @@
 
     # A[3,0] -> m12
     ADDI  x6, x0, 0
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -246,7 +246,7 @@
 
     # A[3,1] -> m13
     ADDI  x6, x0, 0
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -255,7 +255,7 @@
 
     # A[3,2] -> m14
     ADDI  x6, x0, 0
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -264,7 +264,7 @@
 
     # A[3,3] -> m15
     ADDI  x6, x0, 0
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -273,7 +273,7 @@
 
     # B[0,0]^T -> m16
     ADDI  x6, x0, 0
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -282,7 +282,7 @@
 
     # B[0,1]^T -> m17
     ADDI  x6, x0, 0
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -291,7 +291,7 @@
 
     # B[0,2]^T -> m18
     ADDI  x6, x0, 0
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -300,7 +300,7 @@
 
     # B[0,3]^T -> m19
     ADDI  x6, x0, 0
-    LI    x10, 0x4C00
+    LI    x10, 0x90004C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -309,7 +309,7 @@
 
     # B[1,0]^T -> m20
     ADDI  x6, x0, 0
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -318,7 +318,7 @@
 
     # B[1,1]^T -> m21
     ADDI  x6, x0, 0
-    LI    x10, 0x5400
+    LI    x10, 0x90005400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -327,7 +327,7 @@
 
     # B[1,2]^T -> m22
     ADDI  x6, x0, 0
-    LI    x10, 0x5800
+    LI    x10, 0x90005800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -336,7 +336,7 @@
 
     # B[1,3]^T -> m23
     ADDI  x6, x0, 0
-    LI    x10, 0x5C00
+    LI    x10, 0x90005C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -345,7 +345,7 @@
 
     # B[2,0]^T -> m24
     ADDI  x6, x0, 0
-    LI    x10, 0x6000
+    LI    x10, 0x90006000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -354,7 +354,7 @@
 
     # B[2,1]^T -> m25
     ADDI  x6, x0, 0
-    LI    x10, 0x6400
+    LI    x10, 0x90006400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -363,7 +363,7 @@
 
     # B[2,2]^T -> m26
     ADDI  x6, x0, 0
-    LI    x10, 0x6800
+    LI    x10, 0x90006800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -372,7 +372,7 @@
 
     # B[2,3]^T -> m27
     ADDI  x6, x0, 0
-    LI    x10, 0x6C00
+    LI    x10, 0x90006C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -381,7 +381,7 @@
 
     # B[3,0]^T -> m28
     ADDI  x6, x0, 0
-    LI    x10, 0x7000
+    LI    x10, 0x90007000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -390,7 +390,7 @@
 
     # B[3,1]^T -> m29
     ADDI  x6, x0, 0
-    LI    x10, 0x7400
+    LI    x10, 0x90007400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -399,7 +399,7 @@
 
     # B[3,2]^T -> m30
     ADDI  x6, x0, 0
-    LI    x10, 0x7800
+    LI    x10, 0x90007800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -408,7 +408,7 @@
 
     # B[3,3]^T -> m31
     ADDI  x6, x0, 0
-    LI    x10, 0x7C00
+    LI    x10, 0x90007C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -667,7 +667,7 @@
     VSTORE 32, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x8000
+    LI    x3, 0x90008000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -676,7 +676,7 @@
     VSTORE 33, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x8400
+    LI    x3, 0x90008400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -685,7 +685,7 @@
     VSTORE 34, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x8800
+    LI    x3, 0x90008800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -694,7 +694,7 @@
     VSTORE 35, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x8C00
+    LI    x3, 0x90008C00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -703,7 +703,7 @@
     VSTORE 36, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x9000
+    LI    x3, 0x90009000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -712,7 +712,7 @@
     VSTORE 37, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x9400
+    LI    x3, 0x90009400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -721,7 +721,7 @@
     VSTORE 38, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x9800
+    LI    x3, 0x90009800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -730,7 +730,7 @@
     VSTORE 39, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x9C00
+    LI    x3, 0x90009C00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -739,7 +739,7 @@
     VSTORE 40, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xA000
+    LI    x3, 0x9000A000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -748,7 +748,7 @@
     VSTORE 41, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xA400
+    LI    x3, 0x9000A400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -757,7 +757,7 @@
     VSTORE 42, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xA800
+    LI    x3, 0x9000A800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -766,7 +766,7 @@
     VSTORE 43, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xAC00
+    LI    x3, 0x9000AC00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -775,7 +775,7 @@
     VSTORE 44, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xB000
+    LI    x3, 0x9000B000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -784,7 +784,7 @@
     VSTORE 45, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xB400
+    LI    x3, 0x9000B400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -793,7 +793,7 @@
     VSTORE 46, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xB800
+    LI    x3, 0x9000B800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -802,7 +802,7 @@
     VSTORE 47, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0xBC00
+    LI    x3, 0x9000BC00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 

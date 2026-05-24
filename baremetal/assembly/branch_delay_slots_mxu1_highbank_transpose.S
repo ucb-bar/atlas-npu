@@ -1,6 +1,6 @@
 # branch_delay_slots_mxu1_highbank_transpose.S
 # @TIMEOUT 250000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 #
 # Coverage intent:
 #   - Taken BEQ with VLOAD side effect in a delay slot.
@@ -29,13 +29,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
-    LI    x10, 0           # DRAM byte offset of A
-    LI    x11, 1024        # DRAM byte offset of B
+    LI    x10, 0x90000000  # DRAM byte offset of A
+    LI    x11, 0x90000400  # DRAM byte offset of B
     LI    x12, 1024        # 1 KiB transfer size
-    LI    x13, 2048        # DRAM byte offset of output
+    LI    x13, 0x90000800  # DRAM byte offset of output
     LI    x14, 2048        # 2 KiB transfer size
 
     ADDI  x20, x0, 0       # VMEM word addr for A staging

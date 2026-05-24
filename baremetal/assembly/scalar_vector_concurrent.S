@@ -1,11 +1,13 @@
-# scalar_vector_concurrent.S — safe scalar/vector overlap on block-banked VMEM
+# scalar_vector_concurrent.S — legacy scalar/vector overlap layout on block-banked VMEM
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_scalar_vector_concurrent.py 42
 #
-# VMEM is 8-bank block-banked in 128 KiB chunks, so each aligned 1 KiB tensor
-# stays in a single bank for the full VLOAD/VSTORE. This test places each
-# overlapping region in a different bank to avoid LSU same-port conflicts:
+# VMEM is now 6-bank block-banked in 256 KiB chunks (65 536 words / bank), so
+# each aligned 1 KiB tensor still stays in a single bank for the full
+# VLOAD/VSTORE. The address plan below keeps the low-bank tiles compact while
+# moving the scalar-only staging regions into higher banks so every overlap
+# window stays legal under the current residency:
 #   • During VLOAD  (vector reads)  → scalar SW only
 #   • During VSTORE (vector writes) → scalar LW only
 #   • During XLU / MXU compute      → scalar LW/SW chains with a 2-cycle gap after LW
@@ -16,15 +18,15 @@
 #
 # VMEM regions:
 #   tile_A   word 0       byte 0        bank 0
-#   tile_B   word 32768   byte 131072   bank 1
-#   tile_W   word 65536   byte 262144   bank 2
-#   bias     word 98304   byte 393216   bank 3
-#   vstore   word 131072  byte 524288   bank 4
-#   stage1   word 163840  byte 655360   bank 5
-#   stage2   word 196608  byte 786432   bank 6
-#   stage3   word 229376  byte 917504   bank 7
+#   tile_B   word 32768   byte 131072   bank 0
+#   tile_W   word 65536   byte 262144   bank 1
+#   bias     word 131072  byte 524288   bank 2
+#   vstore   word 163840  byte 655360   bank 2
+#   stage1   word 196608  byte 786432   bank 3
+#   stage2   word 262144  byte 1048576  bank 4
+#   stage3   word 327680  byte 1310720  bank 5
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127
@@ -35,30 +37,30 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0      # tile_A
     LI    x6, 32768
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1      # tile_B
     LI    x6, 65536
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 2      # tile_W
-    LI    x6, 98304
-    LI    x10, 0x0C00
+    LI    x6, 131072
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 3      # bias
     DMA.WAIT  0
     DMA.WAIT  1
     DMA.WAIT  2
     DMA.WAIT  3
 
-    LI    x10, 0x1000
-    LI    x6, 163840
+    LI    x10, 0x90001000
+    LI    x6, 196608
     DMA.LOAD  x6, x10, x12, 0      # stage1 <- zeros
     DMA.WAIT  0
-    LI    x6, 196608
+    LI    x6, 262144
     DMA.LOAD  x6, x10, x12, 0      # stage2 <- zeros
     DMA.WAIT  0
-    LI    x6, 229376
+    LI    x6, 327680
     DMA.LOAD  x6, x10, x12, 0      # stage3 <- zeros
     DMA.WAIT  0
 
@@ -68,9 +70,9 @@
 
     LI    x14, 131072             # tile_B byte base
     LI    x15, 262144             # tile_W byte base
-    LI    x16, 655360             # stage1 byte base
-    LI    x17, 786432             # stage2 byte base
-    LI    x18, 917504             # stage3 byte base
+    LI    x16, 786432             # stage1 byte base
+    LI    x17, 1048576            # stage2 byte base
+    LI    x18, 1310720            # stage3 byte base
     LI    x27, 0xCAFEBABE
     LI    x28, 0xDEADBEEF
 
@@ -95,7 +97,7 @@
 #   Each scalar load is followed by DELAY 2 to respect the longer scalar LSU latency.
 # ═══════════════════════════════════════════════════════════════
 
-    LI    x6, 131072
+    LI    x6, 163840
     VSTORE 0, x6, 0
     LW    x21, x14, 0              # tile_B word 0
     DELAY 2
@@ -139,7 +141,7 @@
 # PHASE 4: VLOAD bias + MXU compute with scalar chains in VMEM-free windows
 # ═══════════════════════════════════════════════════════════════
 
-    LI    x6, 98304
+    LI    x6, 131072
     VLOAD 3, x6, 0
     SW    x23, x16, 20             # stage1 word 5 = tile_W word 0
     SW    x22, x17, 20             # stage2 word 5 = tile_B word 1
@@ -177,7 +179,7 @@
     DELAY 2
     DELAY 28
 
-    LI    x6, 98304
+    LI    x6, 131072
     VSTORE 5, x6, 0                # C0 hi -> bias region
     LW    x26, x18, 24             # read stage3 word 6 = tile_W word 0
     DELAY 2
@@ -189,33 +191,33 @@
 # PHASE 6: DMA.STORE outputs
 # ═══════════════════════════════════════════════════════════════
 
-    LI    x6, 131072
-    LI    x10, 0x1400
+    LI    x6, 163840
+    LI    x10, 0x90001400
     DMA.STORE x10, x6, x12, 0      # vstore echo of tile_A
     DMA.WAIT  0
 
-    LI    x6, 163840
-    LI    x10, 0x1800
+    LI    x6, 196608
+    LI    x10, 0x90001800
     DMA.STORE x10, x6, x12, 0      # stage1
     DMA.WAIT  0
 
-    LI    x6, 196608
-    LI    x10, 0x1C00
+    LI    x6, 262144
+    LI    x10, 0x90001C00
     DMA.STORE x10, x6, x12, 0      # stage2
     DMA.WAIT  0
 
-    LI    x6, 229376
-    LI    x10, 0x2000
+    LI    x6, 327680
+    LI    x10, 0x90002000
     DMA.STORE x10, x6, x12, 0      # stage3
     DMA.WAIT  0
 
     LI    x6, 65536
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.STORE x10, x6, x12, 0      # C0 lo
     DMA.WAIT  0
 
-    LI    x6, 98304
-    LI    x10, 0x2800
+    LI    x6, 131072
+    LI    x10, 0x90002800
     DMA.STORE x10, x6, x12, 0      # C0 hi
     DMA.WAIT  0
 

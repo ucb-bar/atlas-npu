@@ -1,6 +1,6 @@
 # perf_mm_single.S — single-matmul per-MXU utilization characterization
 # @TIMEOUT 200000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_mm_single.py 500
 # @PERF_UTIL_THRESHOLD 5
 # @PERF_MACS_MXU0 32768
@@ -35,7 +35,7 @@
 #   0x0400  W0     (1024B FP8, 32x32)
 #   0x0800  W1     (1024B FP8, 32x32)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127
@@ -46,7 +46,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -60,7 +60,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -76,7 +76,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0

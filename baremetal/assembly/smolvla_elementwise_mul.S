@@ -1,7 +1,7 @@
 # smolvla_elementwise_mul.S — port of npu-model smolvla_elementwise_mul
 # Tests: vmul.bf16 on seeded random BF16 32x32 tiles
 # @TIMEOUT 30000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_elementwise_mul.py
 #
 # DRAM layout (set by gen_smolvla_elementwise_mul.py):
@@ -17,17 +17,17 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 
     # ── Load Input A → VMEM[0..511] ──
     ADDI  x6, x0, 0             # VMEM[0]
-    ADDI  x1, x0, 0             # DRAM[0]
+    LI    x1, 0x90000000  # DRAM[0]
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256               # VMEM[256]
-    LI    x1, 1024              # DRAM[1024]
+    LI    x1, 0x90000400  # DRAM[1024]
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -39,11 +39,11 @@
 
     # ── Load Input B → VMEM[512..1023] ──
     LI    x7, 512               # VMEM[512]
-    LI    x1, 2048              # DRAM[2048]
+    LI    x1, 0x90000800  # DRAM[2048]
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 768               # VMEM[768]
-    LI    x1, 3072              # DRAM[3072]
+    LI    x1, 0x90000C00  # DRAM[3072]
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
 
@@ -64,11 +64,11 @@
     DELAY 33
 
     LI    x8, 1024
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

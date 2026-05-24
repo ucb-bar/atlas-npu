@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_fused_norm_scale.py. rsqrt synthesized as
 # VRECIP.BF16(VSQRT(...)) (atlas has no VRSQRT opcode).
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_fused_norm_scale.py
 #
 # Shape: M=128, N=128 → 16 tiles.
@@ -18,7 +18,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x21, 0x8000          # matrix DRAM base
@@ -27,8 +27,10 @@
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
 
+    LUI   x15, 0x90000         # FPGA DRAM offset 0x9000_0000
 tile_loop:
     SLLI  x20, x10, 11
+    ADD   x20, x20, x15        # x20 += FPGA DRAM base
 
     # ── Load variance tile → (m0, m1) ──
     ADDI  x1, x20, 0

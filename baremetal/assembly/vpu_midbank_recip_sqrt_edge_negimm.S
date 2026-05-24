@@ -1,6 +1,6 @@
 # vpu_midbank_recip_sqrt_edge_negimm.S
 # @TIMEOUT 250000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_midbank_recip_sqrt_edge_negimm.py
 #
 # Coverage intent:
@@ -29,14 +29,14 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x12, 0x800          # 2048 B
 
     # DMA.LOAD input pair to high-range VMEM staging.
     LI    x6,  0xDC00         # input_lo word address
-    LI    x10, 0x0000         # DRAM byte offset
+    LI    x10, 0x90000000  # DRAM byte offset
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
@@ -62,7 +62,7 @@
     DELAY 33
 
     LI    x7,  0xE400         # recip_lo word address for DMA.STORE source
-    LI    x11, 0x0800         # DRAM byte offset for recip output
+    LI    x11, 0x90000800  # DRAM byte offset for recip output
     DMA.STORE x11, x7, x12, 1
     DMA.WAIT 1
 
@@ -74,7 +74,7 @@
     DELAY 33
 
     LI    x8,  0xEC00         # sqrt_lo word address for DMA.STORE source
-    LI    x13, 0x1000         # DRAM byte offset for sqrt output
+    LI    x13, 0x90001000  # DRAM byte offset for sqrt output
     DMA.STORE x13, x8, x12, 2
     DMA.WAIT 2
 

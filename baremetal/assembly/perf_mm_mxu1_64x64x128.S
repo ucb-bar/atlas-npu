@@ -1,6 +1,6 @@
 # perf_mm_mxu1_64x64x128.S — single-MXU (M=64, N=64, K=128) tiled matmul perf test
 # @TIMEOUT 400000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_mm_mxu1_64x64x128.py 500
 # @PERF_REPORT
 # @PERF_MACS_MXU1 524288
@@ -89,7 +89,7 @@
 #     0x1800  A12 (i=1,k=2)          0x3800  B30_T (k=3,j=0)
 #     0x1C00  A13 (i=1,k=3)          0x3C00  B31_T (k=3,j=1)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127                    # scale reg 0 = 0x7F → unit scale
@@ -100,7 +100,7 @@
 
     # A00 → m0
     ADDI  x6, x0, 0
-    LI    x10, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -109,7 +109,7 @@
 
     # A01 → m1
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -118,7 +118,7 @@
 
     # A02 → m4
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -127,7 +127,7 @@
 
     # A03 → m5
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -136,7 +136,7 @@
 
     # A10 → m2
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -145,7 +145,7 @@
 
     # A11 → m3
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -154,7 +154,7 @@
 
     # A12 → m6
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -163,7 +163,7 @@
 
     # A13 → m7
     ADDI  x6, x0, 0
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -172,7 +172,7 @@
 
     # B00_T → m8
     ADDI  x6, x0, 0
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -181,7 +181,7 @@
 
     # B01_T → m9
     ADDI  x6, x0, 0
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -190,7 +190,7 @@
 
     # B10_T → m10
     ADDI  x6, x0, 0
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -199,7 +199,7 @@
 
     # B11_T → m11
     ADDI  x6, x0, 0
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -208,7 +208,7 @@
 
     # B20_T → m12
     ADDI  x6, x0, 0
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -217,7 +217,7 @@
 
     # B21_T → m13
     ADDI  x6, x0, 0
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -226,7 +226,7 @@
 
     # B30_T → m14
     ADDI  x6, x0, 0
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -235,7 +235,7 @@
 
     # B31_T → m15
     ADDI  x6, x0, 0
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -350,7 +350,7 @@
     VSTORE 16, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x4000
+    LI    x3, 0x90004000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -359,7 +359,7 @@
     VSTORE 17, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x4400
+    LI    x3, 0x90004400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -368,7 +368,7 @@
     VSTORE 18, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x4800
+    LI    x3, 0x90004800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -377,7 +377,7 @@
     VSTORE 19, x8, 0
     DELAY 40
     LI    x8, 0
-    LI    x3, 0x4C00
+    LI    x3, 0x90004C00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 

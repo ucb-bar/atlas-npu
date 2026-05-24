@@ -1,6 +1,6 @@
 # integ_reduction_recip_pack_branch_scalar.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_integ_reduction_recip_pack_branch_scalar.py
 #
 # Coverage intent:
@@ -33,7 +33,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     # Sizes
@@ -50,12 +50,12 @@
     LI    x11, 1536       # fp8 out
 
     # DRAM byte offsets
-    LI    x12, 0x0000     # input pair
-    LI    x13, 0x0400     # input high half source
-    LI    x14, 0x0800     # scale preload region
-    LI    x15, 0x1000     # bf16 output dst
-    LI    x16, 0x1400     # bf16 output high dst
-    LI    x17, 0x1800     # fp8 output dst
+    LI    x12, 0x90000000  # input pair
+    LI    x13, 0x90000400  # input high half source
+    LI    x14, 0x90000800  # scale preload region
+    LI    x15, 0x90001000  # bf16 output dst
+    LI    x16, 0x90001400  # bf16 output high dst
+    LI    x17, 0x90001800  # fp8 output dst
 
     # DMA input low half -> VMEM[0x0000]
     DMA.LOAD x6, x12, x20, 0

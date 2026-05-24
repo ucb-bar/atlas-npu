@@ -8,7 +8,7 @@
 # before VMATPUSH.W.MXU0; the matmul then yields A @ B.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_fused_matmul_bias_mxu0.py
 #
 # DRAM layout (set by gen_smolvla_fused_matmul_bias.py):
@@ -34,17 +34,17 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024              # bank size in bytes
 
     # ── Load A bf16 → VMEM[0..511] → (m0, m1) ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -56,7 +56,7 @@
 
     # ── Load B fp8 → VMEM[512..767] → m4 ──
     LI    x7, 512
-    LI    x1, 2048
+    LI    x1, 0x90000800
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
 
@@ -66,11 +66,11 @@
 
     # ── Load bias bf16 → VMEM[768..1279] → (m6, m7) ──
     LI    x9, 768
-    LI    x1, 4096
+    LI    x1, 0x90001000
     DMA.LOAD  x9, x1, x2, 0
     DMA.WAIT  0
     LI    x9, 1024
-    LI    x1, 5120
+    LI    x1, 0x90001400
     DMA.LOAD  x9, x1, x2, 0
     DMA.WAIT  0
 
@@ -111,11 +111,11 @@
     DELAY 33
 
     LI    x8, 1280
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1536
-    LI    x3, 0x1C00
+    LI    x3, 0x90001C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

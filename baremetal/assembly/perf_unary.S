@@ -1,6 +1,6 @@
 # perf_unary.S — maximum FU utilization: 100% paired slots
 # @TIMEOUT 25000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_unary.py
 # @PERF_REPORT
 #   Slot  Chain A (m0→m2)    Chain B (m4→m6)    Chain C (m10→m8)
@@ -22,16 +22,16 @@
 # actual = 960 (with vload/vstore)
 # utilization = 53.3%
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 2048
 
 # ─── Load A_raw → m0,m1 ────────────────────────────────────────
     LI    x6, 0x20000000
     LI    x9, 0x20000400 
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x12, 0
-    LI    x1, 0x0800
+    LI    x1, 0x90000800
     DMA.LOAD  x9, x1, x12, 1
     DMA.WAIT  0
     DMA.WAIT  1
@@ -159,17 +159,17 @@
     SUB   x22, x21, x20         # x22 = elapsed cycles
     CSRRW x0,  0xC11, x22       # stash in CSR_DBG1
 
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x6, x12, 1
     DMA.WAIT  1
 
     # Y_b (m6,m7) → DRAM 0x1800
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x7, x12, 1
     DMA.WAIT  1
 
     # Y_c (m8,m9) → DRAM 0x20000
-    LI    x3, 0x2000
+    LI    x3, 0x90002000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 

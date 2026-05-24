@@ -1,6 +1,6 @@
 # mxu1_quant_relu_roundtrip.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu1_quant_relu_roundtrip.py
 #
 # MXU1 -> VPU quantization bridge regression.
@@ -33,7 +33,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x12, 1024
@@ -44,17 +44,17 @@
     # Preload VMEM from DRAM
     # ------------------------------------------------------------------
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
     ADDI  x6, x0, 256
-    LI    x10, 1024
+    LI    x10, 0x90000400
     DMA.LOAD x6, x10, x12, 1
     DMA.WAIT 1
 
     ADDI  x6, x0, 512
-    LI    x10, 2048
+    LI    x10, 0x90000800
     DMA.LOAD x6, x10, x14, 2
     DMA.WAIT 2
 
@@ -110,7 +110,7 @@
     VSTORE 9, x6, 0
     DELAY 33
 
-    LI    x10, 4096
+    LI    x10, 0x90001000
     ADDI  x6, x0, 1024
     DMA.STORE x10, x6, x13, 3
     DMA.WAIT 3
@@ -122,7 +122,7 @@
     VSTORE 16, x6, 0
     DELAY 33
 
-    LI    x10, 6144
+    LI    x10, 0x90001800
     ADDI  x6, x0, 1536
     DMA.STORE x10, x6, x12, 4
     DMA.WAIT 4
@@ -130,16 +130,16 @@
     # ------------------------------------------------------------------
     # Drain unpacked BF16 output to DRAM [0x2000..0x27FF]
     # ------------------------------------------------------------------
-    ADDI  x6, x0, 2048
+    LI    x6, 2048
     VSTORE 20, x6, 0
     DELAY 33
 
-    ADDI  x6, x0, 2304
+    LI    x6, 2304
     VSTORE 21, x6, 0
     DELAY 33
 
-    LI    x10, 8192
-    ADDI  x6, x0, 2048
+    LI    x10, 0x90002000
+    LI    x6, 2048
     DMA.STORE x10, x6, x13, 5
     DMA.WAIT 5
 

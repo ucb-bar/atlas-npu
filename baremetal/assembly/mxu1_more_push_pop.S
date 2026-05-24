@@ -1,6 +1,6 @@
 # mxu1_more_push_pop.S — VMATPUSH.ACC.BF16 + VMATPOP.FP8 with non-trivial scaling
 # @TIMEOUT 20000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu1_more_push_pop.py
 #
 # Test flow:
@@ -23,13 +23,13 @@
 #   Output:       word offsets 128..159  (1024 B, E4M3)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
     LI    x2, 1024
 
 # ── Load weights DRAM[0] → VMEM[0] → TRF m4 ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -37,7 +37,7 @@
 
 # ── Load activations DRAM[1024] → VMEM[256] → TRF m0 ──
     LI    x7, 256
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 256
@@ -45,7 +45,7 @@
 
 # ── Load bias lo DRAM[2048] → VMEM[512] → TRF m6 ──
     LI    x7, 512
-    LI    x1, 2048
+    LI    x1, 0x90000800
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 512
@@ -53,7 +53,7 @@
 
 # ── Load bias hi DRAM[3072] → VMEM[768] → TRF m7 ──
     LI    x7, 768
-    LI    x1, 3072
+    LI    x1, 0x90000C00
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 768
@@ -86,7 +86,7 @@
     VSTORE 2, x8, 0
     DELAY 33
     LI    x8, 1024
-    LI    x3, 4096
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

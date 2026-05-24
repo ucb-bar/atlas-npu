@@ -1,6 +1,6 @@
 # triple_unit_concurrent.S — MXU0 + MXU1 + VPU concurrent execution
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_triple_unit_concurrent.py 777
 #
 # Three independent functional units compute simultaneously:
@@ -62,7 +62,7 @@
 #   0x4400  sum bank0    (1024B BF16) — VPU vadd(C0,C1) lanes 0-15
 #   0x4800  sum bank1    (1024B BF16) — VPU vadd(C0,C1) lanes 16-31
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127          # scale reg 0 — identity E8M0
@@ -73,7 +73,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x1000              # DRAM: zero bias
+    LI    x10, 0x90001000  # DRAM: zero bias
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -86,7 +86,7 @@
 
     # W0 → VMEM[0] → m1 (raw) → XLU transpose → m2
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -108,7 +108,7 @@
 
     # W1 → VMEM[0] → m1 (raw) → XLU transpose → m7
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -131,19 +131,19 @@
 
     # ── OVERLAP [f]: 4-channel DMA parallel load ──
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0              # DRAM 0x0000: X0
+    LI    x10, 0x90000000  # DRAM 0x0000: X0
     DMA.LOAD  x6, x10, x12, 0
 
     LI    x7, 256
-    LI    x10, 0x0800             # DRAM 0x0800: X1
+    LI    x10, 0x90000800  # DRAM 0x0800: X1
     DMA.LOAD  x7, x10, x12, 1
 
     LI    x8, 512
-    LI    x10, 0x1400             # DRAM 0x1400: A_vpu bank0
+    LI    x10, 0x90001400  # DRAM 0x1400: A_vpu bank0
     DMA.LOAD  x8, x10, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x1C00             # DRAM 0x1C00: B_vpu bank0
+    LI    x10, 0x90001C00  # DRAM 0x1C00: B_vpu bank0
     DMA.LOAD  x9, x10, x12, 3
 
     # Wait for all 4 channels
@@ -170,11 +170,11 @@
     # Channel 0: A_vpu bank1 → VMEM[0]
     # Channel 1: B_vpu bank1 → VMEM[256]
     ADDI  x6, x0, 0
-    LI    x10, 0x1800             # DRAM 0x1800: A_vpu bank1
+    LI    x10, 0x90001800  # DRAM 0x1800: A_vpu bank1
     DMA.LOAD  x6, x10, x12, 0
 
     LI    x7, 256
-    LI    x10, 0x2000             # DRAM 0x2000: B_vpu bank1
+    LI    x10, 0x90002000  # DRAM 0x2000: B_vpu bank1
     DMA.LOAD  x7, x10, x12, 1
 
     DMA.WAIT  0
@@ -242,11 +242,11 @@
 
     # DMA store VPU add bank0 and bank1
     LI    x8, 512
-    LI    x10, 0x3400              # DRAM: add bank0
+    LI    x10, 0x90003400  # DRAM: add bank0
     DMA.STORE x10, x8, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x3800              # DRAM: add bank1
+    LI    x10, 0x90003800  # DRAM: add bank1
     DMA.STORE x10, x9, x12, 3
 
     DMA.WAIT  2
@@ -264,11 +264,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3C00              # DRAM: mul bank0
+    LI    x10, 0x90003C00  # DRAM: mul bank0
     DMA.STORE x10, x8, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x4000              # DRAM: mul bank1
+    LI    x10, 0x90004000  # DRAM: mul bank1
     DMA.STORE x10, x9, x12, 3
 
     DMA.WAIT  2
@@ -286,11 +286,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x2400              # DRAM: C0 lo
+    LI    x10, 0x90002400  # DRAM: C0 lo
     DMA.STORE x10, x8, x12, 0
 
     LI    x9, 768
-    LI    x10, 0x2800              # DRAM: C0 hi
+    LI    x10, 0x90002800  # DRAM: C0 hi
     DMA.STORE x10, x9, x12, 1
 
     DMA.WAIT  0
@@ -308,11 +308,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x2C00              # DRAM: C1 lo
+    LI    x10, 0x90002C00  # DRAM: C1 lo
     DMA.STORE x10, x8, x12, 0
 
     LI    x9, 768
-    LI    x10, 0x3000              # DRAM: C1 hi
+    LI    x10, 0x90003000  # DRAM: C1 hi
     DMA.STORE x10, x9, x12, 1
 
     DMA.WAIT  0
@@ -337,11 +337,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4400              # DRAM: sum bank0
+    LI    x10, 0x90004400  # DRAM: sum bank0
     DMA.STORE x10, x8, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x4800              # DRAM: sum bank1
+    LI    x10, 0x90004800  # DRAM: sum bank1
     DMA.STORE x10, x9, x12, 3
 
     DMA.WAIT  2

@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_elementwise_mul.py, but using Atlas bank-split
 # tile layout (matching stock smolvla_elementwise_mul) and a scalar tile loop.
 # @TIMEOUT 1000000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_elementwise_mul.py
 #
 # Shape: M=128, N=128 → M_tiles=4, N_tiles=4, total_tiles=16. Tile-major order.
@@ -36,17 +36,19 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x21, 0x8000
     LI    x22, 0x10000
     ADDI  x11, x0, 16
+    LUI   x15, 0x90000         # FPGA DRAM offset 0x9000_0000
 
     ADDI  x10, x0, 0           # tile_idx = 0
 
 tile_loop:
     SLLI  x20, x10, 11         # x20 = tile_idx * 2048
+    ADD   x20, x20, x15        # x20 += 0x9000_0000 (FPGA DRAM base)
 
     # ── Load A tile: [0x0000 + x20, +0x0400, +0x07FF] ──
     ADDI  x1, x20, 0           # A bank 0 DRAM offset

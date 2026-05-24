@@ -1,6 +1,6 @@
 # vmem_contention_stress.S — VMEM bank arbitration + DMA pipeline stress test
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vmem_contention_stress.py 42
 #
 # Exercises every VMEM contention path:
@@ -13,11 +13,11 @@
 #           new data DMA-loaded and VLOAD-ed during contention,
 #           then re-computed on MXU0 → end-to-end pipeline
 #
-# VMEM bank conflict analysis (8 banks, 128 KiB block banking):
+# VMEM bank conflict analysis (6 banks, 256 KiB / 65 536-word banking):
 #   Each aligned 1024-byte tile occupies one tensor slot inside a single bank.
 #   In this test, the contending VMEM regions are intentionally packed into
-#   bank 0.  The low VMEM slots below are all < 32768 words, which is the
-#   word span of one bank in the 1 MiB / 8-bank configuration.  Same-bank
+#   bank 0.  The low VMEM slots below are all < 65536 words, which is the
+#   word span of one bank in the 1.5 MiB / 6-bank configuration.  Same-bank
 #   overlaps therefore contend for the single 1RW port and force the
 #   lower-priority DMA client to stall.
 #
@@ -64,7 +64,7 @@
 #   0x4400  C2 lo      (1024B BF16)
 #   0x4800  C2 hi      (1024B BF16)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127
@@ -77,7 +77,7 @@
 
     # bias → m3
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -86,11 +86,11 @@
 
     # A_vpu b0 → m8, b1 → m9 (register pair via flag 0/8)
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     LI    x7, 256
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x7, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -101,11 +101,11 @@
 
     # B_vpu b0 → m10, b1 → m11
     ADDI  x6, x0, 0
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     LI    x7, 256
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x7, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -126,19 +126,19 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0     # ch0: X0 → VMEM[0]
 
     LI    x7, 256
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x7, x10, x12, 1     # ch1: W0 → VMEM[256]
 
     LI    x8, 512
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x8, x10, x12, 2     # ch2: X1 → VMEM[512]
 
     LI    x9, 768
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x9, x10, x12, 3     # ch3: W1 → VMEM[768]
 
     # Commands are queued; DMA processes them sequentially on TileLink.
@@ -230,11 +230,11 @@
 
     # Enqueue DMA loads (start TileLink traffic immediately)
     ADDI  x6, x0, 0
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x6, x10, x12, 0     # ch0: X2 → VMEM[0]
 
     LI    x7, 256
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x7, x10, x12, 1     # ch1: W2 → VMEM[256]
 
     # While DMA responses are in flight, VSTORE VPU result → VMEM
@@ -264,10 +264,10 @@
     # DMA.STORE add result: VMEM[512] → DRAM, VMEM[768] → DRAM.
     # Do not wait yet; overlap the DMA pre-reads with the C0 VSTOREs below.
     LI    x8, 512
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[add_b0]
     LI    x9, 768
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[add_b1]
 
     # Store C0 (m4,m5) to VMEM[1024], VMEM[1280] for next phase
@@ -300,7 +300,7 @@
 
     # Issue DMA.STORE first — DMA starts reading VMEM immediately
     LI    x8, 1024
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.STORE x10, x8, x12, 2     # ch2: VMEM[1024] → DRAM[C0_lo]
 
     # Immediately start VLOAD — both read VMEM concurrently!
@@ -310,7 +310,7 @@
 
     # Second pair: DMA.STORE C0 hi + VLOAD W2
     LI    x9, 1280
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x9, x12, 3     # ch3: VMEM[1280] → DRAM[C0_hi]
 
     LI    x7, 256
@@ -360,10 +360,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[C1_lo]
     LI    x9, 768
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[C1_hi]
     DMA.WAIT  0
     DMA.WAIT  1
@@ -377,10 +377,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[C2_lo]
     LI    x9, 768
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[C2_hi]
     DMA.WAIT  0
     DMA.WAIT  1

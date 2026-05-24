@@ -2,7 +2,7 @@
 # Tests: vadd.bf16, vsub.bf16, vmul.bf16, vmin.bf16, vmax.bf16
 #        with the same source register pair used for both operands
 # @TIMEOUT 50000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_same_src.py
 #
 # DRAM layout (set by Python generator):
@@ -19,17 +19,17 @@
     ADDI  x28, x0, 1
 
     # ── DMA config ──
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load Input A → VMEM[0..511] ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -53,11 +53,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x0800
+    LI    x3, 0x90000800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x0C00
+    LI    x3, 0x90000C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -74,11 +74,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -95,11 +95,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x1C00
+    LI    x3, 0x90001C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -116,11 +116,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x2000
+    LI    x3, 0x90002000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x2400
+    LI    x3, 0x90002400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -137,11 +137,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x2800
+    LI    x3, 0x90002800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x2C00
+    LI    x3, 0x90002C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

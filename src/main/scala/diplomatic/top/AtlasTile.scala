@@ -26,6 +26,28 @@ import testchipip.soc.{SubsystemInjectorKey, SubsystemInjector}
 
 import atlas.scalar.{AtlasMemMap, ScalarISA}
 
+private object AtlasTile {
+  def contiguousAddressSets(base: BigInt, size: BigInt): Seq[AddressSet] = {
+    require(size > 0, s"VMEM size must be positive, got $size")
+
+    val sets = scala.collection.mutable.ArrayBuffer.empty[AddressSet]
+    var nextBase = base
+    var remaining = size
+
+    while (remaining > 0) {
+      var chunk = BigInt(1) << (remaining.bitLength - 1)
+      while ((nextBase & (chunk - 1)) != 0) {
+        chunk = chunk >> 1
+      }
+      sets += AddressSet(nextBase, chunk - 1)
+      nextBase += chunk
+      remaining -= chunk
+    }
+
+    sets.toSeq
+  }
+}
+
 /** Diplomatic shell around [[AtlasCore]].
   *
   * @param tp  Full set of Atlas design parameters.
@@ -75,7 +97,7 @@ class AtlasTile(
   /** VMEM direct-access port.  The host can read/write VMEM over the bus. */
   val vmemNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address            = Seq(AddressSet(vmemP.base, vmemP.sizeBytes - 1)),
+      address            = AtlasTile.contiguousAddressSets(vmemP.base, BigInt(vmemP.sizeBytes)),
       regionType         = RegionType.IDEMPOTENT,
       supportsGet        = TransferSizes(1, vmemP.beatBytes),
       supportsPutFull    = TransferSizes(1, vmemP.beatBytes),

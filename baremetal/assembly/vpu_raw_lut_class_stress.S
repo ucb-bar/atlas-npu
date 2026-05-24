@@ -1,6 +1,6 @@
 # vpu_raw_lut_class_stress.S - raw BF16 VPU LUT/class toggle stress
 # @TIMEOUT 900000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_raw_lut_class_stress.py
 #
 # Coverage intent:
@@ -19,7 +19,7 @@
 #   VSQRT, VLOG2, VRECIP.BF16, VEXP, VEXP2, VTANH, VSQUARE.BF16, VCUBE.BF16
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 2048              # input tile bytes
     LI    x3, 2048              # output tile bytes
@@ -28,7 +28,7 @@
 # Tile 0: full mantissa walk across representative normal exponents
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    LI    x10, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x2, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -39,58 +39,50 @@
 
     VSQRT 4, 0
     DELAY 64
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     JAL   x1, store_pair
-    NOP
     NOP
     VLOG2 4, 0
     DELAY 64
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     JAL   x1, store_pair
-    NOP
     NOP
     VRECIP.BF16 4, 0
     DELAY 64
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP 4, 0
     DELAY 64
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP2 4, 0
     DELAY 64
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     JAL   x1, store_pair
-    NOP
     NOP
     VTANH 4, 0
     DELAY 64
-    LI    x10, 0x5800
+    LI    x10, 0x90005800
     JAL   x1, store_pair
-    NOP
     NOP
     VSQUARE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x6000
+    LI    x10, 0x90006000
     JAL   x1, store_pair
-    NOP
     NOP
     VCUBE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x6800
+    LI    x10, 0x90006800
     JAL   x1, store_pair
-    NOP
     NOP
 
 # ----------------------------------------------------------------------
 # Tile 1: exponent ladder with scrambled mantissas and alternating signs
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD x6, x10, x2, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -101,58 +93,50 @@
 
     VSQRT 4, 0
     DELAY 64
-    LI    x10, 0x7000
+    LI    x10, 0x90007000
     JAL   x1, store_pair
-    NOP
     NOP
     VLOG2 4, 0
     DELAY 64
-    LI    x10, 0x7800
+    LI    x10, 0x90007800
     JAL   x1, store_pair
-    NOP
     NOP
     VRECIP.BF16 4, 0
     DELAY 64
-    LI    x10, 0x8000
+    LI    x10, 0x90008000
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP 4, 0
     DELAY 64
-    LI    x10, 0x8800
+    LI    x10, 0x90008800
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP2 4, 0
     DELAY 64
-    LI    x10, 0x9000
+    LI    x10, 0x90009000
     JAL   x1, store_pair
-    NOP
     NOP
     VTANH 4, 0
     DELAY 64
-    LI    x10, 0x9800
+    LI    x10, 0x90009800
     JAL   x1, store_pair
-    NOP
     NOP
     VSQUARE.BF16 4, 0
     DELAY 64
-    LI    x10, 0xA000
+    LI    x10, 0x9000A000
     JAL   x1, store_pair
-    NOP
     NOP
     VCUBE.BF16 4, 0
     DELAY 64
-    LI    x10, 0xA800
+    LI    x10, 0x9000A800
     JAL   x1, store_pair
-    NOP
     NOP
 
 # ----------------------------------------------------------------------
 # Tile 2: explicit zeros, subnormals, min/max normal, inf, NaN, sq/cube edges
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD x6, x10, x2, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -163,58 +147,50 @@
 
     VSQRT 4, 0
     DELAY 64
-    LI    x10, 0xB000
+    LI    x10, 0x9000B000
     JAL   x1, store_pair
-    NOP
     NOP
     VLOG2 4, 0
     DELAY 64
-    LI    x10, 0xB800
+    LI    x10, 0x9000B800
     JAL   x1, store_pair
-    NOP
     NOP
     VRECIP.BF16 4, 0
     DELAY 64
-    LI    x10, 0xC000
+    LI    x10, 0x9000C000
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP 4, 0
     DELAY 64
-    LI    x10, 0xC800
+    LI    x10, 0x9000C800
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP2 4, 0
     DELAY 64
-    LI    x10, 0xD000
+    LI    x10, 0x9000D000
     JAL   x1, store_pair
-    NOP
     NOP
     VTANH 4, 0
     DELAY 64
-    LI    x10, 0xD800
+    LI    x10, 0x9000D800
     JAL   x1, store_pair
-    NOP
     NOP
     VSQUARE.BF16 4, 0
     DELAY 64
-    LI    x10, 0xE000
+    LI    x10, 0x9000E000
     JAL   x1, store_pair
-    NOP
     NOP
     VCUBE.BF16 4, 0
     DELAY 64
-    LI    x10, 0xE800
+    LI    x10, 0x9000E800
     JAL   x1, store_pair
-    NOP
     NOP
 
 # ----------------------------------------------------------------------
 # Tile 3: tanh address bins plus saturation and tiny-value behavior
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD x6, x10, x2, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -225,58 +201,50 @@
 
     VSQRT 4, 0
     DELAY 64
-    LI    x10, 0xF000
+    LI    x10, 0x9000F000
     JAL   x1, store_pair
-    NOP
     NOP
     VLOG2 4, 0
     DELAY 64
-    LI    x10, 0xF800
+    LI    x10, 0x9000F800
     JAL   x1, store_pair
-    NOP
     NOP
     VRECIP.BF16 4, 0
     DELAY 64
-    LI    x10, 0x10000
+    LI    x10, 0x90010000
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP 4, 0
     DELAY 64
-    LI    x10, 0x10800
+    LI    x10, 0x90010800
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP2 4, 0
     DELAY 64
-    LI    x10, 0x11000
+    LI    x10, 0x90011000
     JAL   x1, store_pair
-    NOP
     NOP
     VTANH 4, 0
     DELAY 64
-    LI    x10, 0x11800
+    LI    x10, 0x90011800
     JAL   x1, store_pair
-    NOP
     NOP
     VSQUARE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x12000
+    LI    x10, 0x90012000
     JAL   x1, store_pair
-    NOP
     NOP
     VCUBE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x12800
+    LI    x10, 0x90012800
     JAL   x1, store_pair
-    NOP
     NOP
 
 # ----------------------------------------------------------------------
 # Tile 4: exp thresholds and square/cube normalization carry edges
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD x6, x10, x2, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -287,51 +255,43 @@
 
     VSQRT 4, 0
     DELAY 64
-    LI    x10, 0x13000
+    LI    x10, 0x90013000
     JAL   x1, store_pair
-    NOP
     NOP
     VLOG2 4, 0
     DELAY 64
-    LI    x10, 0x13800
+    LI    x10, 0x90013800
     JAL   x1, store_pair
-    NOP
     NOP
     VRECIP.BF16 4, 0
     DELAY 64
-    LI    x10, 0x14000
+    LI    x10, 0x90014000
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP 4, 0
     DELAY 64
-    LI    x10, 0x14800
+    LI    x10, 0x90014800
     JAL   x1, store_pair
-    NOP
     NOP
     VEXP2 4, 0
     DELAY 64
-    LI    x10, 0x15000
+    LI    x10, 0x90015000
     JAL   x1, store_pair
-    NOP
     NOP
     VTANH 4, 0
     DELAY 64
-    LI    x10, 0x15800
+    LI    x10, 0x90015800
     JAL   x1, store_pair
-    NOP
     NOP
     VSQUARE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x16000
+    LI    x10, 0x90016000
     JAL   x1, store_pair
-    NOP
     NOP
     VCUBE.BF16 4, 0
     DELAY 64
-    LI    x10, 0x16800
+    LI    x10, 0x90016800
     JAL   x1, store_pair
-    NOP
     NOP
 
 pass:
@@ -353,5 +313,4 @@ store_pair:
     DMA.STORE x10, x9, x3, 1
     DMA.WAIT 1
     JALR  x0, x1, 0
-    NOP
     NOP

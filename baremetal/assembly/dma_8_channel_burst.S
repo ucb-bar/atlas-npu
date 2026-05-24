@@ -1,6 +1,6 @@
 # dma_8chan_burst.S — All 8 DMA channels in flight simultaneously
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_8chan_burst.py 42
 #
 # Exercises:
@@ -50,7 +50,7 @@
 #   m2  W transposed      m12,13 VPU result
 #   m3  bias (zero)       m4,5   MXU0 pop result
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127
@@ -65,35 +65,35 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0     # ch0: X → VMEM[0]
 
     LI    x6, 256
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1     # ch1: W → VMEM[256]
 
     LI    x6, 512
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 2     # ch2: bias → VMEM[512]
 
     LI    x6, 768
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 3     # ch3: A_vpu b0 → VMEM[768]
 
     LI    x6, 1024
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 4     # ch4: A_vpu b1 → VMEM[1024]
 
     LI    x6, 1280
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 5     # ch5: B_vpu b0 → VMEM[1280]
 
     LI    x6, 1536
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 6     # ch6: B_vpu b1 → VMEM[1536]
 
     LI    x6, 1792
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 7     # ch7: echo_tile → VMEM[1792]
 
     # All 8 channelBusy flags are set.  Wait for each.
@@ -184,35 +184,35 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.STORE x10, x6, x12, 0     # ch0: VMEM[0] → DRAM[C0 lo]
 
     LI    x6, 256
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.STORE x10, x6, x12, 1     # ch1: VMEM[256] → DRAM[C0 hi]
 
     LI    x6, 512
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.STORE x10, x6, x12, 2     # ch2: VMEM[512] → DRAM[add b0]
 
     LI    x6, 768
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.STORE x10, x6, x12, 3     # ch3: VMEM[768] → DRAM[add b1]
 
     LI    x6, 1024
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x6, x12, 4     # ch4: VMEM[1024] → DRAM[echo0]
 
     LI    x6, 1280
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.STORE x10, x6, x12, 5     # ch5: VMEM[1280] → DRAM[echo1]
 
     LI    x6, 1536
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.STORE x10, x6, x12, 6     # ch6: VMEM[1536] → DRAM[echo2]
 
     LI    x6, 1792
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.STORE x10, x6, x12, 7     # ch7: VMEM[1792] → DRAM[echo3]
 
     # All 8 channelBusy flags set.  Wait.

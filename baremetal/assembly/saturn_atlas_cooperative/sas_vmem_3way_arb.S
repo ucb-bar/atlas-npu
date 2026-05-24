@@ -1,21 +1,21 @@
 # sas_vmem_3way_arb.S — single-bank 3-way VMEM priority ladder
 #
 # T1 of the Saturn↔Atlas memory stress suite. Three VMEM client
-# classes pin VMEM bank 3 simultaneously: Atlas vector LSU
+# classes pin current VMEM bank 3 simultaneously: Atlas vector LSU
 # (VLOAD/VSTORE, the highest priority class this test exercises),
 # DMA (mid), and Saturn TileLink (lowest). Scalar LSU traffic is
-# NOT exercised here — adding scalar SW/LW to bank 3 would risk
+# NOT exercised here — adding scalar SW/LW to the same bank would risk
 # tripping the per-bank same-cycle scalar/vector conflict assertions.
 #
-# Bank 3 is split into three DISJOINT subregions so each writer's golden
-# is deterministic. Word indices into VMEM (bank index = word_idx >> 15;
-# bank 3 starts at word 98 304):
+# Current bank 3 is split into three DISJOINT subregions so each writer's
+# golden is deterministic. Word indices into VMEM (bank size = 65 536 words;
+# bank 3 starts at word 196 608):
 #
-#   LSU sub-region:    word 98304..98559 (256 words = 1024 B)
-#   DMA sub-region:    word 98560..98815 (256 words = 1024 B)
-#   Saturn sub-region: word 98816..99071 (256 words = 1024 B)
+#   LSU sub-region:    word 196608..196863 (256 words = 1024 B)
+#   DMA sub-region:    word 196864..197119 (256 words = 1024 B)
+#   Saturn sub-region: word 197120..197375 (256 words = 1024 B)
 #                      (host accesses Saturn region via SBUS at
-#                       ATLAS_VMEM_BASE + 0x60800)
+#                       ATLAS_VMEM_BASE + 0xC0800)
 #
 # DRAM (DMA base 0x00000001):
 #   IN  tile at 0x0000 (1024 B, fixed pattern from generator)
@@ -38,7 +38,7 @@
 # The Saturn sub-region is untouched by Atlas; the host driver runs an
 # RVV stride-1 sweep over it during the same window.
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024              # transfer size
 
@@ -54,13 +54,13 @@ outer:
     LI    x11, 0                 # inner iter counter
 
 loop:
-    # ── DMA.LOAD: DRAM[0x0000] → VMEM bank 3 word 256 ──
-    LI    x7,  98560
-    LI    x9,  0x0000
+    # ── DMA.LOAD: DRAM[0x0000] → current bank 3, local word 256 ──
+    LI    x7,  196864
+    LI    x9, 0x90000000
     DMA.LOAD x7, x9, x12, 0
 
-    # ── LSU work overlap: VLOAD/VSTORE on bank 3 word 0 ──
-    LI    x6,  98304
+    # ── LSU work overlap: VLOAD/VSTORE on current bank 3, local word 0 ──
+    LI    x6,  196608
     VLOAD 0, x6, 0
     DELAY 40
     VSTORE 0, x6, 0
@@ -68,13 +68,13 @@ loop:
 
     DMA.WAIT 0
 
-    # ── DMA.STORE: VMEM bank 3 word 256 → DRAM[0x1000] ──
-    LI    x7,  98560
-    LI    x10, 0x1000
+    # ── DMA.STORE: current bank 3, local word 256 → DRAM[0x1000] ──
+    LI    x7,  196864
+    LI    x10, 0x90001000
     DMA.STORE x10, x7, x12, 1
 
     # ── More LSU work overlap (different VPU reg to dodge any RAW) ──
-    LI    x6,  98304
+    LI    x6,  196608
     VLOAD 1, x6, 0
     DELAY 40
     VSTORE 1, x6, 0

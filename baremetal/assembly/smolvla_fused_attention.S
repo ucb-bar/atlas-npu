@@ -17,7 +17,7 @@
 #   O /= l
 #
 # @TIMEOUT 200000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_fused_attention.py
 #
 # Atlas MXU computes A @ W^T, so K and V_mlir slices are pushed as
@@ -73,7 +73,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 4096          # tile size in bytes (Q/K/V/OUT all 4096 B)
 
@@ -81,7 +81,7 @@
     # Load Q: DRAM[0x0000..0x0FFF] → VMEM[0..1023] → m0..m3
     # ────────────────────────────────────────────────────────────────────
     ADDI  x6, x0, 0          # VMEM word addr 0
-    ADDI  x1, x0, 0          # DRAM byte addr 0
+    LI    x1, 0x90000000  # DRAM byte addr 0
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -127,7 +127,7 @@
 
     # ── Load K0: DRAM[0x1000..0x1FFF] → VMEM[1024..2047] → m16..m19 ──
     LI    x6, 1024
-    LI    x1, 0x1000
+    LI    x1, 0x90001000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 1024
@@ -152,7 +152,7 @@
 
     # ── Load V0_mlir: DRAM[0x3000..0x3FFF] → VMEM[2048..3071] → m22..m25 ──
     LI    x6, 2048
-    LI    x1, 0x3000
+    LI    x1, 0x90003000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 2048
@@ -263,7 +263,7 @@
 
     # ── Load K1 ──
     LI    x6, 1024
-    LI    x1, 0x2000
+    LI    x1, 0x90002000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 1024
@@ -287,7 +287,7 @@
 
     # ── Load V1_mlir ──
     LI    x6, 2048
-    LI    x1, 0x4000
+    LI    x1, 0x90004000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 2048
@@ -399,7 +399,7 @@
     DELAY 33
 
     LI    x8, 3072
-    LI    x3, 0x6000
+    LI    x3, 0x90006000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

@@ -1,6 +1,6 @@
 # mreg_busy_state_rotator_cross_engine.S
 # @TIMEOUT 700000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mreg_busy_state_rotator_cross_engine.py
 #
 # Coverage intent:
@@ -24,18 +24,18 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
     # DMA serialized by construction.
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
     LI    x6, 256
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD x6, x10, x12, 1
     DMA.WAIT 1
 
@@ -79,12 +79,12 @@
     DELAY 33
 
     LI    x12, 2048
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     LI    x6, 512
     DMA.STORE x10, x6, x12, 2
     DMA.WAIT 2
 
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     LI    x6, 1024
     DMA.STORE x10, x6, x12, 3
     DMA.WAIT 3

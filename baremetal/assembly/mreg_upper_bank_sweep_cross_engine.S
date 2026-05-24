@@ -1,6 +1,6 @@
 # mreg_upper_bank_sweep_cross_engine.S — upper-bank MREG sweep across DMA, XLU, MXU1, and VPU
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mreg_upper_bank_sweep_cross_engine.py
 #
 # Coverage intent:
@@ -34,7 +34,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x2, 1024            # common 1 KiB DMA size
@@ -52,19 +52,19 @@
 setup_done:
     # DMA A_fp8 to VMEM[0 words]
     ADDI  x6, x0, 0          # VMEM word addr
-    ADDI  x7, x0, 0          # DRAM byte offset
+    LI    x7, 0x90000000  # DRAM byte offset
     DMA.LOAD x6, x7, x2, 0
     DMA.WAIT 0
 
     # DMA B_fp8 raw to VMEM[256 words]
     ADDI  x6, x0, 256
-    LI    x7, 0x0400
+    LI    x7, 0x90000400
     DMA.LOAD x6, x7, x2, 0
     DMA.WAIT 0
 
     # DMA BF16 seed pair to VMEM[512 words] (2048 B covers low+high banks)
     ADDI  x6, x0, 512
-    LI    x7, 0x0800
+    LI    x7, 0x90000800
     DMA.LOAD x6, x7, x3, 0
     DMA.WAIT 0
 
@@ -113,30 +113,30 @@ setup_done:
     VSTORE 61, x12, 8
     DELAY 33
 
-    ADDI  x12, x0, 2048
+    LI    x12, 2048
     VSTORE 62, x12, 0
     DELAY 33
     VSTORE 63, x12, 8
     DELAY 33
 
     # Drain all checked regions to DRAM.
-    LI    x13, 0x1000
+    LI    x13, 0x90001000
     ADDI  x14, x0, 1024
     DMA.STORE x13, x14, x2, 1
     DMA.WAIT 1
 
-    LI    x13, 0x1400
+    LI    x13, 0x90001400
     ADDI  x14, x0, 1280
     DMA.STORE x13, x14, x2, 1
     DMA.WAIT 1
 
-    LI    x13, 0x1800
+    LI    x13, 0x90001800
     ADDI  x14, x0, 1536
     DMA.STORE x13, x14, x3, 1
     DMA.WAIT 1
 
-    LI    x13, 0x2000
-    ADDI  x14, x0, 2048
+    LI    x13, 0x90002000
+    LI    x14, 2048
     DMA.STORE x13, x14, x3, 1
     DMA.WAIT 1
 

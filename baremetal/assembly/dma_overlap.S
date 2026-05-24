@@ -1,6 +1,6 @@
 # dma_overlap.S — Multiple in-flight DMA transfers with early/late waits
 # @TIMEOUT 20000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_overlap.py
 #
 # Tests three scenarios:
@@ -35,7 +35,7 @@
 #   Output C:  word offsets 160..191  (1024 B, expect 0xCC)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
     DMA.CONFIG  x5, 1
     DMA.CONFIG  x5, 2
@@ -48,11 +48,11 @@
 # Neither has completed when we immediately wait on ch0.
 
     ADDI  x6, x0, 0          # VMEM[0]
-    ADDI  x1, x0, 0          # DRAM offset 0
+    LI    x1, 0x90000000  # DRAM offset 0
     DMA.LOAD  x6, x1, x2, 0  # ch0: Input A → VMEM[0]
 
     LI    x7, 256             # VMEM[256]
-    LI    x1, 1024            # DRAM offset 1024
+    LI    x1, 0x90000400  # DRAM offset 1024
     DMA.LOAD  x7, x1, x2, 1  # ch1: Input B → VMEM[256]
 
     # EARLY WAIT: ch0 is definitely still in flight —
@@ -69,7 +69,7 @@
 # The 1024-byte DMA completes well within that window.
 
     LI    x7, 512             # VMEM[512]
-    LI    x1, 2048            # DRAM offset 2048
+    LI    x1, 0x90000800  # DRAM offset 2048
     DMA.LOAD  x7, x1, x2, 2  # ch2: Input C → VMEM[512]
 
     # Scalar work — no VMEM or DMA hazards, just register arithmetic.
@@ -161,15 +161,15 @@
 # ═══════════════════════════════════════════════════════════════════
 
     LI    x8, 768
-    LI    x3, 3072
+    LI    x3, 0x90000C00
     DMA.STORE x3, x8, x2, 0   # ch0: VMEM[768] → Output A
 
     LI    x8, 1024
-    LI    x3, 4096
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1   # ch1: VMEM[1024] → Output B
 
     LI    x8, 1280
-    LI    x3, 5120
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 2   # ch2: VMEM[1280] → Output C
 
     # EARLY WAIT: ch0 issued 4 instructions ago, likely still storing.

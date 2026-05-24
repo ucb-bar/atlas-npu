@@ -1,6 +1,6 @@
 # perf_vec_rmsnorm_softmax_32x32.S — fused RMSNorm(X) + Softmax(Z) with FU overlap
 # @TIMEOUT 25000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_vec_rmsnorm_softmax_32x32.py
 # @PERF_REPORT
 #
@@ -34,16 +34,16 @@
 # 
 # actual = 707 (without vload/vstore)
 # utilization = 89.8%
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 2048
 
 # ─── DMA load all tiles into VMEM ──────────────────────────────
     LI    x6, 0x20000000
     LI    x9, 0x20000400        # Z staging: 1 KiB past X (each tile = 2048 B = 2 KiB,
-    ADDI  x1, x0, 0             # but VLOAD block banking requires 1 KiB alignment;
+    LI    x1, 0x90000000  # but VLOAD block banking requires 1 KiB alignment;
     DMA.LOAD  x6, x1, x12, 0   # use 0x20000000 for X, 0x20000800 for Z so they
-    LI    x1, 0x0800            # don't overlap: X=2048 B ends at 0x20000800 exactly)
+    LI    x1, 0x90000800  # don't overlap: X=2048 B ends at 0x20000800 exactly)
     DMA.LOAD  x9, x1, x12, 1
     DMA.WAIT  0
     DMA.WAIT  1
@@ -140,9 +140,9 @@
 
 
 # ─── DMA store all tiles to DRAM ───────────────────────────────
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x7, x12, 0   # VMEM 0x20001000 (Y_x) → DRAM 0x1000
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x12, 1   # VMEM 0x20001800 (Y_z) → DRAM 0x1800
     DMA.WAIT  0
     DMA.WAIT  1

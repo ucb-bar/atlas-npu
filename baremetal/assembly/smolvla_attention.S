@@ -6,7 +6,7 @@
 #   packed = VFP8PACK(probs)   (atlas 2→1 phased pack, permuted layout)
 #   out    = packed @ V        (MXU1, FP8 → BF16)
 # @TIMEOUT 80000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_attention.py
 #
 # Atlas's MXU computes A @ W^T, so K and V are both XLU-transposed
@@ -44,13 +44,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load Q → VMEM[0] → m0 ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -59,7 +59,7 @@
 
     # ── Load K → VMEM[256] → m2 ──
     LI    x6, 256
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256
@@ -68,7 +68,7 @@
 
     # ── Load V → VMEM[512] → m4 ──
     LI    x6, 512
-    LI    x1, 2048
+    LI    x1, 0x90000800
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 512
@@ -77,13 +77,13 @@
 
     # ── Load scale bank 0 → VMEM[768] → m6 ──
     LI    x6, 768
-    LI    x1, 3072
+    LI    x1, 0x90000C00
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
     # ── Load scale bank 1 → VMEM[1024] → m7 ──
     LI    x6, 1024
-    LI    x1, 4096
+    LI    x1, 0x90001000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -146,12 +146,12 @@
     DELAY 33
 
     LI    x8, 1280
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
     LI    x8, 1536
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

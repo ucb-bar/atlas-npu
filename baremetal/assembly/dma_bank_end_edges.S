@@ -1,47 +1,48 @@
-# dma_bank_end_edges.S - DMA at the last lines of every VMEM bank
+# dma_bank_end_edges.S - legacy DMA windows at the former end lines of each VMEM bank
 # @TIMEOUT 300000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_bank_end_edges.py
 #
-# The block-banked VMEM has 32768 words per bank. Starting at word 32736 within
-# a bank and transferring 128 bytes touches local lines 4092..4095, ending at
-# the last word in that bank without crossing into the next bank.
+# VMEM banks are now 65 536 words each (256 KiB). This test places 128-byte
+# DMA windows at the current bank ends. Six channels cover the exact end window
+# of each bank, and two extra channels cover the immediately preceding 32-word
+# window in bank 0 and bank 5 so the full 8-channel DMA interface stays active.
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 128
 
 # Load one bank-end region per channel.
-    LI    x6, 32736
-    ADDI  x10, x0, 0
+    LI    x6, 65472
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
 
     LI    x6, 65504
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1
 
-    LI    x6, 98272
-    LI    x10, 0x0800
+    LI    x6, 131040
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 2
 
-    LI    x6, 131040
-    LI    x10, 0x0c00
+    LI    x6, 196576
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 3
 
-    LI    x6, 163808
-    LI    x10, 0x1000
+    LI    x6, 262112
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 4
 
-    LI    x6, 196576
-    LI    x10, 0x1400
+    LI    x6, 327648
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 5
 
-    LI    x6, 229344
-    LI    x10, 0x1800
+    LI    x6, 393152
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 6
 
-    LI    x6, 262112
-    LI    x10, 0x1c00
+    LI    x6, 393184
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 7
 
     DMA.WAIT  0
@@ -54,36 +55,36 @@
     DMA.WAIT  7
 
 # Store all bank-end regions back out.
-    LI    x6, 32736
-    LI    x10, 0x4000
+    LI    x6, 65472
+    LI    x10, 0x90004000
     DMA.STORE x10, x6, x12, 0
 
     LI    x6, 65504
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.STORE x10, x6, x12, 1
 
-    LI    x6, 98272
-    LI    x10, 0x4800
+    LI    x6, 131040
+    LI    x10, 0x90004800
     DMA.STORE x10, x6, x12, 2
 
-    LI    x6, 131040
-    LI    x10, 0x4c00
+    LI    x6, 196576
+    LI    x10, 0x90004C00
     DMA.STORE x10, x6, x12, 3
 
-    LI    x6, 163808
-    LI    x10, 0x5000
+    LI    x6, 262112
+    LI    x10, 0x90005000
     DMA.STORE x10, x6, x12, 4
 
-    LI    x6, 196576
-    LI    x10, 0x5400
+    LI    x6, 327648
+    LI    x10, 0x90005400
     DMA.STORE x10, x6, x12, 5
 
-    LI    x6, 229344
-    LI    x10, 0x5800
+    LI    x6, 393152
+    LI    x10, 0x90005800
     DMA.STORE x10, x6, x12, 6
 
-    LI    x6, 262112
-    LI    x10, 0x5c00
+    LI    x6, 393184
+    LI    x10, 0x90005C00
     DMA.STORE x10, x6, x12, 7
 
     DMA.WAIT  0
