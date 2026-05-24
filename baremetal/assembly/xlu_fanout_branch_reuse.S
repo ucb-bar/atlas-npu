@@ -1,6 +1,6 @@
 # xlu_fanout_branch_reuse.S
 # @TIMEOUT 600000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_xlu_fanout_branch_reuse.py
 #
 # Coverage intent:
@@ -24,18 +24,18 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
     # Load A and B.
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
     LI    x6, 256
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD x6, x10, x12, 1
     DMA.WAIT 1
 
@@ -57,15 +57,19 @@
     VSTORE 8, x8, 0
     DELAY 33
 
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     LI    x6, 512
     DMA.STORE x10, x6, x12, 2
     DMA.WAIT 2
 
     # Scalar reads first word of transposed tile from VMEM byte addr 2048.
+    # The LW result is not in x21 until 5 cycles after issue (2-cycle LSU
+    # latency + scalar-core writeback pipeline). The BEQ fires DELAY+2 cycles
+    # after the LW, so DELAY must be >= 3 to avoid reading the pre-load
+    # (uninitialized) x21 -- which reads as X in gate-level sims.
     LI    x20, 2048
     LW    x21, x20, 0
-    DELAY 1
+    DELAY 4
 
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7
@@ -86,7 +90,7 @@
     DELAY 33
 
     LI    x12, 2048
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     LI    x6, 1024
     DMA.STORE x10, x6, x12, 3
     DMA.WAIT 3

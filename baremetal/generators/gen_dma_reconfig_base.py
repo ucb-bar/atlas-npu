@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Golden data for dma_reconfig_base.S."""
+"""Golden data for dma_reconfig_base.S — FPGA single-base reissue variant.
+
+FPGA only has memory at 0x9000_0000+, so the test reissues DMA.CONFIG
+with upper-32 = 0 across two distinct lower-32 windows rather than
+sweeping upper-32 values.
+"""
 
 import json
 
 BEAT_BYTES = 32
 WORDS_PER_BEAT = 8
 BEATS = 4
-DRAM_WINDOW_START = 0x80000000
-STORE_DRAM_OFFSET = 0x80002000
+
+# Byte offsets *relative* to @DRAM_BASE in the .S file (currently 0x9000_0000).
+# The assembler adds @DRAM_BASE to these word_offsets to compute the final
+# byte address.
+LOAD_REGION_A  = 0x0000   # first LOAD source
+LOAD_REGION_B  = 0x4000   # second LOAD source
+STORE_REGION_A = 0x2000   # first STORE dest
+STORE_REGION_B = 0x6000   # second STORE dest
 
 
 def beat_offset(byte_off):
@@ -30,11 +41,10 @@ def make_beat(region, beat):
     ])
 
 
-def emit(entries, byte_base, region, key, dram_base=None):
+def emit(entries, byte_base, region, key):
     for beat in range(BEATS):
         entries.append({
             "word_offset": beat_offset(byte_base) + beat,
-            "dram_base": dram_base,
             key: make_beat(region, beat),
         })
 
@@ -43,10 +53,12 @@ def main():
     preloads = []
     checks = []
 
-    emit(preloads, DRAM_WINDOW_START, 0, "data", dram_base=0x00000000)
-    emit(preloads, DRAM_WINDOW_START, 1, "data", dram_base=0x00000001)
-    emit(checks,   STORE_DRAM_OFFSET, 0, "expected", dram_base=0x00000000)
-    emit(checks,   STORE_DRAM_OFFSET, 1, "expected", dram_base=0x00000001)
+    # First reissue: LOAD region A → VMEM → STORE region A
+    emit(preloads, LOAD_REGION_A,  0, "data")
+    emit(checks,   STORE_REGION_A, 0, "expected")
+    # Second reissue: LOAD region B → VMEM → STORE region B
+    emit(preloads, LOAD_REGION_B,  1, "data")
+    emit(checks,   STORE_REGION_B, 1, "expected")
 
     print(json.dumps({
         "dram_preloads": preloads,

@@ -1,6 +1,6 @@
 # mxu0_qk_scores.S — Q=X@WQ+bias, K=X@WK+bias, scores=Q@K^T  (all overlaps)
 # @TIMEOUT 300000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu0_qk_scores.py 900
 #
 # Overlap patterns demonstrated:
@@ -57,7 +57,7 @@
 #   0x4400  scores result hi (1024B)
 #   0x4800  zero bias FP8    (1024B, all 0x00)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     LI    x15, 1024
@@ -68,7 +68,7 @@
 # GLOBAL SETUP: Load zero bias → TRF 12 (persistent for all phases)
 # ═══════════════════════════════════════════════════════════════
     LI    x8, 512                   # VMEM staging addr
-    LI    x10, 0x4800              # DRAM: zero bias FP8
+    LI    x10, 0x90004800  # DRAM: zero bias FP8
     DMA.LOAD  x8, x10, x12, 3
     DMA.WAIT  3
     LI    x8, 512
@@ -83,7 +83,7 @@
 
     # Load WQ_A → TRF 4 → transpose → TRF 5
     ADDI  x6, x0, 0
-    LI    x10, 0x800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -104,7 +104,7 @@
 
     # Pre-load WQ_B → TRF 6 → transpose → TRF 7
     LI    x7, 256
-    LI    x10, 0xC00
+    LI    x10, 0x90000C00
     DMA.LOAD  x7, x10, x12, 1
     DMA.WAIT  1
     LI    x7, 256
@@ -117,7 +117,7 @@
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -134,7 +134,7 @@
 
     # Load X[:,32:64] → TRF 0
     ADDI  x6, x0, 0
-    LI    x10, 0x400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -169,7 +169,7 @@
 
     # Load WQ_C → TRF 4 → transpose → TRF 5, push to wbuf 0
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -183,7 +183,7 @@
 
     # Pre-load WQ_D → TRF 6 → transpose → TRF 7
     LI    x7, 256
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x7, x10, x12, 1
     DMA.WAIT  1
     LI    x7, 256
@@ -196,7 +196,7 @@
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -211,7 +211,7 @@
 
     # Load X[:,32:64] → TRF 0
     ADDI  x6, x0, 0
-    LI    x10, 0x400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -235,7 +235,7 @@
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
@@ -248,7 +248,7 @@
 
     # Load WK_A → TRF 4 → transpose → TRF 5, push to wbuf 0
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -261,7 +261,7 @@
     VMATPUSH.W.MXU0  0, 5
 
     LI    x7, 256
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x7, x10, x12, 1
     DMA.WAIT  1
     LI    x7, 256
@@ -273,7 +273,7 @@
     DELAY 64
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -293,7 +293,7 @@
     VMATPOP.FP8.MXU0  9, 1, 1
 
     ADDI  x6, x0, 0
-    LI    x10, 0x400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -312,7 +312,7 @@
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
@@ -334,7 +334,7 @@
 ######################################################################
 
     ADDI  x6, x0, 0
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -347,7 +347,7 @@
     VMATPUSH.W.MXU0  0, 5
 
     LI    x7, 256
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x7, x10, x12, 1
     DMA.WAIT  1
     LI    x7, 256
@@ -359,7 +359,7 @@
     DELAY 64
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -373,7 +373,7 @@
     VMATPUSH.W.MXU0   1, 7
 
     ADDI  x6, x0, 0
-    LI    x10, 0x400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -395,7 +395,7 @@
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
@@ -417,7 +417,7 @@
     # Load K[:,0:32] result → TRF 4, push to wbuf 0 (no transpose)
     # Pop runs concurrently with this DMA+push (~50 cycles > 32 cycle pop)
     ADDI  x6, x0, 0
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -432,13 +432,13 @@
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
     # Load K[:,32:64] from DRAM → TRF 6 (now correct data is there)
     ADDI  x6, x0, 0
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -448,7 +448,7 @@
 
     # Load Q[:,0:32] activations → TRF 0
     LI    x7, 256
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x7, x10, x12, 0
     DMA.WAIT  0
     LI    x7, 256
@@ -463,7 +463,7 @@
 
     # Load Q[:,32:64] activations → TRF 0
     LI    x7, 256
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.LOAD  x7, x10, x12, 0
     DMA.WAIT  0
     LI    x7, 256
@@ -493,12 +493,12 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x8, x15, 2
     DMA.WAIT  2
 
     LI    x9, 768
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.STORE x10, x9, x15, 3
     DMA.WAIT  3
 

@@ -499,7 +499,11 @@ def _hex_to_words(hex_str):
 
 
 def _parse_golden_json(path, dram_base, beat_bytes):
-    """Parse golden JSON → (preload_addrs[], preload_words[], check_addrs[], check_words[])."""
+    """Parse golden JSON → (preload_addrs[], preload_words[], check_addrs[], check_words[]).
+
+    `dram_base` is treated as a full 64-bit byte address. Each entry's
+    `beat_addr = dram_base + beat_off * beat_bytes`.
+    """
     import json
     with open(path) as f:
         data = json.load(f)
@@ -517,7 +521,7 @@ def _parse_golden_json(path, dram_base, beat_bytes):
         for e in entries:
             entry_dram_base = _parse_base(e.get("dram_base", dram_base))
             beat_off = e["word_offset"]
-            beat_addr = (entry_dram_base << 32) + beat_off * beat_bytes
+            beat_addr = entry_dram_base + beat_off * beat_bytes
             raw = _hex_to_words(e[key])
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -548,7 +552,7 @@ def _parse_inline_golden(source, beat_bytes):
     """Parse inline @DRAM annotations from assembly comments.
 
     Supported directives:
-      # @DRAM_BASE   <addr>
+      # @DRAM_BASE   <addr>            # full 64-bit byte address
       # @DRAM        <beat_offset> <hex_payload>
       # @CHECK_DRAM  <beat_offset> <hex_payload>
 
@@ -575,7 +579,7 @@ def _parse_inline_golden(source, beat_bytes):
         m = dram_re.match(raw_line)
         if m:
             beat_off = int(m.group(1), 0)
-            beat_addr = (dram_base << 32) + beat_off * beat_bytes
+            beat_addr = dram_base + beat_off * beat_bytes
             raw = _hex_to_words(m.group(2))
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -586,7 +590,7 @@ def _parse_inline_golden(source, beat_bytes):
         m = check_re.match(raw_line)
         if m:
             beat_off = int(m.group(1), 0)
-            beat_addr = (dram_base << 32) + beat_off * beat_bytes
+            beat_addr = dram_base + beat_off * beat_bytes
             raw = _hex_to_words(m.group(2))
             while len(raw) < words_per_beat:
                 raw.append(0)
@@ -958,7 +962,7 @@ def main():
             n_pre = len(golden[1])
             n_chk = len(golden[3])
             print(
-                f"Golden data @DRAM_BASE 0x{dram_base:08X}: "
+                f"Golden data @DRAM_BASE 0x{dram_base:016X}: "
                 f"{n_pre} preload words, {n_chk} check words"
             )
         else:
@@ -967,7 +971,7 @@ def main():
                 inline_dram_base, p_addrs, p_words, c_addrs, c_words = inline
                 golden = (p_addrs, p_words, c_addrs, c_words)
                 print(
-                    f"Inline golden data @DRAM_BASE 0x{inline_dram_base:08X}: "
+                    f"Inline golden data @DRAM_BASE 0x{inline_dram_base:016X}: "
                     f"{len(p_words)} preload words, {len(c_words)} check words"
                 )
         perf_threshold = _parse_perf_threshold(source)

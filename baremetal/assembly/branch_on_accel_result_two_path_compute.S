@@ -1,6 +1,6 @@
 # branch_on_accel_result_two_path_compute.S
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_branch_on_accel_result_two_path_compute.py
 #
 # Coverage intent:
@@ -24,13 +24,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 2048
 
     # Load input tile.
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
@@ -53,7 +53,7 @@
     DELAY 33
 
     # Drain the reduction result to DRAM as an intermediate oracle.
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     LI    x6, 512
     DMA.STORE x10, x6, x12, 1
     DMA.WAIT 1
@@ -61,7 +61,7 @@
     # Scalar reads first BF16 pair word of the stored rowsum tile.
     LI    x20, 2048          # byte address of VMEM word base 512
     LW    x21, x20, 0
-    DELAY 1
+    DELAY 4
 
     # Generator makes row 0 sum positive, so branch to relu_path is deterministic.
     BLT   x21, x0, neg_path
@@ -84,7 +84,7 @@ store_final:
     VSTORE 5, x8, 8
     DELAY 33
 
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     LI    x6, 1024
     DMA.STORE x10, x6, x12, 2
     DMA.WAIT 2

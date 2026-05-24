@@ -1,6 +1,6 @@
 # branch_accel_delay_slots_dma_vpu_xlu.S
 # @TIMEOUT 400000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 #
 # Coverage intent:
 #   - Control-flow with architecturally visible accelerator side effects in one delay slot.
@@ -32,7 +32,7 @@
 #
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x8, 1024          # common 1 KiB transfer size
@@ -43,9 +43,9 @@
     LI    x10, 512          # VMEM word 512   -> byte 2048
 
     # DRAM byte-offset constants
-    LI    x7, 0             # input tile
-    LI    x11, 1024         # output tile 0
-    LI    x12, 2048         # output tile 1
+    LI    x7, 0x90000000  # input tile
+    LI    x11, 0x90000400  # output tile 0
+    LI    x12, 0x90000800  # output tile 1
 
 # ----------------------------------------------------------------------
 # Case 1: taken BEQ; the single delay slot launches DMA.LOAD.

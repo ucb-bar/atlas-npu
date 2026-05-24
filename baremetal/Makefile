@@ -20,7 +20,14 @@ GENERATED_C := $(patsubst %,$(TESTS_DIR)/atlas_%.c,$(TESTS))
 # ── Sim infra ─────────────────────────────────────────────────────────
 VCS_DIR_ABS  := $(CHIPYARD_ROOT)/sims/vcs
 GEN_COVERAGE ?= 1
+# Chipyard common.mk interprets LOADMEM as:
+#   1        => preload $(BINARY)
+#   <path>   => preload that ELF
+#   unset    => no preload
+# Passing the literal string "0" is therefore wrong: it becomes +loadmem=0
+# and SimDRAM's load_elf() throws trying to open a file named "0".
 LOADMEM      ?= 1
+CHIPYARD_LOADMEM := $(if $(filter 0,$(strip $(LOADMEM))),,$(LOADMEM))
 
 # simv path. Chipyard names the binary $(sim_dir)/simv-$(MODEL_PACKAGE)-$(CONFIG)
 # (sims/vcs/Makefile:25). MODEL_PACKAGE defaults to chipyard.harness and isn't
@@ -112,7 +119,7 @@ status-all: $(addprefix status-,$(TESTS))
 _sim-%: status-% $(BUILD_DIR)/atlas_%.riscv simv
 	@$(MAKE) -s -C $(VCS_DIR_ABS) run-binary \
 	    BINARY=$(BUILD_DIR)/atlas_$*.riscv CONFIG=$(CONFIG) \
-	    LOADMEM=$(LOADMEM) GEN_COVERAGE=$(GEN_COVERAGE) \
+	    LOADMEM=$(CHIPYARD_LOADMEM) GEN_COVERAGE=$(GEN_COVERAGE) \
 	    BREAK_SIM_PREREQ=1
 
 # Don't let GNU Make auto-delete .riscv binaries as "intermediate" after a

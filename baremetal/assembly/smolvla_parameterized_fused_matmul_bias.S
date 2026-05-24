@@ -13,7 +13,7 @@
 # NO VMATPUSH.ACC.FP8 preload — we mirror stock's quantize-roundtrip pattern.
 #
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_fused_matmul_bias.py
 #
 # Shape: M=64, K=32, N=64 → M_tiles=2, N_tiles=2, K_tiles=1 (single K-tile
@@ -50,13 +50,14 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x25, 0x1000
     LI    x26, 0x2000
     LI    x27, 0x4000
     ADDI  x11, x0, 4
+    LUI   x15, 0x90000          # FPGA DRAM offset 0x9000_0000
 
     ADDI  x10, x0, 0
 
@@ -66,19 +67,23 @@ output_tile_loop:
 
     # ── A[m, 0] DRAM offset = m * 2048 ──
     SLLI  x20, x12, 11
+    ADD   x20, x20, x15
     # ── B[0, n] DRAM offset = n * 2048 + 0x1000 ──
     SLLI  x22, x13, 11
     ADD   x22, x22, x25
+    ADD   x22, x22, x15
     # ── bias[m, n] DRAM offset = (m*2 + n) * 2048 + 0x2000 ──
     SLLI  x23, x12, 1
     ADD   x23, x23, x13
     SLLI  x23, x23, 11
     ADD   x23, x23, x26
+    ADD   x23, x23, x15
     # ── out[m, n] DRAM offset = (m*2 + n) * 2048 + 0x4000 ──
     SLLI  x24, x12, 1
     ADD   x24, x24, x13
     SLLI  x24, x24, 11
     ADD   x24, x24, x27
+    ADD   x24, x24, x15
 
     # ── Load A bf16 → VMEM[0..511] → (m0, m1) ──
     ADDI  x6, x0, 0

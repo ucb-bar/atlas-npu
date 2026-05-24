@@ -1,6 +1,6 @@
 # mem_scalar.S — Scalar load/store and SELD functional test
 # @TIMEOUT 10000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 #
 # All scalar VMEM access goes through the LSU.
 # Scalar loads now have a 3-cycle software-visible latency, and scalar stores
@@ -22,13 +22,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
     LI    x2, 32
 
 # ── Step 1: DMA load DRAM[0] -> VMEM[word 0] ─────────────
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x28, x28, 1       # x28 = 2
@@ -119,7 +119,7 @@
 
 # ── Step 12: DMA store final VMEM -> DRAM word 32 ───────
     ADDI  x6, x0, 0
-    LI    x3, 1024
+    LI    x3, 0x90000400
     DMA.STORE x3, x6, x2, 1
     DMA.WAIT  1
 

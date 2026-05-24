@@ -2,7 +2,7 @@
 # Port of jrmills20 parameterized_rms_norm.py. N fixed at 32; M scales via
 # tile loop. Each 32-row group is independent. VLI constants hoisted.
 # @TIMEOUT 2500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_rms_norm.py
 #
 # Shape: M=512, N=32 → 16 groups.
@@ -27,7 +27,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x22, 0x8000
@@ -41,8 +41,10 @@
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
 
+    LUI   x15, 0x90000         # FPGA DRAM offset 0x9000_0000
 tile_loop:
     SLLI  x20, x10, 11
+    ADD   x20, x20, x15        # x20 += FPGA DRAM base
 
     # ── Load X ──
     ADDI  x1, x20, 0

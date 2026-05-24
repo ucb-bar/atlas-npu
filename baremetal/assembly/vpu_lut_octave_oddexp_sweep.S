@@ -1,6 +1,6 @@
 # vpu_lut_octave_oddexp_sweep.S — wide-octave/oddExp LUT-input sweep
 # @TIMEOUT 600000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_lut_octave_oddexp_sweep.py
 #
 # Coverage intent (cov_overall.modinfo.txt):
@@ -51,7 +51,7 @@
 #     m4,m5   VPU result pair
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 2048             # 2 KiB per tile / output
 
@@ -59,7 +59,7 @@
 # TILE 0 - oddExp branch dense, |x| around 1.0
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x0000
+    LI    x1, 0x90000000
     DMA.LOAD x6, x1, x2, 0
     DMA.WAIT 0
 
@@ -78,7 +78,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -91,7 +91,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -104,7 +104,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -117,7 +117,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x5800
+    LI    x10, 0x90005800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -130,7 +130,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x6000
+    LI    x10, 0x90006000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -138,7 +138,7 @@
 # TILE 1 - oddExp branch dense, mixed sign just below/above 1
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x0800
+    LI    x1, 0x90000800
     DMA.LOAD x6, x1, x2, 0
     DMA.WAIT 0
 
@@ -157,7 +157,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x6800
+    LI    x10, 0x90006800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -170,7 +170,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x7000
+    LI    x10, 0x90007000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -183,7 +183,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x7800
+    LI    x10, 0x90007800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -196,7 +196,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x8000
+    LI    x10, 0x90008000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -209,7 +209,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x8800
+    LI    x10, 0x90008800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -217,7 +217,7 @@
 # TILE 2 - full ~50-octave ladder, both signs
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x1000
+    LI    x1, 0x90001000
     DMA.LOAD x6, x1, x2, 0
     DMA.WAIT 0
 
@@ -236,7 +236,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x9000
+    LI    x10, 0x90009000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -249,7 +249,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0x9800
+    LI    x10, 0x90009800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -262,7 +262,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xA000
+    LI    x10, 0x9000A000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -275,7 +275,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xA800
+    LI    x10, 0x9000A800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -288,7 +288,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xB000
+    LI    x10, 0x9000B000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -296,7 +296,7 @@
 # TILE 3 - special-case lattice (zero, subnormal, inf, NaN-coded, sat)
 # ======================================================================
     ADDI  x6, x0, 0
-    LI    x1, 0x1800
+    LI    x1, 0x90001800
     DMA.LOAD x6, x1, x2, 0
     DMA.WAIT 0
 
@@ -315,7 +315,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xB800
+    LI    x10, 0x9000B800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -328,7 +328,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xC000
+    LI    x10, 0x9000C000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -341,7 +341,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xC800
+    LI    x10, 0x9000C800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -354,7 +354,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xD000
+    LI    x10, 0x9000D000
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 
@@ -367,7 +367,7 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x9, 1024
-    LI    x10, 0xD800
+    LI    x10, 0x9000D800
     DMA.STORE x10, x9, x2, 1
     DMA.WAIT 1
 

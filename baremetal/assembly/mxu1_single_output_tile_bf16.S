@@ -1,7 +1,7 @@
 # mxu1_single_output_tile_bf16.S — C_tile = A_tile @ B_tile + bias (K=2048)
 #                                  weight double-buffer with overlap
 # @TIMEOUT 500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu1_single_output_tile_bf16.py 42 1
 #
 # Overlap patterns demonstrated:
@@ -27,13 +27,13 @@
     LI    x10, 0
     LI    x11, 64
     LI    x12, 1024
-    LI    x16, 0
-    LI    x17, 65536
-    LI    x18, 131072
-    LI    x23, 132096
+    LI    x16, 0x90000000    # act DRAM offset (FPGA base + 0)
+    LI    x17, 0x90010000    # wgt DRAM offset (FPGA base + 0x10000)
+    LI    x18, 0x90020000    # bias DRAM offset (FPGA base + 0x20000)
+    LI    x23, 0x90020400    # result DRAM offset (FPGA base + 0x20400)
     LI    x24, 1024
     LI    x30, 1
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
 
     # Bias -> TRF 8

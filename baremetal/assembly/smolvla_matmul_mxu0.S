@@ -2,7 +2,7 @@
 # Tests: C = A @ B on seeded random FP8 32x32 tiles
 #   (single-tile FP8 matmul → BF16 output, split across m2/m3)
 # @TIMEOUT 30000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_matmul_mxu0.py
 #
 # Atlas MXU loads weights in transposed orientation, so assembly
@@ -19,13 +19,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load B DRAM[0x400] → VMEM[0] → TRF m4 ──
     ADDI  x6, x0, 0
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -34,7 +34,7 @@
 
     # ── Load A DRAM[0x000] → VMEM[256] → TRF m0 ──
     LI    x7, 256
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x7, x1, x2, 0
     DMA.WAIT  0
     LI    x7, 256
@@ -63,12 +63,12 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x3, 0x0800
+    LI    x3, 0x90000800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
     LI    x9, 768
-    LI    x3, 0x0C00
+    LI    x3, 0x90000C00
     DMA.STORE x3, x9, x2, 1
     DMA.WAIT  1
 

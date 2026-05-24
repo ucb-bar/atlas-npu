@@ -1,6 +1,6 @@
 # vpu_special_math_roundtrip_classes.S
 # @TIMEOUT 700000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_special_math_roundtrip_classes.py
 #
 # Coverage intent:
@@ -31,14 +31,14 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x12, 2048
 
     # Load input pair to VMEM[0..2047 B]
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
@@ -96,29 +96,29 @@
     # VMEM byte address = 2048 words * 4 bytes/word = 8192.
     LI    x20, 8192
     LW    x21, x20, 4
-    DELAY 1
+    DELAY 4
     BEQ   x21, x0, fail
     NOP
     ADDI  x28, x28, 1
 
     # Drain all outputs to DRAM.
     LI    x6, 512
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.STORE x10, x6, x12, 1
     DMA.WAIT 1
 
     LI    x6, 1024
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.STORE x10, x6, x12, 2
     DMA.WAIT 2
 
     LI    x6, 1536
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.STORE x10, x6, x12, 3
     DMA.WAIT 3
 
     LI    x6, 2048
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.STORE x10, x6, x12, 4
     DMA.WAIT 4
 

@@ -9,7 +9,7 @@
 # VMEM offsets are unchanged — VMEM is Atlas-local and disjoint from DRAM.
 #
 # @TIMEOUT 30000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 #
 # DRAM layout:
 #   [0x2000..0x23FF]  Input X bank 0    (1024 B)
@@ -20,17 +20,17 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load Input X → VMEM[0..511] → (m0, m1) ──
     ADDI  x6, x0, 0
-    LI    x1, 0x2000
+    LI    x1, 0x90002000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256
-    LI    x1, 0x2400
+    LI    x1, 0x90002400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
 
@@ -51,11 +51,11 @@
     DELAY 40
 
     LI    x8, 512
-    LI    x3, 0x2800
+    LI    x3, 0x90002800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 768
-    LI    x3, 0x2C00
+    LI    x3, 0x90002C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

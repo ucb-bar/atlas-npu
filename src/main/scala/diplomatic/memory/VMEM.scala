@@ -1,9 +1,12 @@
 // ============================================================================
-// Vmem.scala — 8-bank block-banked vector scratchpad with masked writes.
+// Vmem.scala — block-banked vector scratchpad with masked writes.
 //
 // Storage: numBanks × SyncReadMem(linesPerBank, Vec(lineBytes, UInt(8.W)))
 //          Each bank: 1 shared read/write port (1RW SRAM).
 //          Byte-granularity masking via SyncReadMem native mask.
+//          Bank decode/address come from VmemParams so each bank remains one
+//          contiguous power-of-two VMEM window even when the total bank count
+//          is not itself a power of two.
 //
 // Clients (all present pre-decomposed bankIdx + bankAddr):
 //   LSU scalar:  scalar loads (read) and scalar stores (masked write).
@@ -68,9 +71,17 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   val tlLineAddr = tlByteAddr(p.byteAddrBits - 1, p.lineOffBits)
   val tlBankIdx  = p.getBankIdx(tlLineAddr)
   val tlBankAddr = p.getBankAddr(tlLineAddr)
+  val tlBankValid = tlBankIdx < p.numBanks.U
   val tlIsGet    = tl.a.bits.opcode === TLMessages.Get
   val tlIsPut    = tl.a.bits.opcode === TLMessages.PutFullData ||
                    tl.a.bits.opcode === TLMessages.PutPartialData
+
+  when (tl.a.valid && (tlIsGet || tlIsPut)) {
+    assert(tlByteAddr < p.capacityBytes.U,
+      "VMEM: TL request addressed beyond implemented VMEM capacity")
+    assert(tlBankValid,
+      "VMEM: TL request decoded to nonexistent VMEM bank")
+  }
 
   // ==========================================================================
   // Software-scheduling assertions
@@ -235,7 +246,7 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   val tlWriteMask        = VecInit((0 until p.lineBytes).map(i => tl.a.bits.mask(i)))
 
   def bankOH(bankIdx: UInt, valid: Bool): UInt =
-    UIntToOH(bankIdx, p.numBanks) & Fill(p.numBanks, valid)
+    Mux(valid && (bankIdx < p.numBanks.U), UIntToOH(bankIdx, p.numBanks), 0.U(p.numBanks.W))
 
   val lsuScalarReadBankOH  = bankOH(io.lsuScalarRead.bits.bankIdx, io.lsuScalarRead.valid)
   val lsuVecReadBankOH     = bankOH(io.lsuVecRead.bits.bankIdx, io.lsuVecRead.valid)
@@ -310,7 +321,7 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   tlAccepted      := treeReduce((0 until p.numBanks).map(b => bankTlAccepted(b)))(_ || _)
 
   // Global tlAccepted must equal the active bank's tlAccepted (one-hot decode).
-  val activeBankOH         = UIntToOH(tlBankIdx, p.numBanks)
+  val activeBankOH         = bankOH(tlBankIdx, tl.a.valid && dCanAccept && (tlIsPut || tlIsGet))
   val activeBankTlAccepted = (bankTlAccepted.asUInt & activeBankOH).orR
   when (tl.a.valid && dCanAccept && (tlIsPut || tlIsGet)) {
     assert(tlAccepted === activeBankTlAccepted,

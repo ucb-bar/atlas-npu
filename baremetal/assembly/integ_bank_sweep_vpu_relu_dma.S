@@ -1,11 +1,13 @@
 # integ_bank_sweep_vpu_relu_dma.S — VMEM bank/address sweep with DMA, VPU, and scalar LSU
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_integ_bank_sweep_vpu_relu_dma.py
 #
 # Coverage intent:
-#   - DMA traffic to four distinct VMEM placements spread across the 1 MiB VMEM
-#   - VLOAD/VSTORE on four distinct tensor slots / bank decodes
+#   - DMA traffic to four distinct VMEM placements spread across the lower
+#     VMEM banks of the 1.5 MiB default map
+#   - VLOAD/VSTORE on four distinct tensor slots; under current 256 KiB
+#     banking these land in banks 0, 0, 1, and 2
 #   - VPU pair op (VRELU) on each loaded BF16 tile
 #   - Scalar LB/LHU/LW reads from a dedicated scratch region after each phase
 #
@@ -22,17 +24,17 @@
 # VMEM plan:
 #   scratch bytes      0x7000 .. 0x701F   scalar-only scratch, disjoint from DMA.STORE sources
 #
-#   tile0 in bytes     0x00000 .. 0x007FF   word base 0x0000 /4 =     0, VLOAD imm 0/8
-#   tile0 out bytes    0x00800 .. 0x00FFF   word base 0x0800 /4 =   512, VSTORE imm 0/8
+#   tile0 in bytes     0x00000 .. 0x007FF   word base 0x0000 /4 =     0, bank 0, VLOAD imm 0/8
+#   tile0 out bytes    0x00800 .. 0x00FFF   word base 0x0800 /4 =   512, bank 0, VSTORE imm 0/8
 #
-#   tile1 in bytes     0x20000 .. 0x207FF   word base 0x20000/4 = 32768, VLOAD imm 0/8
-#   tile1 out bytes    0x20800 .. 0x20FFF   word base 0x20800/4 = 33280, VSTORE imm 0/8
+#   tile1 in bytes     0x20000 .. 0x207FF   word base 0x20000/4 = 32768, bank 0, VLOAD imm 0/8
+#   tile1 out bytes    0x20800 .. 0x20FFF   word base 0x20800/4 = 33280, bank 0, VSTORE imm 0/8
 #
-#   tile2 in bytes     0x40000 .. 0x407FF   word base 0x40000/4 = 65536, VLOAD imm 0/8
-#   tile2 out bytes    0x40800 .. 0x40FFF   word base 0x40800/4 = 66048, VSTORE imm 0/8
+#   tile2 in bytes     0x40000 .. 0x407FF   word base 0x40000/4 = 65536, bank 1, VLOAD imm 0/8
+#   tile2 out bytes    0x40800 .. 0x40FFF   word base 0x40800/4 = 66048, bank 1, VSTORE imm 0/8
 #
-#   tile3 in bytes     0x60000 .. 0x607FF   word base 0x60000/4 = 98304, VLOAD imm 0/8
-#   tile3 out bytes    0x60800 .. 0x60FFF   word base 0x60800/4 = 98816, VSTORE imm 0/8
+#   tile3 in bytes     0x80000 .. 0x807FF   word base 0x80000/4 = 131072, bank 2, VLOAD imm 0/8
+#   tile3 out bytes    0x80800 .. 0x80FFF   word base 0x80800/4 = 131584, bank 2, VSTORE imm 0/8
 #
 # Notes:
 #   - Every DMA is serialized with DMA.WAIT.
@@ -41,7 +43,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x29, 0x7000        # scratch byte base
@@ -60,7 +62,7 @@
     # Tile 0: low VMEM region
     # ------------------------------------------------------------------
     LI    x6, 0              # input VMEM word base
-    LI    x10, 0x0000        # input DRAM byte offset
+    LI    x10, 0x90000000  # input DRAM byte offset
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
 
@@ -96,7 +98,7 @@
     BNE   x20, x21, fail
     NOP
 
-    LI    x11, 0x2000        # output DRAM byte offset
+    LI    x11, 0x90002000  # output DRAM byte offset
     DMA.STORE x11, x7, x12, 1
     DMA.WAIT 1
 
@@ -104,7 +106,7 @@
     # Tile 1: 0x20000 VMEM region
     # ------------------------------------------------------------------
     LI    x6, 32768          # 0x20000 bytes / 4
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD x6, x10, x12, 2
     DMA.WAIT 2
 
@@ -140,7 +142,7 @@
     BNE   x20, x21, fail
     NOP
 
-    LI    x11, 0x2800
+    LI    x11, 0x90002800
     DMA.STORE x11, x7, x12, 3
     DMA.WAIT 3
 
@@ -148,7 +150,7 @@
     # Tile 2: 0x40000 VMEM region
     # ------------------------------------------------------------------
     LI    x6, 65536          # 0x40000 bytes / 4
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD x6, x10, x12, 4
     DMA.WAIT 4
 
@@ -184,15 +186,15 @@
     BNE   x20, x21, fail
     NOP
 
-    LI    x11, 0x3000
+    LI    x11, 0x90003000
     DMA.STORE x11, x7, x12, 5
     DMA.WAIT 5
 
     # ------------------------------------------------------------------
-    # Tile 3: 0x60000 VMEM region
+    # Tile 3: 0x80000 VMEM region
     # ------------------------------------------------------------------
-    LI    x6, 98304          # 0x60000 bytes / 4
-    LI    x10, 0x1800
+    LI    x6, 131072         # 0x80000 bytes / 4
+    LI    x10, 0x90001800
     DMA.LOAD x6, x10, x12, 6
     DMA.WAIT 6
 
@@ -204,7 +206,7 @@
     VRELU 14, 12
     DELAY 64
 
-    LI    x7, 98816          # 0x60800 bytes / 4
+    LI    x7, 131584         # 0x80800 bytes / 4
     VSTORE 14, x7, 0
     DELAY 33
     VSTORE 15, x7, 8
@@ -228,7 +230,7 @@
     BNE   x20, x21, fail
     NOP
 
-    LI    x11, 0x3800
+    LI    x11, 0x90003800
     DMA.STORE x11, x7, x12, 7
     DMA.WAIT 7
 

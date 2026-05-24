@@ -1,13 +1,17 @@
 // ============================================================================
 // VmemParams.scala — VMEM parameters and port bundles (architecture).
 //
-// Atlas uses a block-banked VMEM. Each bank owns one contiguous `bankBytes`
-// range, and the default Atlas memory map places this window at
+// Atlas uses a block-banked VMEM. Each bank owns one contiguous power-of-two
+// `bankBytes` range, and the default Atlas memory map places this window at
 // `AtlasMemMap.VMEM_BASE` with size `AtlasMemMap.VMEM_SIZE`.
 //
-// Banking on high bits of line address:
-//   lineAddr[lineAddrBits-1 : bankLineAddrBits]  → bank index
-//   lineAddr[bankLineAddrBits-1 : 0]             → line within bank
+// Banking on power-of-two bank windows of line address:
+//   bank index        = lineAddr >> bankLineAddrBits
+//   line within bank  = lineAddr(bankLineAddrBits-1, 0)
+//
+// This keeps each bank as one contiguous VMEM window while allowing a
+// non-power-of-two number of banks, as long as the per-bank SRAM macro size
+// remains a power of two.
 // ============================================================================
 
 package atlas.common
@@ -21,11 +25,21 @@ case class VmemParams(
   capacityBytes: Int    = AtlasMemMap.VMEM_SIZE,
   base:          BigInt = BigInt(AtlasMemMap.VMEM_BASE),
   beatBytes:     Int    = 32,
-  numBanks:      Int    = 8
+  numBanks:      Int    = AtlasMemMap.VMEM_NUM_BANKS
 ) {
+  private def isPowerOfTwo(x: Int): Boolean = x > 0 && (x & (x - 1)) == 0
+
+  require(capacityBytes > 0)
+  require(numBanks > 0)
+  require(lineWidthBits % 8 == 0)
+
   val lineBytes: Int        = lineWidthBits / 8
-  val numLines: Int         = capacityBytes / lineBytes
-  val lineAddrBits: Int     = log2Ceil(numLines)
+  val bankBytes: Int        = capacityBytes / numBanks
+  val linesPerBank: Int     = bankBytes / lineBytes
+  val numLines: Int         = linesPerBank * numBanks
+  val bankIdBits: Int       = log2Ceil(numBanks)
+  val bankLineAddrBits: Int = log2Ceil(linesPerBank)
+  val lineAddrBits: Int     = bankLineAddrBits + bankIdBits
   val wordWidth: Int        = 32
   val wordsPerLine: Int     = lineWidthBits / wordWidth
   val wordOffBits: Int      = log2Ceil(wordsPerLine)
@@ -34,29 +48,22 @@ case class VmemParams(
   val byteAddrBits: Int     = log2Ceil(capacityBytes)
 
   // ── Banking ──
-  val bankIdBits: Int       = log2Ceil(numBanks)
-  val bankBytes: Int        = capacityBytes / numBanks
-  val linesPerBank: Int     = numLines / numBanks
-  val bankLineAddrBits: Int = log2Ceil(linesPerBank)
   val lineOffBits: Int      = log2Ceil(lineBytes)
 
   // ── Aliases ──
   def lineWidth: Int = lineWidthBits
   def sizeBytes: Int = capacityBytes
 
-  private def isPowerOfTwo(x: Int): Boolean = x > 0 && (x & (x - 1)) == 0
-
-  require(lineWidthBits % 8 == 0)
-  require(capacityBytes % lineBytes == 0)
-  require(isPowerOfTwo(capacityBytes))
-  require(isPowerOfTwo(numBanks))
-  require(numLines % numBanks == 0)
-  require(lineAddrBits == bankLineAddrBits + bankIdBits)
+  require(bankBytes * numBanks == capacityBytes)
+  require(bankBytes % lineBytes == 0)
+  require(isPowerOfTwo(bankBytes))
 
   /** Extract bank index from a line address. */
-  def getBankIdx(lineAddr: UInt): UInt = lineAddr(lineAddrBits - 1, bankLineAddrBits)
+  def getBankIdx(lineAddr: UInt): UInt =
+    (lineAddr >> bankLineAddrBits)(bankIdBits - 1, 0)
   /** Extract bank-local line address from a line address. */
-  def getBankAddr(lineAddr: UInt): UInt = lineAddr(bankLineAddrBits - 1, 0)
+  def getBankAddr(lineAddr: UInt): UInt =
+    lineAddr(bankLineAddrBits - 1, 0)
 }
 
 // ============================================================================

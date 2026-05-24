@@ -12,7 +12,7 @@
 # SELI 0, 0x7F sets the unit-scale (E8M0 = 0x7F) for all FP8 pops.
 #
 # @TIMEOUT 200000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_fused_attention_MXU1.py
 #
 # Mreg map (Updated for all-upfront loading):
@@ -34,7 +34,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 4096
 
@@ -43,19 +43,19 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0       # Q
     LI    x6, 0x1000
-    LI    x1, 0x1000
+    LI    x1, 0x90001000
     DMA.LOAD  x6, x1, x2, 1       # K0
     LI    x6, 0x2000
-    LI    x1, 0x2000
+    LI    x1, 0x90002000
     DMA.LOAD  x6, x1, x2, 2       # K1
     LI    x6, 0x3000
-    LI    x1, 0x3000
+    LI    x1, 0x90003000
     DMA.LOAD  x6, x1, x2, 3       # V0
     LI    x6, 0x4000
-    LI    x1, 0x4000
+    LI    x1, 0x90004000
     DMA.LOAD  x6, x1, x2, 4       # V1
 
     DMA.WAIT  0
@@ -389,7 +389,7 @@
     DELAY 33
 
     LI    x8, 0x1400
-    LI    x3, 0x6000
+    LI    x3, 0x90006000
     DMA.STORE x3, x8, x2, 0
     DMA.WAIT  0
 

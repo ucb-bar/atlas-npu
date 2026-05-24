@@ -1,6 +1,6 @@
 # mxu_chain_vpu_reduce.S — MXU0→FP8→MXU1 chain + VPU post-process
 # @TIMEOUT 1000000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu_chain_vpu_reduce.py 333
 #
 # Attention-like pipeline exercising all three functional units:
@@ -59,7 +59,7 @@
 #   0x4000  biased b0  (1024B BF16) — vadd(scores, bias_vpu)
 #   0x4400  biased b1  (1024B BF16)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127          # identity scale for FP8 pops
@@ -72,22 +72,22 @@
 
     # ch0: zero bias → VMEM[0]
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 0
 
     # ch1: A_vpu b0 → VMEM[256]
     LI    x7, 256
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x7, x10, x12, 1
 
     # ch2: B_vpu b0 → VMEM[512]
     LI    x8, 512
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x8, x10, x12, 2
 
     # ch3: bias_vpu b0 → VMEM[768]
     LI    x9, 768
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x9, x10, x12, 3
 
     DMA.WAIT  0
@@ -112,17 +112,17 @@
     # Second round: bank1 data
     # ch0: A_vpu b1
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 0
 
     # ch1: B_vpu b1
     LI    x7, 256
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x7, x10, x12, 1
 
     # ch2: bias_vpu b1
     LI    x8, 512
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x8, x10, x12, 2
 
     DMA.WAIT  0
@@ -145,7 +145,7 @@
 
     # Load WQ → m1 → XLU → m2
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -160,7 +160,7 @@
 
     # Load X → m0
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -183,7 +183,7 @@
     VSTORE 4, x8, 0
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
@@ -193,7 +193,7 @@
 
     # Load WK → m1 → XLU → m2 (reuse scratch banks)
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -223,10 +223,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.STORE x10, x8, x12, 2
     LI    x9, 768
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.STORE x10, x9, x12, 3
     DMA.WAIT  2
     DMA.WAIT  3
@@ -236,7 +236,7 @@
     VSTORE 5, x8, 0
     DELAY 33
     LI    x8, 512
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.STORE x10, x8, x12, 2
     DMA.WAIT  2
 
@@ -249,7 +249,7 @@
 
     # Load K from DRAM → m1, push as weight (NO transpose for K^T)
     ADDI  x6, x0, 0
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -261,7 +261,7 @@
 
     # ── [f] Load Q from DRAM (DMA) while MXU0 push completes ──
     ADDI  x6, x0, 0
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x6, x10, x12, 1     # ch1 for Q load
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -285,11 +285,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x8, x12, 0
 
     LI    x9, 768
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.STORE x10, x9, x12, 1
 
     DMA.WAIT  0
@@ -312,11 +312,11 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x8, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.STORE x10, x9, x12, 3
 
     DMA.WAIT  2

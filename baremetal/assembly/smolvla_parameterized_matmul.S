@@ -15,7 +15,7 @@
 # depending on which engine ran that tile.
 #
 # @TIMEOUT 400000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_matmul.py
 #
 # Shape: M=64, K=32, N=64 → M_tiles=2, N_tiles=2, K_tiles=1.
@@ -45,12 +45,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x25, 0x1000
     LI    x17, 0x2000
     ADDI  x11, x0, 4
+    LUI   x15, 0x90000         # FPGA DRAM offset 0x9000_0000
 
     ADDI  x10, x0, 0           # output_tile_idx = 0
 
@@ -60,9 +61,11 @@ output_tile_loop:
 
     # ── A[m, 0] DRAM offset = m_tile * 1024 ──
     SLLI  x20, x12, 10
+    ADD   x20, x20, x15
     # ── B[0, n] DRAM offset = n_tile * 1024 + 0x1000 ──
     SLLI  x22, x13, 10
     ADD   x22, x22, x25
+    ADD   x22, x22, x15
 
     # ── DMA A tile → VMEM[0] ──
     ADDI  x6, x0, 0
@@ -126,6 +129,7 @@ matmul_done:
     ADD   x16, x16, x13        # m*2 + n
     SLLI  x16, x16, 11         # *2048
     ADD   x16, x16, x17        # + 0x2000 (C base)
+    ADD   x16, x16, x15        # + FPGA DRAM base
 
     LI    x8, 512
     DMA.STORE x16, x8, x2, 1

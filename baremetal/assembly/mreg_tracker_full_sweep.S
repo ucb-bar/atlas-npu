@@ -1,6 +1,6 @@
 # mreg_tracker_full_sweep.S — sweep every MREG bank as both a read and write
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mreg_tracker_full_sweep.py
 #
 # Coverage intent:
@@ -49,7 +49,7 @@
 #                      bank, in bank-index order (64 KiB = 64 * 1 KiB)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024             # 1 KiB tile size
 
@@ -57,7 +57,7 @@
 # PHASE 0: Load source tile into VMEM[word 0 .. 255]
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x12, 0
     DMA.WAIT  0
 
@@ -536,82 +536,82 @@
 
     # chunk i: VMEM word base = 1024 + i * 1024, DRAM byte = 0x1000 + i*0x1000
     LI    x8, 1024
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 2048
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 3072
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 4096
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 5120
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 6144
-    LI    x10, 0x6000
+    LI    x10, 0x90006000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 7168
-    LI    x10, 0x7000
+    LI    x10, 0x90007000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 8192
-    LI    x10, 0x8000
+    LI    x10, 0x90008000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 9216
-    LI    x10, 0x9000
+    LI    x10, 0x90009000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 10240
-    LI    x10, 0xA000
+    LI    x10, 0x9000A000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 11264
-    LI    x10, 0xB000
+    LI    x10, 0x9000B000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 12288
-    LI    x10, 0xC000
+    LI    x10, 0x9000C000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 13312
-    LI    x10, 0xD000
+    LI    x10, 0x9000D000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 14336
-    LI    x10, 0xE000
+    LI    x10, 0x9000E000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 15360
-    LI    x10, 0xF000
+    LI    x10, 0x9000F000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 
     LI    x8, 16384
-    LI    x10, 0x10000
+    LI    x10, 0x90010000
     DMA.STORE x10, x8, x11, 1
     DMA.WAIT 1
 

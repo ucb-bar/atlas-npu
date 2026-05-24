@@ -1,6 +1,6 @@
 # vpu_special_class_chain_pack.S
 # @TIMEOUT 300000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_special_class_chain_pack.py
 #
 # Coverage intent:
@@ -32,7 +32,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x12, 2048              # BF16 tensor-pair bytes
@@ -48,12 +48,12 @@
     LI    x11, 2304              # scale table base
 
     # DRAM byte offsets
-    LI    x20, 0x0000            # input bf16 pair preload
-    LI    x21, 0x2400            # scale table preload
-    LI    x22, 0x0800            # recip output store
-    LI    x23, 0x1000            # sqrt output store
-    LI    x24, 0x1800            # mul output store
-    LI    x25, 0x2000            # packed fp8 store
+    LI    x20, 0x90000000  # input bf16 pair preload
+    LI    x21, 0x90002400  # scale table preload
+    LI    x22, 0x90000800  # recip output store
+    LI    x23, 0x90001000  # sqrt output store
+    LI    x24, 0x90001800  # mul output store
+    LI    x25, 0x90002000  # packed fp8 store
 
     # Stage input tensor pair into VMEM.
     DMA.LOAD x6, x20, x12, 0

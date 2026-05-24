@@ -1,6 +1,6 @@
 # dma_lsu_stall_mixed.S - DMA mixed directions under repeated LSU grant stalls
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_lsu_stall_mixed.py
 #
 # Baremetal cannot force TileLink D-channel reordering; that needs a harness or
@@ -11,28 +11,29 @@
 #   - scalar loads repeatedly hit the same banks as DMA STORE VMEM reads
 #   - final checks prove both load-data and store-data slots retire correctly
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
 # ============================================================================
-# Prefill VMEM banks 4..7. These become the source tiles for mixed-burst stores.
+# Prefill VMEM banks 4..5. Two tiles per bank become the source tiles for the
+# mixed-burst DMA.STORE half.
 # ============================================================================
 
-    LI    x6, 131072
-    ADDI  x10, x0, 0
+    LI    x6, 262144
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
 
-    LI    x6, 163840
-    LI    x10, 0x0400
+    LI    x6, 262400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1
 
-    LI    x6, 196608
-    LI    x10, 0x0800
+    LI    x6, 327680
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 2
 
-    LI    x6, 229376
-    LI    x10, 0x0c00
+    LI    x6, 327936
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 3
 
     DMA.WAIT  0
@@ -43,55 +44,56 @@
 # Scalar scratch byte addresses. Each one is in the same bank as a DMA region
 # but outside the 1024-byte DMA tile being checked.
     LI    x20, 0x00800       # bank 0 scratch
-    LI    x21, 0x20800       # bank 1 scratch
-    LI    x22, 0x40800       # bank 2 scratch
-    LI    x23, 0x60800       # bank 3 scratch
-    LI    x24, 0x80800       # bank 4 scratch
-    LI    x25, 0xA0800       # bank 5 scratch
-    LI    x26, 0xC0800       # bank 6 scratch
-    LI    x27, 0xE0800       # bank 7 scratch
+    LI    x21, 0x40800       # bank 1 scratch
+    LI    x22, 0x80800       # bank 2 scratch
+    LI    x23, 0xC0800       # bank 3 scratch
+    LI    x24, 0x100800      # bank 4 scratch, slot 0
+    LI    x25, 0x101800      # bank 4 scratch, slot 1
+    LI    x26, 0x140800      # bank 5 scratch, slot 0
+    LI    x27, 0x141800      # bank 5 scratch, slot 1
     LI    x13, 0xCAFED00D
     LI    x18, 24
 
 # ============================================================================
-# Mixed DMA burst: LOADs target banks 0..3, STOREs source banks 4..7.
+# Mixed DMA burst: LOADs target banks 0..3, STOREs source banks 4..5
+# (two tiles per bank).
 # ============================================================================
 
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 0
 
-    LI    x6, 131072
-    LI    x10, 0x3000
+    LI    x6, 262144
+    LI    x10, 0x90003000
     DMA.STORE x10, x6, x12, 1
 
-    LI    x6, 32768
-    LI    x10, 0x1400
+    LI    x6, 65536
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 2
 
-    LI    x6, 163840
-    LI    x10, 0x3400
+    LI    x6, 262400
+    LI    x10, 0x90003400
     DMA.STORE x10, x6, x12, 3
 
-    LI    x6, 65536
-    LI    x10, 0x1800
+    LI    x6, 131072
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 4
 
-    LI    x6, 196608
-    LI    x10, 0x3800
+    LI    x6, 327680
+    LI    x10, 0x90003800
     DMA.STORE x10, x6, x12, 5
 
-    LI    x6, 98304
-    LI    x10, 0x1c00
+    LI    x6, 196608
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 6
 
-    LI    x6, 229376
-    LI    x10, 0x3c00
+    LI    x6, 327936
+    LI    x10, 0x90003C00
     DMA.STORE x10, x6, x12, 7
 
 # ============================================================================
 # LSU pressure loop. Stores deny DMA write grants on banks 0..3; loads deny DMA
-# read grants on banks 4..7. Each scalar load uses DELAY 2 so the loop respects
+# read grants on banks 4..5. Each scalar load uses DELAY 2 so the loop respects
 # the longer fixed scalar-load latency.
 # ============================================================================
 
@@ -125,19 +127,19 @@ lsu_stall_loop:
 
 # Store the four DMA-loaded tiles back out so the LOAD half is checked.
     ADDI  x6, x0, 0
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x6, x12, 0
 
-    LI    x6, 32768
-    LI    x10, 0x4400
+    LI    x6, 65536
+    LI    x10, 0x90004400
     DMA.STORE x10, x6, x12, 1
 
-    LI    x6, 65536
-    LI    x10, 0x4800
+    LI    x6, 131072
+    LI    x10, 0x90004800
     DMA.STORE x10, x6, x12, 2
 
-    LI    x6, 98304
-    LI    x10, 0x4c00
+    LI    x6, 196608
+    LI    x10, 0x90004C00
     DMA.STORE x10, x6, x12, 3
 
     DMA.WAIT  0

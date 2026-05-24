@@ -1,6 +1,6 @@
 # dma_stress.S — DMA stress: copy 16 matrices via loop
 # @TIMEOUT 300000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_stress.py 1300
 #
 # Each iteration: DRAM → VMEM[0] → DRAM
@@ -8,9 +8,9 @@
     LI    x2, 0              # loop counter
     LI    x3, 16             # count
     LI    x11, 1024          # bytes per matrix
-    LI    x16, 0             # src DRAM byte offset
-    LI    x17, 16384         # dst DRAM byte offset
-    LI    x5,  0x00000001
+    LI    x16, 0x90000000  # src DRAM byte offset
+    LI    x17, 0x90004000  # dst DRAM byte offset
+    LI    x5, 0x00000000
     DMA.CONFIG  x5, 0
 
     ADDI  x6, x0, 0         # VMEM word address = 0 (staging)

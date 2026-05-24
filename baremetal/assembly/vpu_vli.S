@@ -1,7 +1,7 @@
 # vpu_vli.S — VPU vector load immediate operations
 # Tests: vli.all, vli.row, vli.col, vli.one
 # @TIMEOUT 20000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_vli.py
 #
 # VLI instructions write an immediate BF16 constant into a tensor
@@ -28,7 +28,7 @@
 #   [0x1C00..0x1FFF]  vli.one  m5 output        (1024 B)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
@@ -45,11 +45,11 @@
     VSTORE 5, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x0000
+    LI    x3, 0x90000000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 256
-    LI    x3, 0x0400
+    LI    x3, 0x90000400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -69,11 +69,11 @@
     VSTORE 5, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x0800
+    LI    x3, 0x90000800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 256
-    LI    x3, 0x0C00
+    LI    x3, 0x90000C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -93,11 +93,11 @@
     VSTORE 5, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 256
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -117,11 +117,11 @@
     VSTORE 5, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 256
-    LI    x3, 0x1C00
+    LI    x3, 0x90001C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

@@ -1,6 +1,6 @@
 # vpu_overlap_lut_pack_reduce.S - overlapped VPU LUT/pack/reduce chain
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_overlap_lut_pack_reduce.py
 #
 # Coverage intent:
@@ -23,17 +23,17 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
     # Load input A into VMEM[0..511] and m0/m1.
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
     LI    x6, 256
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
     ADDI  x6, x0, 0
@@ -44,11 +44,11 @@
 
     # Load input B into VMEM[512..1023] and m2/m3.
     LI    x6, 512
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
     LI    x6, 768
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD x6, x10, x12, 0
     DMA.WAIT 0
     LI    x6, 512
@@ -100,7 +100,7 @@
     LI    x8, 1024
     VSTORE 28, x8, 0
     DELAY 33
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
 
@@ -108,13 +108,13 @@
     LI    x8, 1280
     VSTORE 30, x8, 0
     DELAY 33
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
     LI    x8, 1536
     VSTORE 31, x8, 0
     DELAY 33
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
 
@@ -122,13 +122,13 @@
     LI    x8, 1792
     VSTORE 26, x8, 0
     DELAY 33
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
     LI    x8, 2048
     VSTORE 27, x8, 0
     DELAY 33
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
 
@@ -136,13 +136,13 @@
     LI    x8, 2304
     VSTORE 32, x8, 0
     DELAY 33
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
     LI    x8, 2560
     VSTORE 33, x8, 0
     DELAY 33
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
 

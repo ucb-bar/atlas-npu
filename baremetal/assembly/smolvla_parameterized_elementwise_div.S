@@ -2,7 +2,7 @@
 # Atlas has no dedicated divide; synthesize as A * vrecip(B).
 # Port of jrmills20 parameterized_elementwise_div.py.
 # @TIMEOUT 1500000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_smolvla_parameterized_elementwise_div.py
 #
 # Shape: M=128, N=128 → M_tiles=4, N_tiles=4, total_tiles=16. Tile-major order.
@@ -13,7 +13,7 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
     LI    x21, 0x8000
@@ -22,8 +22,10 @@
 
     ADDI  x10, x0, 0
 
+    LUI   x15, 0x90000         # FPGA DRAM offset 0x9000_0000
 tile_loop:
     SLLI  x20, x10, 11
+    ADD   x20, x20, x15        # x20 += FPGA DRAM base
 
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0

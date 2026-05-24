@@ -1,6 +1,6 @@
 # perf_mm_mxu0_64x64x64.S — single-MXU (M=64, N=64, K=64) tiled matmul perf test
 # @TIMEOUT 400000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_mm_mxu0_64x64x64.py 500
 # @PERF_REPORT
 # @PERF_MACS_MXU0 262144
@@ -84,7 +84,7 @@
 #   x20 start-cycle snapshot         x21  end-cycle snapshot
 #   x22 cycle delta (→ CSR_DBG1)     x30  completion signal
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127                    # scale reg 0 = 0x7F → unit scale
@@ -95,7 +95,7 @@
 
     # A00 → m0
     ADDI  x6, x0, 0
-    LI    x10, 0x0000
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -104,7 +104,7 @@
 
     # A01 → m1
     ADDI  x6, x0, 0
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -113,7 +113,7 @@
 
     # A10 → m2
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -122,7 +122,7 @@
 
     # A11 → m3
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -131,7 +131,7 @@
 
     # B00_T → m4
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -140,7 +140,7 @@
 
     # B01_T → m5
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -149,7 +149,7 @@
 
     # B10_T → m6
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -158,7 +158,7 @@
 
     # B11_T → m7
     ADDI  x6, x0, 0
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -235,7 +235,7 @@
     VSTORE 8, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x2000
+    LI    x3, 0x90002000
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -244,7 +244,7 @@
     VSTORE 9, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x2400
+    LI    x3, 0x90002400
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -253,7 +253,7 @@
     VSTORE 10, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x2800
+    LI    x3, 0x90002800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 
@@ -262,7 +262,7 @@
     VSTORE 11, x8, 0
     DELAY 33
     LI    x8, 0
-    LI    x3, 0x2C00
+    LI    x3, 0x90002C00
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 

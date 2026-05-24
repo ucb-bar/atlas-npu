@@ -1,6 +1,6 @@
 # perf_vec_layernorm_32x32.S — row-wise layer norm on BF16 32×32 tile
 # @TIMEOUT 20000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_perf_vec_layernorm_32x32.py
 # @PERF_REPORT
 #
@@ -30,7 +30,7 @@
 # actual = 605 (without vload/vstore)
 # utilization = 84.6%
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 2048
 
@@ -39,7 +39,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 0x20000000         # VMEM base address
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x12, 0
     DMA.WAIT  0
 
@@ -107,7 +107,7 @@
 
 
     LI    x8, 0
-    LI    x3, 0x0800
+    LI    x3, 0x90000800
     DMA.STORE x3, x8, x12, 1
     DMA.WAIT  1
 

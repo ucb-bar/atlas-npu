@@ -163,6 +163,7 @@ class DmaEngine(
 
   val requestBeatCount    = RegInit(0.U(beatCountBits.W))
   val requestBeatsNeeded  = commandQueue(requestIdx).transferSize >> log2Ceil(beatBytes).U
+  val cmdTransferBeats    = io.command.bits.transferSize >> log2Ceil(beatBytes).U
 
   val nextSourceId    = RegInit(0.U(tagBits.W))
   val currentInFlight = tlAdapter.io.inFlightCount
@@ -211,6 +212,13 @@ class DmaEngine(
   // ==========================================================================
   // Command enqueueing
   // ==========================================================================
+
+  assert(!(io.command.valid && io.command.bits.vmemLineAddr >= vmemP.numLines.U),
+    "ASSERT FAIL: DMA base VMEM line address exceeds VMEM capacity")
+  assert(!(io.command.valid &&
+           ((cmdTransferBeats === 0.U) ||
+            (io.command.bits.vmemLineAddr + cmdTransferBeats - 1.U) >= vmemP.numLines.U)),
+    "ASSERT FAIL: DMA VMEM transfer range exceeds VMEM capacity")
 
   when(io.command.valid) {
     commandQueue(enqueueIdx)               := io.command.bits

@@ -1,7 +1,7 @@
 # mreg_cross_engine_full_rotor.S - drive MREG tracker with XLU + VPU traffic
 #                                   on every bank index in 0..63
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mreg_cross_engine_full_rotor.py
 #
 # Coverage intent (cov_overall.modinfo.txt):
@@ -51,7 +51,7 @@
 #     0x1000..0x13FF   final VSTORE drain (oracle: equals input tile)
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024              # 1 KiB tile size
 
@@ -60,7 +60,7 @@
 #          VLOAD m0 from VMEM bank 0.
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD x6, x1, x12, 0
     DMA.WAIT 0
 
@@ -290,7 +290,7 @@
     DELAY 33
 
     LI    x8, 256                # VMEM word base of output region
-    LI    x10, 0x1000            # DRAM byte offset
+    LI    x10, 0x90001000  # DRAM byte offset
     DMA.STORE x10, x8, x12, 1
     DMA.WAIT 1
 

@@ -327,16 +327,19 @@ def emit_json(first_op_names: list[str]) -> str:
     )
 
 
+FPGA_DRAM_BASE = 0x90000000  # FPGA DRAM window starts here (lower-32 byte addr)
+
+
 def _emit_bf16_pair_load(lines: list[str], name: str, dram_base_bytes: int, vmem_base_words: int, dst_bank: int) -> None:
     lines.extend(
         [
             f"    # Load {name} -> m{dst_bank},m{dst_bank + 1}",
             f"    LI    x6, {vmem_base_words}",
-            f"    LI    x1, 0x{dram_base_bytes:04X}",
+            f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes:08X}",
             "    DMA.LOAD  x6, x1, x2, 0",
             "    DMA.WAIT  0",
             f"    LI    x6, {vmem_base_words + 256}",
-            f"    LI    x1, 0x{dram_base_bytes + INPUT_BANK_BYTES:04X}",
+            f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes + INPUT_BANK_BYTES:08X}",
             "    DMA.LOAD  x6, x1, x2, 0",
             "    DMA.WAIT  0",
             f"    LI    x6, {vmem_base_words}",
@@ -354,7 +357,7 @@ def _emit_single_bank_load(lines: list[str], name: str, dram_base_bytes: int, vm
         [
             f"    # Load {name} -> m{dst_bank}",
             f"    LI    x6, {vmem_base_words}",
-            f"    LI    x1, 0x{dram_base_bytes:04X}",
+            f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes:08X}",
             "    DMA.LOAD  x6, x1, x2, 0",
             "    DMA.WAIT  0",
             f"    LI    x6, {vmem_base_words}",
@@ -381,7 +384,7 @@ def _emit_signature_store(lines: list[str], bank: int, scratch_words: int, dram_
             f"    VSTORE {bank}, x8, 0",
             f"    DELAY {VSTORE_DELAY}",
             f"    LI    x8, {scratch_words}",
-            f"    LI    x3, 0x{dram_off_bytes:04X}",
+            f"    LI    x3, 0x{FPGA_DRAM_BASE + dram_off_bytes:08X}",
             "    DMA.STORE x3, x8, x21, 1",
             "    DMA.WAIT  1",
         ]
@@ -399,10 +402,10 @@ def emit_assembly(test_name: str, title: str, first_op_names: list[str]) -> str:
         "# because the current FSM never accepts them into the overlap slot.",
         f"# Cases in this file: {len(cases)}",
         f"# @TIMEOUT {TIMEOUT}",
-        "# @DRAM_BASE 0x00000001",
+        "# @DRAM_BASE 0x90000000",
         f"# @PYTHON_GEN gen_{test_name}.py",
         "#",
-        "# DRAM inputs:",
+        "# DRAM inputs (offsets relative to FPGA DRAM base 0x9000_0000):",
         "#   [0x0000..0x07FF]  safe slot1 BF16 tensor pair",
         "#   [0x0800..0x0FFF]  signed slot1 BF16 tensor pair",
         "#   [0x1000..0x17FF]  safe slot2 BF16 tensor pair",
@@ -413,7 +416,7 @@ def emit_assembly(test_name: str, title: str, first_op_names: list[str]) -> str:
         "#   slot1 low, slot1 high, slot2 low, slot2 high",
         "",
         "    ADDI  x28, x0, 1",
-        "    LI    x5, 0x00000001",
+        "    LI    x5, 0x00000000",
         "    DMA.CONFIG x5, 0",
         f"    LI    x2, {INPUT_COPY_SIZE_WORDS}",
         f"    LI    x21, {SIGNATURE_COPY_SIZE_WORDS}",

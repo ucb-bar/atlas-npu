@@ -1,6 +1,6 @@
 # dma_compute_control_serialized_pipeline.S
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dma_compute_control_serialized_pipeline.py
 #
 # Coverage intent:
@@ -22,13 +22,13 @@
 
     ADDI  x28, x0, 1
 
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
 
     LI    x2, 0              # loop counter
     LI    x3, 2              # trip count
-    LI    x16, 0x0000        # src DRAM byte offset
-    LI    x17, 0x2000        # dst DRAM byte offset
+    LI    x16, 0x90000000  # src DRAM byte offset
+    LI    x17, 0x90002000  # dst DRAM byte offset
     LI    x12, 2048          # bytes per BF16 tile pair
     LI    x18, 0x0800        # per-iter DRAM stride (reg: 0x800 > ADDI signed-12 max → would sign-extend to -2048).
 

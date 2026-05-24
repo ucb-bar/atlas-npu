@@ -1,7 +1,7 @@
 # vpu_unary_simple.S — VPU simple unary operations integration test
 # Tests: vmov, vrelu.bf16, vrecip.bf16, vsquare.bf16, vcube.bf16
 # @TIMEOUT 30000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_unary_simple.py
 #
 # DRAM layout:
@@ -15,17 +15,17 @@
 # Mreg: m0,m1 = A    m4,m5 = result
 
     ADDI  x28, x0, 1
-    LI    x5, 0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x2, 1024
 
     # ── Load Input A → m0,m1 ──
     ADDI  x6, x0, 0
-    ADDI  x1, x0, 0
+    LI    x1, 0x90000000
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     LI    x6, 256
-    LI    x1, 1024
+    LI    x1, 0x90000400
     DMA.LOAD  x6, x1, x2, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -46,11 +46,11 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x8, 1024
-    LI    x3, 0x0800
+    LI    x3, 0x90000800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x0C00
+    LI    x3, 0x90000C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -66,11 +66,11 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x8, 1024
-    LI    x3, 0x1000
+    LI    x3, 0x90001000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x1400
+    LI    x3, 0x90001400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -86,11 +86,11 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x8, 1024
-    LI    x3, 0x1800
+    LI    x3, 0x90001800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x1C00
+    LI    x3, 0x90001C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -106,11 +106,11 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x8, 1024
-    LI    x3, 0x2000
+    LI    x3, 0x90002000
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x2400
+    LI    x3, 0x90002400
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 
@@ -126,11 +126,11 @@
     VSTORE 5, x8, 8
     DELAY 33
     LI    x8, 1024
-    LI    x3, 0x2800
+    LI    x3, 0x90002800
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
     LI    x8, 1280
-    LI    x3, 0x2C00
+    LI    x3, 0x90002C00
     DMA.STORE x3, x8, x2, 1
     DMA.WAIT  1
 

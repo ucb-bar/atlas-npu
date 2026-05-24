@@ -47,7 +47,8 @@ object AtlasMemMap {
   val CSR_ADDR_BITS   = log2Ceil(CSR_WINDOW_SIZE)
 
   val VMEM_BASE      = 0x2000_0000L
-  val VMEM_SIZE      = 0x0010_0000  // 1 MiB
+  val VMEM_SIZE      = 0x0018_0000  // 1.5 MiB
+  val VMEM_NUM_BANKS = 6
 
   val DRAM_BASE      = 0x8000_0000L
 }

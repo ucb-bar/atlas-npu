@@ -1,6 +1,6 @@
 # dual_mxu_pipeline_vpu.S — MXU0 + MXU1 pipelined K=64, VPU interleaved
 # @TIMEOUT 800000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_dual_mxu_pipeline_vpu.py 500
 #
 # Both MXUs perform 2-k-tile (K=64) matmuls with weight double-buffering
@@ -71,7 +71,7 @@
 #   0x4C00  diff bank0     (1024B BF16) — vsub(C0,C1)
 #   0x5000  diff bank1     (1024B BF16)
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
     SELI  0, 127
@@ -82,7 +82,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x1800
+    LI    x10, 0x90001800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -98,19 +98,19 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    LI    x10, 0x1C00
+    LI    x10, 0x90001C00
     DMA.LOAD  x6, x10, x12, 0
 
     LI    x7, 256
-    LI    x10, 0x2000
+    LI    x10, 0x90002000
     DMA.LOAD  x7, x10, x12, 1
 
     LI    x8, 512
-    LI    x10, 0x2400
+    LI    x10, 0x90002400
     DMA.LOAD  x8, x10, x12, 2
 
     LI    x9, 768
-    LI    x10, 0x2800
+    LI    x10, 0x90002800
     DMA.LOAD  x9, x10, x12, 3
 
     DMA.WAIT  0
@@ -137,7 +137,7 @@
 
     # W0_A → VMEM[0] → m2 → XLU → m3
     ADDI  x6, x0, 0
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -152,7 +152,7 @@
 
     # Preload W0_B (k=1) → m4 → XLU → m5
     ADDI  x6, x0, 0
-    LI    x10, 0x0C00
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -167,7 +167,7 @@
 
     # W1_A → VMEM[0] → m6 → XLU → m7
     ADDI  x6, x0, 0
-    LI    x10, 0x1000
+    LI    x10, 0x90001000
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -182,7 +182,7 @@
 
     # Preload W1_B (k=1) → m8 → XLU → m9
     ADDI  x6, x0, 0
-    LI    x10, 0x1400
+    LI    x10, 0x90001400
     DMA.LOAD  x6, x10, x12, 1
     DMA.WAIT  1
     ADDI  x6, x0, 0
@@ -196,7 +196,7 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0              # DRAM 0x0000: X[:,0:32]
+    LI    x10, 0x90000000  # DRAM 0x0000: X[:,0:32]
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -229,7 +229,7 @@
     DELAY 64
 
     ADDI  x6, x0, 0
-    LI    x10, 0x0400             # DRAM 0x0400: X[:,32:64]
+    LI    x10, 0x90000400  # DRAM 0x0400: X[:,32:64]
     DMA.LOAD  x6, x10, x12, 0
     DMA.WAIT  0
     ADDI  x6, x0, 0
@@ -264,10 +264,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3C00
+    LI    x10, 0x90003C00
     DMA.STORE x10, x8, x12, 2
     LI    x9, 768
-    LI    x10, 0x4000
+    LI    x10, 0x90004000
     DMA.STORE x10, x9, x12, 3
     DMA.WAIT  2
     DMA.WAIT  3
@@ -284,10 +284,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4400
+    LI    x10, 0x90004400
     DMA.STORE x10, x8, x12, 2
     LI    x9, 768
-    LI    x10, 0x4800
+    LI    x10, 0x90004800
     DMA.STORE x10, x9, x12, 3
     DMA.WAIT  2
     DMA.WAIT  3
@@ -315,10 +315,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x2C00
+    LI    x10, 0x90002C00
     DMA.STORE x10, x8, x12, 0
     LI    x9, 768
-    LI    x10, 0x3000
+    LI    x10, 0x90003000
     DMA.STORE x10, x9, x12, 1
     DMA.WAIT  0
     DMA.WAIT  1
@@ -335,10 +335,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x3400
+    LI    x10, 0x90003400
     DMA.STORE x10, x8, x12, 0
     LI    x9, 768
-    LI    x10, 0x3800
+    LI    x10, 0x90003800
     DMA.STORE x10, x9, x12, 1
     DMA.WAIT  0
     DMA.WAIT  1
@@ -359,10 +359,10 @@
     DELAY 33
 
     LI    x8, 512
-    LI    x10, 0x4C00
+    LI    x10, 0x90004C00
     DMA.STORE x10, x8, x12, 2
     LI    x9, 768
-    LI    x10, 0x5000
+    LI    x10, 0x90005000
     DMA.STORE x10, x9, x12, 3
     DMA.WAIT  2
     DMA.WAIT  3

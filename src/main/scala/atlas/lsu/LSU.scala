@@ -59,6 +59,13 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   private val mregRows    = mregP.mregRows
   private val tensorLineBits = log2Ceil(mregRows)
 
+  private def tensorTransferStaysInOneBank(baseLineAddr: UInt): Bool = {
+    val lastLineAddr = baseLineAddr + (mregRows - 1).U
+    (baseLineAddr < vmemP.numLines.U) &&
+    (lastLineAddr < vmemP.numLines.U) &&
+    (vmemP.getBankIdx(baseLineAddr) === vmemP.getBankIdx(lastLineAddr))
+  }
+
   val io = IO(new Bundle {
     val scalarCmd  = Flipped(Valid(new LsuScalarCmd(vmemP)))
     val scalarResp = Valid(UInt(32.W))
@@ -101,6 +108,9 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val scalarFullByteAddr = io.scalarCmd.bits.byteAddr
   val scalarLineAddr     = scalarFullByteAddr(vmemP.byteAddrBits - 1, lineOffBits)
 
+  assert(!(issueScalarLoad && scalarFullByteAddr >= vmemP.capacityBytes.U),
+    "ASSERT FAIL: scalar load address exceeds VMEM capacity")
+
   io.vmemScalarRead.valid          := issueScalarLoad
   io.vmemScalarRead.bits.bankIdx   := vmemP.getBankIdx(scalarLineAddr)
   io.vmemScalarRead.bits.bankAddr  := vmemP.getBankAddr(scalarLineAddr)
@@ -131,6 +141,9 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val issueScalarStore = io.scalarCmd.valid && io.scalarCmd.bits.isStore
   val storeLineAddr    = scalarFullByteAddr(vmemP.byteAddrBits - 1, lineOffBits)
   val storeWordIdx     = scalarFullByteAddr(lineOffBits - 1, 2)
+
+  assert(!(issueScalarStore && scalarFullByteAddr >= vmemP.capacityBytes.U),
+    "ASSERT FAIL: scalar store address exceeds VMEM capacity")
 
   io.vmemScalarWrite.valid         := issueScalarStore
   io.vmemScalarWrite.bits.bankIdx  := vmemP.getBankIdx(storeLineAddr)
@@ -194,6 +207,12 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   assert(!(issueVstoreCmd &&
            io.cmd.bits.vmemLineAddr(tensorLineBits - 1, 0) =/= 0.U),
     "ASSERT FAIL: VSTORE base must be 1 KiB aligned for block banking")
+  assert(!(issueVloadCmd &&
+           !tensorTransferStaysInOneBank(io.cmd.bits.vmemLineAddr)),
+    "ASSERT FAIL: VLOAD range must stay within one VMEM bank")
+  assert(!(issueVstoreCmd &&
+           !tensorTransferStaysInOneBank(io.cmd.bits.vmemLineAddr)),
+    "ASSERT FAIL: VSTORE range must stay within one VMEM bank")
 
   // ── Vector port defaults ──
   val vloadLineAddr  = vloadVmemBase + vloadCounter

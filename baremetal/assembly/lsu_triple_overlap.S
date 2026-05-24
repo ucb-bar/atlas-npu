@@ -1,29 +1,29 @@
 # lsu_triple_overlap.S — scalar + VLOAD + VSTORE overlap on split LSU paths
 # @TIMEOUT 200000
-# @DRAM_BASE 0x00000001
+# @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_lsu_triple_overlap.py
 #
 # This test exercises two overlap windows without any inter-vector waits:
 #   Phase 1: scalar stores + VLOAD + VSTORE
 #   Phase 2: scalar loads  + VLOAD + VSTORE
 #
-# The schedule is bank-safe by construction under 128 KiB block banking:
-#   - Phase 1 scalar stores target bank 6 while VLOAD/VSTORE use banks 0/4.
-#   - Phase 2 scalar loads target bank 2 while VLOAD/VSTORE use banks 3/7.
+# The VMEM addresses below keep the low-bank source tiles compact while moving
+# the overlap destinations into higher banks. Under the current 256 KiB /
+# 65 536-word banking, the residency is:
 #
-# VMEM regions (word addresses / byte addresses):
-#   tile_A            0      /      0      bank 0 slot 0
-#   tile_B            32768  / 131072      bank 1 slot 0
-#   scalar_ld_src     65536  / 262144      bank 2 slot 0
-#   tile_C            98304  / 393216      bank 3 slot 0
-#   out_store_1       131072 / 524288      bank 4 slot 0
-#   out_load_1        163840 / 655360      bank 5 slot 0
-#   scalar_store_out  196608 / 786432      bank 6 slot 0
-#   out_store_2       229376 / 917504      bank 7 slot 0
-#   out_load_2        131328 / 525312      bank 4 slot 1
-#   scalar_load_out   229632 / 918528      bank 7 slot 1
+# VMEM regions (word addresses / byte addresses / current bank):
+#   tile_A            0      /      0      bank 0
+#   tile_B            32768  / 131072      bank 0
+#   scalar_ld_src     65536  / 262144      bank 1
+#   tile_C            131072 / 524288      bank 2
+#   out_store_1       163840 / 655360      bank 2
+#   out_load_1        196608 / 786432      bank 3
+#   scalar_store_out  262144 / 1048576     bank 4
+#   out_store_2       327680 / 1310720     bank 5
+#   out_load_2        196864 / 787456      bank 3
+#   scalar_load_out   262400 / 1049600     bank 4
 
-    LI    x5,  0x00000001
+    LI    x5, 0x00000000
     DMA.CONFIG x5, 0
     LI    x12, 1024
 
@@ -32,27 +32,27 @@
 # ──────────────────────────────────────────────────────────────
 
     ADDI  x6, x0, 0
-    ADDI  x10, x0, 0
+    LI    x10, 0x90000000
     DMA.LOAD  x6, x10, x12, 0      # tile_A
     LI    x6, 32768
-    LI    x10, 0x0400
+    LI    x10, 0x90000400
     DMA.LOAD  x6, x10, x12, 1      # tile_B
     LI    x6, 65536
-    LI    x10, 0x0800
+    LI    x10, 0x90000800
     DMA.LOAD  x6, x10, x12, 2      # scalar load source
-    LI    x6, 98304
-    LI    x10, 0x0C00
+    LI    x6, 131072
+    LI    x10, 0x90000C00
     DMA.LOAD  x6, x10, x12, 3      # tile_C
     DMA.WAIT  0
     DMA.WAIT  1
     DMA.WAIT  2
     DMA.WAIT  3
 
-    LI    x10, 0x1000
-    LI    x6, 196608
+    LI    x10, 0x90001000
+    LI    x6, 262144
     DMA.LOAD  x6, x10, x12, 0      # scalar_store_out <- zeros
     DMA.WAIT  0
-    LI    x6, 229632
+    LI    x6, 262400
     DMA.LOAD  x6, x10, x12, 0      # scalar_load_out <- zeros
     DMA.WAIT  0
 
@@ -60,7 +60,7 @@
 # Scalar helper addresses and constants
 # ──────────────────────────────────────────────────────────────
 
-    LI    x20, 786432              # scalar_store_out byte base
+    LI    x20, 1048576             # scalar_store_out byte base
     LI    x21, 0x11111111
     LI    x22, 0x22222222
     LI    x23, 0x33333333
@@ -70,7 +70,7 @@
     LI    x27, 0x77777777
     LI    x28, 0x88888888
     LI    x29, 262144              # scalar_ld_src byte base
-    LI    x30, 918528              # scalar_load_out byte base
+    LI    x30, 1049600             # scalar_load_out byte base
 
 # ──────────────────────────────────────────────────────────────
 # Preload m1 from tile_B so both overlap phases can VSTORE from it.
@@ -86,7 +86,7 @@
 
     ADDI  x6, x0, 0
     VLOAD 0, x6, 0
-    LI    x6, 131072
+    LI    x6, 163840
     VSTORE 1, x6, 0
     SW    x21, x20, 0
     SW    x22, x20, 4
@@ -98,7 +98,7 @@
     SW    x28, x20, 28
     DELAY 24
 
-    LI    x6, 163840
+    LI    x6, 196608
     VSTORE 0, x6, 0
     DELAY 32
 
@@ -106,9 +106,9 @@
 # PHASE 2: scalar loads + VLOAD(tile_C) + VSTORE(m1 -> out_store_2)
 # ──────────────────────────────────────────────────────────────
 
-    LI    x6, 98304
+    LI    x6, 131072
     VLOAD 2, x6, 0
-    LI    x6, 229376
+    LI    x6, 327680
     VSTORE 1, x6, 0
     LW    x14, x29, 0
     DELAY 2
@@ -120,7 +120,7 @@
     DELAY 2
     DELAY 24
 
-    LI    x6, 131328
+    LI    x6, 196864
     VSTORE 2, x6, 0
     DELAY 32
 
@@ -133,33 +133,33 @@
 # PHASE 3: DMA.STORE outputs back to DRAM for checking
 # ──────────────────────────────────────────────────────────────
 
-    LI    x6, 131072
-    LI    x10, 0x1400
+    LI    x6, 163840
+    LI    x10, 0x90001400
     DMA.STORE x10, x6, x12, 0      # out_store_1 = tile_B
     DMA.WAIT  0
 
-    LI    x6, 163840
-    LI    x10, 0x1800
+    LI    x6, 196608
+    LI    x10, 0x90001800
     DMA.STORE x10, x6, x12, 0      # out_load_1 = tile_A
     DMA.WAIT  0
 
-    LI    x6, 196608
-    LI    x10, 0x1C00
+    LI    x6, 262144
+    LI    x10, 0x90001C00
     DMA.STORE x10, x6, x12, 0      # scalar_store_out
     DMA.WAIT  0
 
-    LI    x6, 229376
-    LI    x10, 0x2000
+    LI    x6, 327680
+    LI    x10, 0x90002000
     DMA.STORE x10, x6, x12, 0      # out_store_2 = tile_B
     DMA.WAIT  0
 
-    LI    x6, 131328
-    LI    x10, 0x2400
+    LI    x6, 196864
+    LI    x10, 0x90002400
     DMA.STORE x10, x6, x12, 0      # out_load_2 = tile_C
     DMA.WAIT  0
 
-    LI    x6, 229632
-    LI    x10, 0x2800
+    LI    x6, 262400
+    LI    x10, 0x90002800
     DMA.STORE x10, x6, x12, 0      # scalar_load_out
     DMA.WAIT  0
 
