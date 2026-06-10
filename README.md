@@ -1,4 +1,4 @@
-# Sp26 Atlas Accelerator
+# Atlas NPU
 
 ## Getting Started
 
