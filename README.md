@@ -36,5 +36,6 @@ make verilog
 Running test:
 
 ```bash
-make test
+cd baremetal
+make test-all
 ```
