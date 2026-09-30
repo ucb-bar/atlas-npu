@@ -10,7 +10,7 @@
 # Cleaning:
 #   cmake --build ./build/ --target clean
 ########################################################################################################################
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 
 project(atlas-baremetal LANGUAGES C)
 
@@ -121,6 +121,14 @@ foreach(_asm IN LISTS _ATLAS_ASM)
         list(APPEND _atlas_skip "${_stem}")
     endif()
 endforeach()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/../dispatcher/dispatcher.cmake")
+add_executable(atlas_dispatcher "${ATLAS_DISPATCHER_TEST_DIR}/test_dispatcher.c")
+atlas_use_dispatcher(atlas_dispatcher)
+add_dump_target(atlas_dispatcher)
+list(APPEND _atlas_combo_targets atlas_dispatcher)
+list(APPEND _atlas_smoke_targets atlas_dispatcher)
+math(EXPR _atlas_n "${_atlas_n}+1")
 
 if(_atlas_skip)
     string(REPLACE ";" ", " _skip_msg "${_atlas_skip}")

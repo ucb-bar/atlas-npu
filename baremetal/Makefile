@@ -14,8 +14,9 @@ ASM_DIR   := $(CURDIR)/assembly
 
 .DEFAULT_GOAL := cicd
 
-TESTS := $(patsubst $(ASM_DIR)/%.S,%,$(wildcard $(ASM_DIR)/*.S))
-GENERATED_C := $(patsubst %,$(TESTS_DIR)/atlas_%.c,$(TESTS))
+ASM_TESTS := $(patsubst $(ASM_DIR)/%.S,%,$(wildcard $(ASM_DIR)/*.S))
+TESTS := $(ASM_TESTS) dispatcher
+GENERATED_C := $(patsubst %,$(TESTS_DIR)/atlas_%.c,$(ASM_TESTS))
 
 # ── Sim infra ─────────────────────────────────────────────────────────
 VCS_DIR_ABS  := $(CHIPYARD_ROOT)/sims/vcs
@@ -41,7 +42,7 @@ SIM_OUTPUT_DIR := $(VCS_DIR_ABS)/output/chipyard.harness.TestHarness.$(CONFIG)
 # `make test-perf` to sweep every perf_* test, `make test-smolvla` for smolvla_*, etc.
 TEST_GROUPS := $(sort $(foreach t,$(TESTS),$(firstword $(subst _, ,$(t)))))
 
-.PHONY: cicd build-assembly clean help list-tests list-groups _sim-% test-all simv status-% status-all $(TESTS)
+.PHONY: cicd build-assembly clean help list-tests list-groups _sim-% test-all simv status-% status-dispatcher status-all $(TESTS)
 
 cicd: build-assembly
 	mv "$(BUILD_DIR)"/*.riscv "$(CURDIR)/"
@@ -59,6 +60,16 @@ $(TESTS): %: $(BUILD_DIR)/atlas_%.riscv
 
 $(BUILD_DIR)/CMakeCache.txt:
 	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
+
+# Handwritten host-driven test: CMake tracks the assembly/image/header inputs.
+# Always consult it so dependency changes are not hidden behind this wrapper.
+.PHONY: dispatcher-build
+dispatcher-build:
+	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
+	MAKEFLAGS= cmake --build $(BUILD_DIR) --target atlas_dispatcher
+
+$(BUILD_DIR)/atlas_dispatcher.riscv: dispatcher-build
+	@:
 
 # Lazy-reconfigure: if this test's .c is newer than CMakeCache, rerun cmake
 # configure (handles "new test added since last configure" without forcing all
@@ -102,6 +113,9 @@ simv:
 	$(MAKE) -C $(VCS_DIR_ABS) CONFIG=$(CONFIG) default
 
 # Per-test pipeline-cache report. Prints which stages are already up-to-date.
+status-dispatcher:
+	@echo 'dispatcher: handwritten host harness; CMake tracks instruction images and C dependencies'
+
 status-%:
 	@NAME=$* GEN_DIR=$(GEN_DIR) TESTS_DIR=$(TESTS_DIR) \
 	 ASM_DIR=$(ASM_DIR) BUILD_DIR=$(BUILD_DIR) SIMV=$(SIMV) \
@@ -214,7 +228,7 @@ help:
 	@echo "  $(SIM_OUTPUT_DIR)/atlas_<name>.log"
 
 list-tests:
-	@echo "Detected tests:"
+	@echo "Detected tests (assembly kernels and host-driven dispatcher):"
 	@for test in $(TESTS); do echo "  - $$test"; done
 
 list-groups:
