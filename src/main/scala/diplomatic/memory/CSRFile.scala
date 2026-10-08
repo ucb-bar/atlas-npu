@@ -13,6 +13,13 @@ TileLink byte-address map within the first 0x1C bytes of the CSR window:
   0x14  dbg1               (RW)
   0x18  execControl        (RW — bit 0: 1=start, 0=stop; auto-clears on scalar halt)
 
+Host-MMIO performance counters:
+  0x20  performance control (RW — bit 0: enable, bit 1: clear all counters)
+  0x24+ performance counters (RO, one 32-bit counter per word; names and
+        offsets are defined in AtlasPerfCounterMap)
+  Counters increment only while enabled. A clear write resets all counters;
+  the clear bit is a pulse and reads back as zero. This block is MMIO-only.
+
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
 */
@@ -24,17 +31,27 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
 
+import atlas.perf.{AtlasPerfCounterBank, AtlasPerfCounterMap, AtlasPerfEvents}
 import ScalarISA._
 
 /** TileLink-visible CSR register file shared with the scalar core.
   *
   * @param tlBP  TileLink bundle parameters for the host-facing CSR port.
   */
-class CSRFile(tlBP: TLBundleParameters) extends Module {
+class CSRFile(
+  tlBP: TLBundleParameters,
+  mregBanks: Int = AtlasPerfCounterMap.DefaultMregBanks,
+  vmemBanks: Int = AtlasPerfCounterMap.DefaultVmemBanks
+) extends Module {
+
+  private val perfCounterMap = AtlasPerfCounterMap.counters(mregBanks, vmemBanks)
+  private val perfCounterEndOffset =
+    AtlasPerfCounterMap.CounterBaseOffset + 4 * perfCounterMap.size
 
   val io = IO(new Bundle {
     val tl  = Flipped(new TLBundle(tlBP))
     val csr = new CSRInternalPort
+    val perfEvents = Input(new AtlasPerfEvents(mregBanks, vmemBanks))
     // Direct outputs for debug / convenience
     val dbg0         = Output(UInt(32.W))
     val dbg1         = Output(UInt(32.W))
@@ -49,6 +66,13 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   val reg_halt_reason = RegInit(0.U(2.W))
   val reg_dbg0        = RegInit(0.U(32.W))
   val reg_dbg1        = RegInit(0.U(32.W))
+  val reg_perfEnable  = RegInit(false.B)
+
+  val perfCounters = Module(new AtlasPerfCounterBank(mregBanks, vmemBanks))
+  val perfClear = WireDefault(false.B)
+  perfCounters.io.enable := reg_perfEnable
+  perfCounters.io.clear  := perfClear
+  perfCounters.io.events := io.perfEvents
 
   val reg_execRun      = RegInit(false.B)
   val reg_execRunWrite = RegInit(false.B)
@@ -80,6 +104,14 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     5.U -> reg_dbg1,
     6.U -> Cat(0.U(31.W), reg_execRun)
   ))
+
+  private def readMmioWord(idx: UInt): UInt = {
+    val isPerfCounter = idx >= (AtlasPerfCounterMap.CounterBaseOffset / 4).U &&
+      idx < (perfCounterEndOffset / 4).U
+    Mux(idx === (AtlasPerfCounterMap.ControlOffset / 4).U,
+      Cat(0.U(31.W), reg_perfEnable),
+      Mux(isPerfCounter, perfCounters.io.readData, readWord(idx)))
+  }
 
   // ── Internal (scalar-core) access ────────────────────────────────
   // Map 12-bit CSR addresses to word indices
@@ -119,6 +151,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   // ── TileLink manager ───────────────────────────────────────────────
   // Single-beat, 1-cycle latency (registered response).
   val tl = io.tl
+  perfCounters.io.wordIndex := tl.a.bits.address(AtlasMemMap.CSR_ADDR_BITS - 1, 2)
 
   val respValid  = RegInit(false.B)
   val respData   = Reg(UInt(tl.params.dataBits.W))
@@ -136,7 +169,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
 
     when(tl.a.bits.opcode === TLMessages.Get) {
       respOpcode := TLMessages.AccessAckData
-      respData   := readWord(wordIdx)
+      respData   := readMmioWord(wordIdx)
     }.otherwise { // PutFullData / PutPartialData
       respOpcode := TLMessages.AccessAck
       respData   := 0.U
@@ -153,6 +186,10 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
           reg_halt_reason := 0.U
           reg_illegal     := 0.U
         }
+      }
+      when(wordIdx === (AtlasPerfCounterMap.ControlOffset / 4).U) {
+        reg_perfEnable := tl.a.bits.data(AtlasPerfCounterMap.EnableBit)
+        perfClear := tl.a.bits.data(AtlasPerfCounterMap.ClearBit)
       }
     }
   }

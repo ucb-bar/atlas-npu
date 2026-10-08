@@ -52,6 +52,10 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
     val dmaReadData  = Valid(UInt(p.lineWidthBits.W))
     val dmaWrite      = Flipped(Valid(new VmemLineWritePort(p)))
     val dmaWriteGrant = Output(Bool())
+
+    val perfReadAccess = Output(Vec(p.numBanks, Bool()))
+    val perfWriteAccess = Output(Vec(p.numBanks, Bool()))
+    val perfContended = Output(Vec(p.numBanks, Bool()))
   })
 
   // ==========================================================================
@@ -264,6 +268,18 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
   for (b <- 0 until p.numBanks) {
     val bank = banks(b)
 
+    val bankRequestHits = Seq(
+      lsuScalarWriteBankOH(b),
+      lsuVecWriteBankOH(b),
+      lsuScalarReadBankOH(b),
+      lsuVecReadBankOH(b),
+      dmaWriteBankOH(b),
+      dmaReadBankOH(b),
+      tlWriteBankOH(b),
+      tlReadBankOH(b)
+    )
+    io.perfContended(b) := PopCount(bankRequestHits) > 1.U
+
     val accessSel = treeReduce(Seq(
       makeAccessLeaf(lsuScalarWriteBankOH(b), true.B, io.lsuScalarWrite.bits.bankAddr,
         CLIENT_NONE, lsuScalarWriteData, io.lsuScalarWrite.bits.mask,
@@ -298,6 +314,8 @@ class Vmem(p: VmemParams, bundle: TLBundleParameters) extends Module {
       accessSel.valid,
       accessSel.isWrite
     )
+    io.perfReadAccess(b) := accessSel.valid && !accessSel.isWrite
+    io.perfWriteAccess(b) := accessSel.valid && accessSel.isWrite
     r1_bankReadClient(b) := Mux(accessSel.valid && !accessSel.isWrite, accessSel.readClient, CLIENT_NONE)
     r1_bankReadValid(b)  := accessSel.valid && !accessSel.isWrite
     bankDmaReadGrant(b)  := accessSel.dmaReadGrant

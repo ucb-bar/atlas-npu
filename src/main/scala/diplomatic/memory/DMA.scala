@@ -137,6 +137,13 @@ class DmaEngine(
 
     val tl = new TLBundle(tlBundleParams)
     val debugInFlight = Output(UInt((tagBits + 1).W))
+    val perfIssuedBeat = Output(Bool())
+    val perfCompletedBeat = Output(Bool())
+    val perfVmemStall = Output(Bool())
+    val perfSaturated = Output(Bool())
+    val perfLimitBlocked = Output(Bool())
+    val perfOutstanding = Output(Bool())
+    val perfResponseWaitBeatCycles = Output(UInt((tagBits + 1).W))
   })
 
   val tlAdapter = Module(new TileLinkAdapter(beatBytes, tagBits, tlBundleParams))
@@ -233,17 +240,25 @@ class DmaEngine(
   // ==========================================================================
 
   val isLastBeat = requestBeatCount === (requestBeatsNeeded - 1.U)
+  val inFlightLimitReached = currentInFlight >= dmaP.maxInFlight.U
+  val requestReadyExceptInFlight =
+    slotActive(requestIdx) && !slotDispatched(requestIdx) &&
+      Mux(currentCmdIsStore, storeDataQueue.io.deq.valid, true.B)
 
   tlAdapter.io.request.valid :=
-    slotActive(requestIdx) && !slotDispatched(requestIdx) &&
-    (currentInFlight < dmaP.maxInFlight.U) &&
-    Mux(currentCmdIsStore, storeDataQueue.io.deq.valid, true.B)
+    requestReadyExceptInFlight && !inFlightLimitReached
+  io.perfSaturated := currentInFlight === dmaP.maxInFlight.U
+  io.perfLimitBlocked :=
+    inFlightLimitReached && requestReadyExceptInFlight && tlAdapter.io.request.ready
+  io.perfOutstanding := currentInFlight =/= 0.U
+  io.perfResponseWaitBeatCycles := currentInFlight
 
   tlAdapter.io.request.bits.address := commandQueue(requestIdx).dramAddress + (requestBeatCount * beatBytes.U)
   tlAdapter.io.request.bits.tag     := nextSourceId
   tlAdapter.io.request.bits.isStore := currentCmdIsStore
   tlAdapter.io.request.bits.data    := storeDataQueue.io.deq.bits
   tlAdapter.io.request.bits.mask    := Fill(beatBytes, 1.U(1.W))
+  io.perfIssuedBeat := tlAdapter.io.request.fire
 
   // Track per-slot A-fire / D-fire deltas so we can retire correctly even
   // when A and D happen in the same cycle against the same slot.
@@ -291,6 +306,10 @@ class DmaEngine(
   // Loads need a VMEM write grant; stores (PutFullData ACKs) have no VMEM
   // side-effect so they retire unconditionally.
   tlAdapter.io.response.ready := Mux(respIsLoad, io.vmemWriteGrant, true.B)
+  io.perfCompletedBeat := tlAdapter.io.response.fire
+  io.perfVmemStall :=
+    (io.vmemRead.valid && !io.vmemReadGrant) ||
+    (tlAdapter.io.response.valid && respIsLoad && !io.vmemWriteGrant)
 
   when(tlAdapter.io.response.fire) {
     slotDFireOH(respSlotIdx) := true.B

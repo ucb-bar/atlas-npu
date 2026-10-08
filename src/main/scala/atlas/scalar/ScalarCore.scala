@@ -34,6 +34,7 @@ import chisel3.util._
 import ScalarISA._
 import atlas.common.VmemParams
 import atlas.lsu.LsuScalarCmd
+import atlas.perf.AtlasPerfCounterMap
 
 object AtlasMemMap {
   val IMEM_BASE      = 0x0002_0000L
@@ -42,7 +43,7 @@ object AtlasMemMap {
   val IMEM_ADDR_BITS = log2Ceil(IMEM_WORDS)
 
   val CSR_BASE        = 0x0004_0000L
-  val CSR_SIZE        = 0x20    // Total size of the actual CSR registers we’ve implemented
+  val CSR_SIZE        = 0x20 + AtlasPerfCounterMap.Size
   val CSR_WINDOW_SIZE = 0x1000  // Size of the address range reserved for CSRs on the bus (4 KiB page). Only the first CSR_SIZE bytes are used; the rest is unused space
   val CSR_ADDR_BITS   = log2Ceil(CSR_WINDOW_SIZE)
 
@@ -225,6 +226,7 @@ class ScalarCore(spP: VmemParams) extends Module {
 
   val delay_stall    = delayCounter =/= 0.U
   val dma_wait_stall = s1_valid && (dec.dma_cmd === DMA_WAIT) && io.dma_busy(dec.funct3)
+  io.dmaFenceWait := dma_wait_stall
 
   // ==============================================================
   // Halt logic

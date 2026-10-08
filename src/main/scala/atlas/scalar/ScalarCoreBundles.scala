@@ -93,6 +93,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val scalarMemResp = Flipped(Valid(UInt(32.W)))
 
   val dma_busy      = Input(Vec(8, Bool()))
+  val dmaFenceWait  = Output(Bool())
   val vpu_status    = Input(new VpuStatus)
 
   // Split LSU busy: scalar load path plus independent VLOAD / VSTORE engines.

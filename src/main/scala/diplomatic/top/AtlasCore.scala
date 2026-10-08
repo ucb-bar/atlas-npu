@@ -18,6 +18,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters}
 
 import atlas.common._
+import atlas.perf.AtlasPerfEvents
 import atlas.scalar.{ScalarCore, ScalarISA, VpuStatus, AtlasMemMap,
                       CSRFile, LsuCmd, InstrMem, ImemFetchPort, DmaCmd,
                       MxuCmd => ScalarMxuCmd, VpuCmd, XluCmd,
@@ -73,7 +74,7 @@ class AtlasCore(
   // ==========================================================================
 
   val imem    = Module(new InstrMem(imemBP))
-  val csrfile = Module(new CSRFile(csrBP))
+  val csrfile = Module(new CSRFile(csrBP, mregP.numMregBanks, vmemP.numBanks))
   val vmem    = Module(new Vmem(vmemP, vmemBP))
   val scalar  = Module(new ScalarCore(vmemP))
   val dma     = Module(new DmaEngine(tp, dmaBP))
@@ -101,6 +102,32 @@ class AtlasCore(
   // ==========================================================================
 
   csrfile.io.csr <> scalar.io.csrPort
+  csrfile.io.perfEvents.runActive        := csrfile.io.execRun
+  csrfile.io.perfEvents.dmaActive        := dma.io.channelBusy.asUInt.orR
+  csrfile.io.perfEvents.dmaCommand       := scalar.io.dmaCmd.valid
+  csrfile.io.perfEvents.dmaIssuedBeat    := dma.io.perfIssuedBeat
+  csrfile.io.perfEvents.dmaCompletedBeat := dma.io.perfCompletedBeat
+  csrfile.io.perfEvents.dmaVmemStall     := dma.io.perfVmemStall
+  csrfile.io.perfEvents.dmaSaturated     := dma.io.perfSaturated
+  csrfile.io.perfEvents.dmaLimitBlocked   := dma.io.perfLimitBlocked
+  csrfile.io.perfEvents.dmaOutstanding   := dma.io.perfOutstanding
+  csrfile.io.perfEvents.dmaResponseWaitBeatCycles := dma.io.perfResponseWaitBeatCycles
+  csrfile.io.perfEvents.dmaFenceWait      := scalar.io.dmaFenceWait
+  csrfile.io.perfEvents.vpuActive        := vpu.io.busy
+  csrfile.io.perfEvents.vpuCommand       := scalar.io.vpuCmd.valid
+  csrfile.io.perfEvents.mxu0Compute      := mxu0.io.computeBusy
+  csrfile.io.perfEvents.mxu0Data         := mxu0.io.dataBusy
+  csrfile.io.perfEvents.mxu0Command      := scalar.io.mxu0Cmd.valid
+  csrfile.io.perfEvents.mxu1Compute      := mxu1.io.computeBusy
+  csrfile.io.perfEvents.mxu1Data         := mxu1.io.dataBusy
+  csrfile.io.perfEvents.mxu1Command      := scalar.io.mxu1Cmd.valid
+  csrfile.io.perfEvents.mregRead         := mreg.io.perfReadAccess
+  csrfile.io.perfEvents.mregWrite        := mreg.io.perfWriteAccess
+  csrfile.io.perfEvents.mregReadContended := mreg.io.perfReadContended
+  csrfile.io.perfEvents.mregWriteContended := mreg.io.perfWriteContended
+  csrfile.io.perfEvents.vmemRead         := vmem.io.perfReadAccess
+  csrfile.io.perfEvents.vmemWrite        := vmem.io.perfWriteAccess
+  csrfile.io.perfEvents.vmemContended    := vmem.io.perfContended
   scalar.io.execRun      := csrfile.io.execRun
   scalar.io.execRunWrite := csrfile.io.execRunWrite
 

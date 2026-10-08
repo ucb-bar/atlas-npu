@@ -61,6 +61,11 @@ class MregFile(p: MregParams) extends Module {
     val vpuReadResp1  = Valid(UInt(p.mregRowBits.W))
     val lsuReadResp   = Valid(UInt(p.mregRowBits.W))
     val xluReadResp   = Valid(UInt(p.mregRowBits.W))
+
+    val perfReadAccess = Output(Vec(p.numMregBanks, Bool()))
+    val perfWriteAccess = Output(Vec(p.numMregBanks, Bool()))
+    val perfReadContended = Output(Vec(p.numMregBanks, Bool()))
+    val perfWriteContended = Output(Vec(p.numMregBanks, Bool()))
   })
 
   // ==========================================================================
@@ -210,6 +215,8 @@ class MregFile(p: MregParams) extends Module {
 
     val readCount  = PopCount(readHits)
     val writeCount = PopCount(writeHits)
+    io.perfReadContended(b) := readCount > 1.U
+    io.perfWriteContended(b) := writeCount > 1.U
 
     assert(readCount <= 1.U,
       s"MregFile bank conflict: multiple read ports targeting physical bank $b (m$b or m${b + p.numMregBanks})")
@@ -238,6 +245,8 @@ class MregFile(p: MregParams) extends Module {
     bankReadValid(b) := readSel.valid
     bankReadPort(b)  := readSel.port
     bankReadRow(b)   := readSel.row
+    io.perfReadAccess(b) := readSel.valid
+    io.perfWriteAccess(b) := writeSel.valid
 
     bankWriteValid(b) := writeSel.valid
     bankWriteRow(b)   := writeSel.row
