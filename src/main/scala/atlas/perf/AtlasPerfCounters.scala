@@ -65,6 +65,7 @@ object AtlasPerfCounterMap {
     CounterBaseOffset + 4 * counters(mregBanks, vmemBanks).size
 
   val CounterEndOffset = counterEndOffset(DefaultMregBanks, DefaultVmemBanks)
+  val Size = CounterEndOffset - ControlOffset
 }
 
 class AtlasPerfEvents(
