@@ -30,53 +30,53 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x12, 0x800          # 2048 B
 
     # DMA.LOAD input pair to high-range VMEM staging.
     LI    x6,  0xDC00         # input_lo word address
     LI    x10, 0x90000000  # DRAM byte offset
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     # Negative-offset VLOAD into mid-bank MREGs.
     LI    x20, 0xDD00         # input_hi word address
-    VLOAD 40, x20, -8         # -> VMEM word 0xDC00
+    vload m40, -8(x20)         # -> VMEM word 0xDC00
     DELAY 33
-    VLOAD 41, x20, 0          # -> VMEM word 0xDD00
+    vload m41, 0(x20)          # -> VMEM word 0xDD00
     DELAY 33
 
     # Edge-class VPU approximators.
-    VRECIP.BF16 42, 40
+    vrecip.bf16 m42, m40
     DELAY 64
 
-    VSQRT 44, 40
+    vsqrt.bf16 m44, m40
     DELAY 64
 
     # Spill recip result with negative-offset VSTORE, then DMA.STORE to DRAM.
     LI    x21, 0xE500         # recip_hi word address
-    VSTORE 42, x21, -8        # -> VMEM word 0xE400
+    vstore m42, -8(x21)        # -> VMEM word 0xE400
     DELAY 33
-    VSTORE 43, x21, 0         # -> VMEM word 0xE500
+    vstore m43, 0(x21)         # -> VMEM word 0xE500
     DELAY 33
 
     LI    x7,  0xE400         # recip_lo word address for DMA.STORE source
     LI    x11, 0x90000800  # DRAM byte offset for recip output
-    DMA.STORE x11, x7, x12, 1
-    DMA.WAIT 1
+    dma.store x11, x7, x12, ch1
+    dma.wait ch1
 
     # Spill sqrt result with negative-offset VSTORE, then DMA.STORE to DRAM.
     LI    x22, 0xED00         # sqrt_hi word address
-    VSTORE 44, x22, -8        # -> VMEM word 0xEC00
+    vstore m44, -8(x22)        # -> VMEM word 0xEC00
     DELAY 33
-    VSTORE 45, x22, 0         # -> VMEM word 0xED00
+    vstore m45, 0(x22)         # -> VMEM word 0xED00
     DELAY 33
 
     LI    x8,  0xEC00         # sqrt_lo word address for DMA.STORE source
     LI    x13, 0x90001000  # DRAM byte offset for sqrt output
-    DMA.STORE x13, x8, x12, 2
-    DMA.WAIT 2
+    dma.store x13, x8, x12, ch2
+    dma.wait ch2
 
 pass:
     ADDI  x1, x0, 1

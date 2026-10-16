@@ -33,7 +33,12 @@ ASSEMBLY_DIR = BAREMETAL_DIR / "assembly"
 GENERATORS_DIR = BAREMETAL_DIR / "generators"
 TESTS_DIR = BAREMETAL_DIR / "tests"
 TESTS_BUILD_DIR = TESTS_DIR / "build"
-ASSEMBLER_PATH = BAREMETAL_DIR / "assembler.py"
+ASSEMBLER_PATH = BAREMETAL_DIR / "atlas_asm.py"
+NPU_MODEL_DIR = Path(os.environ.get("NPU_MODEL_DIR", BAREMETAL_DIR.parent / "npu-model")).resolve()
+ASSEMBLER_CMD = [
+    "env", f"PYTHONPATH={NPU_MODEL_DIR}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
+    "uv", "run", "--locked", "--project", str(NPU_MODEL_DIR), "--python", "3.14", "python",
+]
 ISA_DOCS_PATH = RESOURCES_DIR / "isa_docs.md"
 BUILT_DIR = AGENTIC_DIR / ".built"
 OUTPUT_DIR = BAREMETAL_DIR / "baremetal_gen"
@@ -1986,7 +1991,16 @@ def collect_generators() -> dict[str, str]:
 def load_isa_docs() -> str:
     if not ISA_DOCS_PATH.exists():
         raise FileNotFoundError(f"ISA docs not found at {ISA_DOCS_PATH}")
-    return _read_text(ISA_DOCS_PATH)
+    model_docs = NPU_MODEL_DIR / "npu_spec/06_instruction_set/README.md"
+    if not model_docs.is_file():
+        raise FileNotFoundError(
+            f"ISA docs not found at {model_docs}; initialize the npu-model submodule "
+            "(git submodule update --init npu-model)"
+        )
+    return (
+        f"# Source: {ISA_DOCS_PATH}\n\n{_read_text(ISA_DOCS_PATH)}\n\n"
+        f"# Source: {model_docs}\n\n{_read_text(model_docs)}"
+    )
 
 
 def load_analysis_text(path: Path | None = None) -> str:
@@ -2362,6 +2376,13 @@ def build_published_baremetal_tests(
     if not published_tests:
         raise ValueError("No published tests were provided for build.")
 
+    if shutil.which("uv") is None:
+        raise FileNotFoundError("uv is required to assemble Atlas programs")
+    if not (NPU_MODEL_DIR / "npu_model/util/converter.py").is_file():
+        raise FileNotFoundError(
+            "Initialize the npu-model submodule (git submodule update --init npu-model)"
+        )
+
     for test in published_tests:
         name = str(test["name"])
         generator_path = test["generator"]
@@ -2378,7 +2399,7 @@ def build_published_baremetal_tests(
                 )
 
         assembler_cmd = [
-            sys.executable,
+            *ASSEMBLER_CMD,
             str(ASSEMBLER_PATH.relative_to(BAREMETAL_DIR)),
             str(Path(test["assembly"]).relative_to(BAREMETAL_DIR)),
             "--out-c",
@@ -2608,7 +2629,7 @@ def try_build_and_run_single_test(
     # Stage 2: assembler
     # ------------------------------------------------------------------
     assembler_cmd = [
-        sys.executable,
+        *ASSEMBLER_CMD,
         str(ASSEMBLER_PATH.relative_to(BAREMETAL_DIR)),
         str(assembly_path.relative_to(BAREMETAL_DIR)),
         "--out-c",
@@ -2619,7 +2640,12 @@ def try_build_and_run_single_test(
             ["--golden-json", str(golden_json_path.relative_to(BAREMETAL_DIR))]
         )
     print(f"       [attempt {attempt_idx}] Assembling {name}...")
-    rc, out = _capture(assembler_cmd, BAREMETAL_DIR)
+    if shutil.which("uv") is None:
+        rc, out = 127, "uv is required to assemble Atlas programs"
+    elif not (NPU_MODEL_DIR / "npu_model/util/converter.py").is_file():
+        rc, out = 1, "Initialize the npu-model submodule (git submodule update --init npu-model)"
+    else:
+        rc, out = _capture(assembler_cmd, BAREMETAL_DIR)
     _record(rc, assembler_cmd, BAREMETAL_DIR, out)
     if rc != 0:
         result = {

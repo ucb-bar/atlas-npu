@@ -19,18 +19,18 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x22, 0x8000
 
     # ── Invariant constants ──
-    VLI.ALL 2, 0x3D37          # 0.044715
+    vli.all m2, 0x3D37          # 0.044715
     DELAY 63
-    VLI.ALL 4, 0x3F4C          # sqrt(2/pi)
+    vli.all m4, 0x3F4C          # sqrt(2/pi)
     DELAY 63
-    VLI.ALL 6, 0x3F80          # 1.0
+    vli.all m6, 0x3F80          # 1.0
     DELAY 63
-    VLI.ALL 8, 0x3F00          # 0.5
+    vli.all m8, 0x3F00          # 0.5
     DELAY 63
 
     ADDI  x11, x0, 16
@@ -44,52 +44,52 @@ tile_loop:
     # ── Load X ──
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x20, 1024
     LI    x6, 256
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── GELU tanh chain ──
-    VCUBE.BF16 10, 0           # X^3
+    vcube.bf16 m10, m0           # X^3
     DELAY 64
-    VMUL.BF16 12, 2, 10        # 0.044715 * X^3
+    vmul.bf16 m12, m2, m10        # 0.044715 * X^3
     DELAY 64
-    VADD.BF16 10, 0, 12        # X + 0.044715 * X^3
+    vadd.bf16 m10, m0, m12        # X + 0.044715 * X^3
     DELAY 64
-    VMUL.BF16 12, 4, 10        # sqrt(2/pi) * (...)
+    vmul.bf16 m12, m4, m10        # sqrt(2/pi) * (...)
     DELAY 64
-    VTANH 10, 12               # tanh(...)
+    vtanh.bf16 m10, m12               # tanh(...)
     DELAY 64
-    VADD.BF16 12, 6, 10        # 1 + tanh(...)
+    vadd.bf16 m12, m6, m10        # 1 + tanh(...)
     DELAY 64
-    VMUL.BF16 14, 8, 12        # 0.5 * (1 + tanh(...))
+    vmul.bf16 m14, m8, m12        # 0.5 * (1 + tanh(...))
     DELAY 64
-    VMUL.BF16 10, 0, 14        # GELU(X)
+    vmul.bf16 m10, m0, m14        # GELU(X)
     DELAY 64
 
     LI    x8, 512
-    VSTORE 10, x8, 0
+    vstore m10, 0(x8)
     DELAY 33
-    VSTORE 11, x8, 8
+    vstore m11, 8(x8)
     DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20
     LI    x8, 512
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     ADDI  x3, x3, 1024
     LI    x8, 768
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop

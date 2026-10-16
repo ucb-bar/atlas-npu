@@ -52,7 +52,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 2048
 
 # ======================================================================
@@ -60,160 +60,160 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD x6, x1, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # Tile 0 / VSQUARE.BF16
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90004000
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
     # Tile 0 / VCUBE.BF16
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90004800
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
 # ======================================================================
 # TILE 1 - tiny magnitudes (drives isSquareResultZero, isCubeResultZero)
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90000800
-    DMA.LOAD x6, x1, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # Tile 1 / VSQUARE.BF16
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90005000
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
     # Tile 1 / VCUBE.BF16
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90005800
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
 # ======================================================================
 # TILE 2 - huge magnitudes (drives isSquareResultInf, isCubeResultInf)
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90001000
-    DMA.LOAD x6, x1, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # Tile 2 / VSQUARE.BF16
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90006000
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
     # Tile 2 / VCUBE.BF16
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90006800
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
 # ======================================================================
 # TILE 3 - special-class lattice (zero/subnormal/inf/NaN/etc.)
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90001800
-    DMA.LOAD x6, x1, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # Tile 3 / VSQUARE.BF16
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90007000
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
     # Tile 3 / VCUBE.BF16
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90007800
-    DMA.STORE x10, x9, x2, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

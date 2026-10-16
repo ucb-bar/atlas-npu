@@ -85,9 +85,9 @@
 #   x22 cycle delta (→ CSR_DBG1)     x30  completion signal
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127                    # scale reg 0 = 0x7F → unit scale
+    seli e0, 127                    # scale reg 0 = 0x7F → unit scale
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: load all 8 input tiles DRAM → VMEM → MREG (NOT timed)
@@ -96,79 +96,79 @@
     # A00 → m0
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # A01 → m1
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
 
     # A10 → m2
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
 
     # A11 → m3
     ADDI  x6, x0, 0
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 3, x6, 0
+    vload m3, 0(x6)
     DELAY 33
 
     # B00_T → m4
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
 
     # B01_T → m5
     ADDI  x6, x0, 0
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 5, x6, 0
+    vload m5, 0(x6)
     DELAY 33
 
     # B10_T → m6
     ADDI  x6, x0, 0
     LI    x10, 0x90001800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
 
     # B11_T → m7
     ADDI  x6, x0, 0
     LI    x10, 0x90001C00
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 7, x6, 0
+    vload m7, 0(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — snapshot start cycle
 # ═══════════════════════════════════════════════════════════════
-    CSRR  x20, 0xC00                # x20 = cycle count at start
+    csrrs x20, 0xC00, x0                # x20 = cycle count at start
 
 # ── Phase A: compute C00 (→acc0) and C01 (→acc1), K-stationary ──
 # Pattern: (push wK, matmul accN wK, DELAY 29) — back-to-back matmul stride
@@ -176,55 +176,55 @@
 # Same-accSel reuse stride is 64 cycles (= drainAccConflict minimum).
 
     # K=0
-    VMATPUSH.W.MXU0   0, 4            # cyc 1: wslot0 ← B00_T
-    VMATMUL.MXU0      0, 0, 0         # cyc 2: M0  acc0 = A00·B00      (overwrite)
+    vmatpush.weight.mxu0 w0, m4            # cyc 1: wslot0 ← B00_T
+    vmatmul.mxu0 acc0, m0, w0         # cyc 2: M0  acc0 = A00·B00      (overwrite)
     DELAY 29                          # cyc 3..32
-    VMATPUSH.W.MXU0   1, 5            # cyc 33: wslot1 ← B01_T
-    VMATMUL.MXU0      1, 0, 1         # cyc 34: M1  acc1 = A00·B01     [stride 32 from M0]
+    vmatpush.weight.mxu0 w1, m5            # cyc 33: wslot1 ← B01_T
+    vmatmul.mxu0 acc1, m0, w1         # cyc 34: M1  acc1 = A00·B01     [stride 32 from M0]
     DELAY 29                          # cyc 35..64
     # K=1
-    VMATPUSH.W.MXU0   0, 6            # cyc 65: wslot0 ← B10_T (cd[0]=0 ✓)
-    VMATMUL.ACC.MXU0  0, 1, 0         # cyc 66: M2  acc0 += A01·B10    [stride 32, same-accSel
+    vmatpush.weight.mxu0 w0, m6            # cyc 65: wslot0 ← B10_T (cd[0]=0 ✓)
+    vmatmul.acc.mxu0 acc0, m1, w0         # cyc 66: M2  acc0 += A01·B10    [stride 32, same-accSel
                                       #              stride 64 from M0 = drainAcc minimum]
     DELAY 29                          # cyc 67..96
-    VMATPUSH.W.MXU0   1, 7            # cyc 97: wslot1 ← B11_T (cd[1]=0 ✓)
-    VMATMUL.ACC.MXU0  1, 1, 1         # cyc 98: M3  acc1 += A01·B11    [stride 32, drainAcc 64]
+    vmatpush.weight.mxu0 w1, m7            # cyc 97: wslot1 ← B11_T (cd[1]=0 ✓)
+    vmatmul.acc.mxu0 acc1, m1, w1         # cyc 98: M3  acc1 += A01·B11    [stride 32, drainAcc 64]
     DELAY 29                          # cyc 99..128
 
 # ── Phase A → B: pre-PUSH next-phase weights INSIDE the drainAcc gap, then
 #                 POP, then back-to-back matmul. Saves the cycle that POP+PUSH
 #                 between matmuls would otherwise cost.
 
-    VMATPUSH.W.MXU0   0, 4            # cyc 129: wslot0 ← B00_T (Phase B K=0; cd[0]=0 at 129 ✓)
-    VMATPOP.FP8.MXU0  8, 0, 0         # cyc 130: m8 ← acc0 (C00 = M0+M2); drainAcc T_M2+64
-    VMATMUL.MXU0      0, 2, 0         # cyc 131: M4  acc0 = A10·B00 (overwrite)
+    vmatpush.weight.mxu0 w0, m4            # cyc 129: wslot0 ← B00_T (Phase B K=0; cd[0]=0 at 129 ✓)
+    vmatpop.fp8.acc.mxu0 m8, acc0, e0         # cyc 130: m8 ← acc0 (C00 = M0+M2); drainAcc T_M2+64
+    vmatmul.mxu0 acc0, m2, w0         # cyc 131: M4  acc0 = A10·B00 (overwrite)
                                       #   stride 33 from M3 (was 34); PUSH+2=131 ≤ 131 ✓
     DELAY 28                          # cyc 132..160 — POP m9 fires at T_M3+64 = 162
-    VMATPUSH.W.MXU0   1, 5            # cyc 161: wslot1 ← B01_T (cd[1]=0 at 161 ✓)
-    VMATPOP.FP8.MXU0  9, 0, 1         # cyc 162: m9 ← acc1 (C01); POP→POP stride 32 ✓
-    VMATMUL.MXU0      1, 2, 1         # cyc 163: M5  acc1 = A10·B01
+    vmatpush.weight.mxu0 w1, m5            # cyc 161: wslot1 ← B01_T (cd[1]=0 at 161 ✓)
+    vmatpop.fp8.acc.mxu0 m9, acc1, e0         # cyc 162: m9 ← acc1 (C01); POP→POP stride 32 ✓
+    vmatmul.mxu0 acc1, m2, w1         # cyc 163: M5  acc1 = A10·B01
                                       #   stride 32 from M4 (back-to-back via p0Boundary) ✓
     DELAY 29                          # cyc 164..193
 
 # ── Phase B K=1: accumulate ──
-    VMATPUSH.W.MXU0   0, 6            # cyc 194: wslot0 ← B10_T (cd[0]=0 ✓)
-    VMATMUL.ACC.MXU0  0, 3, 0         # cyc 195: M6  acc0 += A11·B10   [stride 32, drainAcc[0] 64]
+    vmatpush.weight.mxu0 w0, m6            # cyc 194: wslot0 ← B10_T (cd[0]=0 ✓)
+    vmatmul.acc.mxu0 acc0, m3, w0         # cyc 195: M6  acc0 += A11·B10   [stride 32, drainAcc[0] 64]
     DELAY 29                          # cyc 196..225
-    VMATPUSH.W.MXU0   1, 7            # cyc 226: wslot1 ← B11_T (cd[1]=0 ✓)
-    VMATMUL.ACC.MXU0  1, 3, 1         # cyc 227: M7  acc1 += A11·B11   [stride 32, drainAcc[1] 64]
+    vmatpush.weight.mxu0 w1, m7            # cyc 226: wslot1 ← B11_T (cd[1]=0 ✓)
+    vmatmul.acc.mxu0 acc1, m3, w1         # cyc 227: M7  acc1 += A11·B11   [stride 32, drainAcc[1] 64]
     DELAY 30                          # cyc 228..258 — POP m10 fires at T_M6+64 = 259
 
-    VMATPOP.FP8.MXU0  10, 0, 0        # cyc 259: m10 ← acc0 (C10 = M4+M6)
+    vmatpop.fp8.acc.mxu0 m10, acc0, e0        # cyc 259: m10 ← acc0 (C10 = M4+M6)
     DELAY 30                          # cyc 260..290 — POP→POP stride 32 (post-w0LastCycle
                                       # collapse) AND T_M7+64 = 291 reached at cyc 291
-    VMATPOP.FP8.MXU0  11, 0, 1        # cyc 291: m11 ← acc1 (C11 = M5+M7)
+    vmatpop.fp8.acc.mxu0 m11, acc1, e0        # cyc 291: m11 ← acc1 (C11 = M5+M7)
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
 # ═══════════════════════════════════════════════════════════════
-    CSRR  x21, 0xC00                # x21 = cycle count at end
+    csrrs x21, 0xC00, x0                # x21 = cycle count at end
     SUB   x22, x21, x20             # x22 = cycles inside timed window
-    CSRW  x22, 0xC11                # stash delta in CSR_DBG1 (host reads @ 0x14)
+    csrrw x0, 0xC11, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
 
 # ═══════════════════════════════════════════════════════════════
 # WRITEBACK (not timed) — MREG → VMEM → DRAM for each output tile
@@ -232,39 +232,39 @@
 
     # C00 (m8) → DRAM 0x2000
     LI    x8, 0
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
     LI    x8, 0
     LI    x3, 0x90002000
-    DMA.STORE x3, x8, x12, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x12, ch1
+    dma.wait ch1
 
     # C01 (m9) → DRAM 0x2400
     LI    x8, 0
-    VSTORE 9, x8, 0
+    vstore m9, 0(x8)
     DELAY 33
     LI    x8, 0
     LI    x3, 0x90002400
-    DMA.STORE x3, x8, x12, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x12, ch1
+    dma.wait ch1
 
     # C10 (m10) → DRAM 0x2800
     LI    x8, 0
-    VSTORE 10, x8, 0
+    vstore m10, 0(x8)
     DELAY 33
     LI    x8, 0
     LI    x3, 0x90002800
-    DMA.STORE x3, x8, x12, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x12, ch1
+    dma.wait ch1
 
     # C11 (m11) → DRAM 0x2C00
     LI    x8, 0
-    VSTORE 11, x8, 0
+    vstore m11, 0(x8)
     DELAY 33
     LI    x8, 0
     LI    x3, 0x90002C00
-    DMA.STORE x3, x8, x12, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x12, ch1
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # DONE — host verifies DRAM 0x2000–0x2FFF against golden; reads
@@ -272,5 +272,5 @@
 #        from the @PERF_MACS_MXU0 directive.
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

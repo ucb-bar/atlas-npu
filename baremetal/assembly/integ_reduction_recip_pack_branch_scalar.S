@@ -34,7 +34,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     # Sizes
     LI    x20, 1024
@@ -58,58 +58,58 @@
     LI    x17, 0x90001800  # fp8 output dst
 
     # DMA input low half -> VMEM[0x0000]
-    DMA.LOAD x6, x12, x20, 0
-    DMA.WAIT 0
+    dma.load x6, x12, x20, ch0
+    dma.wait ch0
 
     # DMA input high half -> VMEM[0x0400]
-    DMA.LOAD x7, x13, x20, 1
-    DMA.WAIT 1
+    dma.load x7, x13, x20, ch1
+    dma.wait ch1
 
     # DMA scale region -> VMEM[0x0800]
-    DMA.LOAD x8, x14, x22, 2
-    DMA.WAIT 2
+    dma.load x8, x14, x22, ch2
+    dma.wait ch2
 
     # Load BF16 pair into upper-mid banks.
-    VLOAD 40, x6, 0
+    vload m40, 0(x6)
     DELAY 33
-    VLOAD 41, x7, 0
+    vload m41, 0(x7)
     DELAY 33
 
     # row_sum = broadcast(sum(row(input)))
-    VREDSUM.ROW.BF16 44, 40
+    vredsum.row.bf16 m44, m40
     DELAY 37
 
     # recip_sum = recip(row_sum)
-    VRECIP.BF16 48, 44
+    vrecip.bf16 m48, m44
     DELAY 64
 
     # normalized = input * recip_sum
-    VMUL.BF16 52, 40, 48
+    vmul.bf16 m52, m40, m48
     DELAY 64
 
     # Load pack scale from VMEM byte address 0x0800 into e0.
     LI    x18, 0x0800
-    SELD  0, x18, 0
+    seld e0, 0(x18)
     DELAY 2
 
     # packed = fp8pack(normalized, e0)
-    VFP8PACK 56, 52, 0
+    vpack.bf16.fp8 m56, m52, e0
     DELAY 64
 
     # Store BF16 normalized tensor pair to VMEM.
-    VSTORE 52, x9, 0
+    vstore m52, 0(x9)
     DELAY 33
-    VSTORE 53, x10, 0
+    vstore m53, 0(x10)
     DELAY 33
 
     # Store FP8 packed result to VMEM.
-    VSTORE 56, x11, 0
+    vstore m56, 0(x11)
     DELAY 33
 
     # Scalar-observable readback from BF16 output footprint, then branch on nonzero.
     # This is a read only; scalar scratch stores remain disjoint from DMA.STORE regions.
     LI    x19, 0x1000
-    LW    x23, x19, 0
+    lw x23, 0(x19)
     DELAY 2
     BEQ   x23, x0, fail
     NOP
@@ -121,14 +121,14 @@
 
 after_scalar_branch:
     # Drain BF16 outputs to DRAM.
-    DMA.STORE x15, x9, x20, 3
-    DMA.WAIT 3
-    DMA.STORE x16, x10, x20, 4
-    DMA.WAIT 4
+    dma.store x15, x9, x20, ch3
+    dma.wait ch3
+    dma.store x16, x10, x20, ch4
+    dma.wait ch4
 
     # Drain FP8 packed output to DRAM.
-    DMA.STORE x17, x11, x20, 5
-    DMA.WAIT 5
+    dma.store x17, x11, x20, ch5
+    dma.wait ch5
 
     JAL   x0, pass
     NOP
@@ -136,7 +136,7 @@ after_scalar_branch:
 scalar_marker:
     # Write a disjoint scalar scratch marker, then fall through to common storeback.
     LI    x25, 0x3000
-    SW    x24, x25, 0
+    sw x24, 0(x25)
     JAL   x0, after_scalar_branch
     NOP
 

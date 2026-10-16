@@ -19,7 +19,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x21, 0x8000          # matrix DRAM base
     LI    x22, 0x10000         # output DRAM base
@@ -35,60 +35,60 @@ tile_loop:
     # ── Load variance tile → (m0, m1) ──
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x20, 1024
     LI    x6, 256
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── Load matrix tile → (m2, m3) ──
     ADD   x1, x21, x20
     LI    x7, 512
-    DMA.LOAD  x7, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x7, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x1, 1024
     LI    x7, 768
-    DMA.LOAD  x7, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x7, x1, x2, ch0
+    dma.wait ch0
 
     LI    x7, 512
-    VLOAD 2, x7, 0
+    vload m2, 0(x7)
     DELAY 33
-    VLOAD 3, x7, 8
+    vload m3, 8(x7)
     DELAY 33
 
     # ── rsqrt(variance) = 1 / sqrt(variance) ──
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
-    VRECIP.BF16 6, 4
+    vrecip.bf16 m6, m4
     DELAY 64
 
     # ── matrix * rsqrt(variance) ──
-    VMUL.BF16 8, 2, 6
+    vmul.bf16 m8, m2, m6
     DELAY 64
 
     LI    x8, 1024
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    VSTORE 9, x8, 8
+    vstore m9, 8(x8)
     DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20
     LI    x8, 1024
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     ADDI  x3, x3, 1024
     LI    x8, 1280
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop

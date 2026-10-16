@@ -8,7 +8,7 @@
 # outstanding counters and isLast metadata see 1, 2, 3, 5, and 7 beat commands.
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x12, 32
     LI    x13, 64
@@ -19,57 +19,57 @@
 # Load five differently sized regions before waiting.
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     LI    x6, 256
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x13, 1
+    dma.load x6, x10, x13, ch1
 
     LI    x6, 512
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x14, 2
+    dma.load x6, x10, x14, ch2
 
     LI    x6, 768
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x15, 3
+    dma.load x6, x10, x15, ch3
 
     LI    x6, 1024
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x16, 4
+    dma.load x6, x10, x16, ch4
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
-    DMA.WAIT  4
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
 
 # Store the same differently sized regions back out before waiting.
     ADDI  x6, x0, 0
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0
+    dma.store x10, x6, x12, ch0
 
     LI    x6, 256
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x13, 1
+    dma.store x10, x6, x13, ch1
 
     LI    x6, 512
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x14, 2
+    dma.store x10, x6, x14, ch2
 
     LI    x6, 768
     LI    x10, 0x90002C00
-    DMA.STORE x10, x6, x15, 3
+    dma.store x10, x6, x15, ch3
 
     LI    x6, 1024
     LI    x10, 0x90003000
-    DMA.STORE x10, x6, x16, 4
+    dma.store x10, x6, x16, ch4
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
-    DMA.WAIT  4
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

@@ -32,62 +32,62 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x12, 2048
 
     # Load input pair to VMEM[0..2047 B]
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     # VLOAD input pair into m40/m41
     ADDI  x7, x0, 0
-    VLOAD 40, x7, 0
+    vload m40, 0(x7)
     DELAY 33
-    VLOAD 41, x7, 8
+    vload m41, 8(x7)
     DELAY 33
 
     # VSQRT input -> m42/m43
-    VSQRT 42, 40
+    vsqrt.bf16 m42, m40
     DELAY 64
 
     # VRECIP input -> m44/m45
-    VRECIP.BF16 44, 40
+    vrecip.bf16 m44, m40
     DELAY 64
 
     # VLOG2 input -> m46/m47
-    VLOG2 46, 40
+    vlog2.bf16 m46, m40
     DELAY 64
 
     # VEXP2(log2(x)) -> m48/m49
-    VEXP2 48, 46
+    vexp2.bf16 m48, m46
     DELAY 64
 
     # Store all result pairs back to VMEM
     LI    x8, 512
-    VSTORE 42, x8, 0
+    vstore m42, 0(x8)
     DELAY 33
-    VSTORE 43, x8, 8
+    vstore m43, 8(x8)
     DELAY 33
 
     LI    x8, 1024
-    VSTORE 44, x8, 0
+    vstore m44, 0(x8)
     DELAY 33
-    VSTORE 45, x8, 8
+    vstore m45, 8(x8)
     DELAY 33
 
     LI    x8, 1536
-    VSTORE 46, x8, 0
+    vstore m46, 0(x8)
     DELAY 33
-    VSTORE 47, x8, 8
+    vstore m47, 8(x8)
     DELAY 33
 
     LI    x8, 2048
-    VSTORE 48, x8, 0
+    vstore m48, 0(x8)
     DELAY 33
-    VSTORE 49, x8, 8
+    vstore m49, 8(x8)
     DELAY 33
 
     # Scalar-observable read from stored exp2(log2(x)) result.
@@ -95,7 +95,7 @@
     # class-directed inputs begin with +0.0 and -0.0, so probe the next word.
     # VMEM byte address = 2048 words * 4 bytes/word = 8192.
     LI    x20, 8192
-    LW    x21, x20, 4
+    lw x21, 4(x20)
     DELAY 4
     BEQ   x21, x0, fail
     NOP
@@ -104,23 +104,23 @@
     # Drain all outputs to DRAM.
     LI    x6, 512
     LI    x10, 0x90000800
-    DMA.STORE x10, x6, x12, 1
-    DMA.WAIT 1
+    dma.store x10, x6, x12, ch1
+    dma.wait ch1
 
     LI    x6, 1024
     LI    x10, 0x90001000
-    DMA.STORE x10, x6, x12, 2
-    DMA.WAIT 2
+    dma.store x10, x6, x12, ch2
+    dma.wait ch2
 
     LI    x6, 1536
     LI    x10, 0x90001800
-    DMA.STORE x10, x6, x12, 3
-    DMA.WAIT 3
+    dma.store x10, x6, x12, ch3
+    dma.wait ch3
 
     LI    x6, 2048
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 4
-    DMA.WAIT 4
+    dma.store x10, x6, x12, ch4
+    dma.wait ch4
 
 pass:
     ADDI  x1, x0, 1

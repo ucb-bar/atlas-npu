@@ -23,7 +23,7 @@
 # @TIMEOUT 200000
 
 _start:
-    CSRR  x1, 0xC11              # x1 = dbg1 (phase selector)
+    csrrs x1, 0xC11, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
     NOP
     JAL   x0, phase_1
@@ -39,7 +39,7 @@ phase_0:
 
 p0_q_loop:
     ADD   x6, x6, x2             # val += 113
-    SW    x6, x3, 0              # VMEM[addr] = val
+    sw x6, 0(x3)              # VMEM[addr] = val
     DELAY 1
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
@@ -53,7 +53,7 @@ p0_q_loop:
 
 p0_k_loop:
     ADD   x6, x6, x2             # val += 97
-    SW    x6, x3, 0
+    sw x6, 0(x3)
     DELAY 1
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
@@ -61,7 +61,7 @@ p0_k_loop:
     NOP
 
     ADDI  x1, x0, 1
-    CSRW  x1, 0xC10              # dbg0 = 1 (phase 0 done)
+    csrrw x0, 0xC10, x1              # dbg0 = 1 (phase 0 done)
     ECALL
 
 # ── Phase 1: result[i] = Q'[i] XOR K'[i]; running checksum ─────────────────
@@ -74,13 +74,13 @@ phase_1:
     ADDI  x9, x0, 0              # checksum accumulator
 
 p1_loop:
-    LW    x10, x3, 0             # Q'[i]
+    lw x10, 0(x3)             # Q'[i]
     DELAY 2
-    LW    x11, x7, 0             # K'[i]
+    lw x11, 0(x7)             # K'[i]
     DELAY 2
     XOR   x12, x10, x11          # result
     XOR   x9,  x9,  x12          # checksum ^= result
-    SW    x12, x8, 0             # VMEM[256 + i*4] = result
+    sw x12, 0(x8)             # VMEM[256 + i*4] = result
     DELAY 1
     ADDI  x3, x3, 4
     ADDI  x7, x7, 4
@@ -89,9 +89,9 @@ p1_loop:
     BLT   x4, x5, p1_loop
     NOP
 
-    SW    x9, x8, 0              # VMEM[384] = checksum
+    sw x9, 0(x8)              # VMEM[384] = checksum
     DELAY 1
 
     ADDI  x1, x0, 2
-    CSRW  x1, 0xC10              # dbg0 = 2 (PASS)
+    csrrw x0, 0xC10, x1              # dbg0 = 2 (PASS)
     ECALL

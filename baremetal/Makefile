@@ -1,4 +1,7 @@
 PYTHON ?= python3
+NPU_MODEL_DIR ?= ../npu-model
+ATLAS_ASSEMBLER_RUN = PYTHONPATH="$(abspath $(NPU_MODEL_DIR))$${PYTHONPATH:+:$$PYTHONPATH}" \
+	uv run --locked --project "$(NPU_MODEL_DIR)" --python 3.14 python
 CONFIG ?= EE290SimConfig
 VCS_DIR ?= sims/vcs
 RUN_TIMEOUT_S ?= 0
@@ -73,10 +76,18 @@ $(BUILD_DIR)/atlas_%.riscv: $(TESTS_DIR)/atlas_%.c | $(BUILD_DIR)/CMakeCache.txt
 	fi
 	MAKEFLAGS= cmake --build $(BUILD_DIR) --target atlas_$*
 
-# assembler.py is listed as a prereq so a marker-format change (or any other
-# C-harness emission tweak) invalidates already-generated atlas_*.c files.
-$(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S assembler.py
+# Assembler and model changes invalidate generated C files.
+$(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S atlas_asm.py $(wildcard \
+    $(NPU_MODEL_DIR)/npu_model/util/converter.py \
+    $(NPU_MODEL_DIR)/npu_model/isa.py \
+    $(NPU_MODEL_DIR)/npu_model/isa_types.py \
+    $(NPU_MODEL_DIR)/npu_model/isa_patterns.py \
+    $(NPU_MODEL_DIR)/npu_model/configs/isa_definition.py \
+    $(NPU_MODEL_DIR)/npu_model/software/program.py)
 	@set -e; \
+	command -v uv >/dev/null 2>&1 || { echo "Error: uv is required to assemble Atlas programs" >&2; exit 1; }; \
+	[ -f "$(NPU_MODEL_DIR)/npu_model/util/converter.py" ] || { \
+		echo "Error: initialize the npu-model submodule (git submodule update --init npu-model)" >&2; exit 1; }; \
 	BASE=$*; \
 	if [ ! -f "$(GEN_DIR)/gen_$$BASE.py" ]; then \
 		BASE=$$(echo $$BASE | sed -E 's/mxu[01]_/mxu_/'); \
@@ -84,12 +95,12 @@ $(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S assembler.py
 	if [ -f "$(GEN_DIR)/gen_$$BASE.py" ]; then \
 		echo "--> Using generator gen_$$BASE.py for test $*"; \
 		$(PYTHON) $(GEN_DIR)/gen_$$BASE.py > $(GEN_DIR)/$*.json; \
-		$(PYTHON) assembler.py $< \
+		$(ATLAS_ASSEMBLER_RUN) atlas_asm.py $< \
 			--out-c $@ \
 			--golden-json $(GEN_DIR)/$*.json; \
 	else \
 		echo "--> No generator found for $*. Assembling standalone."; \
-		$(PYTHON) assembler.py $< \
+		$(ATLAS_ASSEMBLER_RUN) atlas_asm.py $< \
 			--out-c $@; \
 	fi
 

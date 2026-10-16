@@ -23,7 +23,7 @@
 # End: dbg0 = 1, halt_reason = ECALL.
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024            # transfer size
 
     LI    x29, 16              # N_ROUNDS
@@ -34,87 +34,87 @@ round_loop:
 
     LI    x6,  0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     LI    x6,  32768
     LI    x10, 0x90000400
-    DMA.LOAD x6, x10, x12, 1
+    dma.load x6, x10, x12, ch1
 
     LI    x6,  65536
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x12, 2
+    dma.load x6, x10, x12, ch2
 
     LI    x6,  131072
     LI    x10, 0x90000C00
-    DMA.LOAD x6, x10, x12, 3
+    dma.load x6, x10, x12, ch3
 
     LI    x6,  163840
     LI    x10, 0x90001000
-    DMA.LOAD x6, x10, x12, 4
+    dma.load x6, x10, x12, ch4
 
     LI    x6,  196608
     LI    x10, 0x90001400
-    DMA.LOAD x6, x10, x12, 5
+    dma.load x6, x10, x12, ch5
 
     LI    x6,  262144
     LI    x10, 0x90001800
-    DMA.LOAD x6, x10, x12, 6
+    dma.load x6, x10, x12, ch6
 
     LI    x6,  256
     LI    x10, 0x90001C00
-    DMA.LOAD x6, x10, x12, 7
+    dma.load x6, x10, x12, ch7
 
-    DMA.WAIT 0
-    DMA.WAIT 1
-    DMA.WAIT 2
-    DMA.WAIT 3
-    DMA.WAIT 4
-    DMA.WAIT 5
-    DMA.WAIT 6
-    DMA.WAIT 7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
 # ── 8-channel DMA.STORE burst ─────────────────────────────────────────
 
     LI    x6,  0
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0
+    dma.store x10, x6, x12, ch0
 
     LI    x6,  32768
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x12, 1
+    dma.store x10, x6, x12, ch1
 
     LI    x6,  65536
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x12, 2
+    dma.store x10, x6, x12, ch2
 
     LI    x6,  131072
     LI    x10, 0x90002C00
-    DMA.STORE x10, x6, x12, 3
+    dma.store x10, x6, x12, ch3
 
     LI    x6,  163840
     LI    x10, 0x90003000
-    DMA.STORE x10, x6, x12, 4
+    dma.store x10, x6, x12, ch4
 
     LI    x6,  196608
     LI    x10, 0x90003400
-    DMA.STORE x10, x6, x12, 5
+    dma.store x10, x6, x12, ch5
 
     LI    x6,  262144
     LI    x10, 0x90003800
-    DMA.STORE x10, x6, x12, 6
+    dma.store x10, x6, x12, ch6
 
     LI    x6,  256
     LI    x10, 0x90003C00
-    DMA.STORE x10, x6, x12, 7
+    dma.store x10, x6, x12, ch7
 
-    DMA.WAIT 0
-    DMA.WAIT 1
-    DMA.WAIT 2
-    DMA.WAIT 3
-    DMA.WAIT 4
-    DMA.WAIT 5
-    DMA.WAIT 6
-    DMA.WAIT 7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
     ADDI  x28, x28, 1
     BLT   x28, x29, round_loop
@@ -122,5 +122,5 @@ round_loop:
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

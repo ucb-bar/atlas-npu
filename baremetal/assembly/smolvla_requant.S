@@ -20,38 +20,38 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
 
     # ── Load Input X → VMEM[0..511] → (m0, m1) ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── Unit-scale FP8 pack: scale reg 0 = 0x7F (2^0 = 1.0) ──
-    SELI 0, 0x7F
-    VFP8PACK 4, 0, 0
+    seli e0, 0x7F
+    vpack.bf16.fp8 m4, m0, e0
     DELAY 64
 
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
 
     LI    x8, 512
     LI    x3, 0x90000800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

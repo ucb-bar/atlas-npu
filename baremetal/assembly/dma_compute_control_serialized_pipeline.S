@@ -23,7 +23,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x2, 0              # loop counter
     LI    x3, 2              # trip count
@@ -37,51 +37,51 @@ loop:
     NOP
 
     ADDI  x6, x0, 0
-    DMA.LOAD x6, x16, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x16, x12, ch0
+    dma.wait ch0
 
     ADDI  x7, x0, 0
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
-    VLOAD 1, x7, 8
+    vload m1, 8(x7)
     DELAY 33
 
-    VREDSUM.ROW.BF16 2, 0
+    vredsum.row.bf16 m2, m0
     DELAY 37
 
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
-    VSTORE 3, x8, 8
+    vstore m3, 8(x8)
     DELAY 33
 
     # Scalar predicate from row-sum footprint.
     LI    x20, 2048
-    LW    x21, x20, 0
+    lw x21, 0(x20)
     DELAY 1
 
     BLT   x21, x0, use_mov
     ADDI  x29, x0, 3
 
-    VRELU 4, 2
+    vrelu.bf16 m4, m2
     DELAY 64
     JAL   x0, store_iter
     NOP
 
 use_mov:
-    VMOV  4, 2
+    vmov m4, m2
     DELAY 64
 
 store_iter:
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
 
     LI    x6, 1024
-    DMA.STORE x17, x6, x12, 1
-    DMA.WAIT 1
+    dma.store x17, x6, x12, ch1
+    dma.wait ch1
 
     ADD   x16, x16, x18
     ADD   x17, x17, x18

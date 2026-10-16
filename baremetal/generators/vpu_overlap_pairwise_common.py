@@ -162,20 +162,20 @@ class OpSpec:
         pair_base = self._pair_base(slot)
         if self.kind == "unary":
             src_bank = 0 if slot == 1 else 4
-            return f"{self.mnemonic} {pair_base}, {src_bank}"
+            return f"{self.mnemonic} m{pair_base}, m{src_bank}"
         if self.kind == "signed_reduce":
             src_bank = 2 if slot == 1 else 6
-            return f"{self.mnemonic} {pair_base}, {src_bank}"
+            return f"{self.mnemonic} m{pair_base}, m{src_bank}"
         if self.kind == "fp8pack":
             src_bank = 0 if slot == 1 else 4
-            return f"{self.mnemonic} {pair_base}, {src_bank}, {self._pack_scale_reg(slot)}"
+            return f"{self.mnemonic} m{pair_base}, m{src_bank}, e{self._pack_scale_reg(slot)}"
         if self.kind == "fp8unpack":
             src_bank = 8 if slot == 1 else 9
-            return f"{self.mnemonic} {pair_base}, {src_bank}, {self._unpack_scale_reg(slot)}"
+            return f"{self.mnemonic} m{pair_base}, m{src_bank}, e{self._unpack_scale_reg(slot)}"
         if self.kind == "vli_pair":
-            return f"{self.mnemonic} {pair_base}, 0x{self._imm():04X}"
+            return f"{self.mnemonic} m{pair_base}, 0x{self._imm():04X}"
         if self.kind == "vli_single":
-            return f"{self.mnemonic} {self._odd_bank(slot)}, 0x{self._imm():04X}"
+            return f"{self.mnemonic} m{self._odd_bank(slot)}, 0x{self._imm():04X}"
         raise ValueError(f"unknown asm kind {self.kind!r}")
 
     def result_rows(self, slot: int) -> tuple[list[list[int]], list[list[int]]]:
@@ -222,18 +222,18 @@ class OpSpec:
 ALL_SINGLE_OPS: list[OpSpec] = [
     OpSpec("mov", "VMOV", "unary", "mov", "safe", False, True),
     OpSpec("rcp", "VRECIP.BF16", "unary", "rcp", "safe", False, True),
-    OpSpec("exp", "VEXP", "unary", "exp", "safe", False, True),
-    OpSpec("exp2", "VEXP2", "unary", "exp", "safe", False, True),
+    OpSpec("exp", "VEXP.BF16", "unary", "exp", "safe", False, True),
+    OpSpec("exp2", "VEXP2.BF16", "unary", "exp", "safe", False, True),
     OpSpec("square", "VSQUARE.BF16", "unary", "squarecube", "safe", False, True),
     OpSpec("cube", "VCUBE.BF16", "unary", "squarecube", "safe", False, True),
-    OpSpec("fp8pack", "VFP8PACK", "fp8pack", "fp8pack", "safe", True, False),
-    OpSpec("fp8unpack", "VFP8UNPACK", "fp8unpack", "fp8unpack", "packed", False, True),
-    OpSpec("relu", "VRELU", "unary", "relu", "safe", False, True),
-    OpSpec("sin", "VSIN", "unary", "sincos", "safe", False, True),
-    OpSpec("cos", "VCOS", "unary", "sincos", "safe", False, True),
-    OpSpec("tanh", "VTANH", "unary", "tanh", "safe", False, True),
-    OpSpec("log", "VLOG2", "unary", "log", "safe", False, True),
-    OpSpec("sqrt", "VSQRT", "unary", "sqrt", "safe", False, True),
+    OpSpec("fp8pack", "VPACK.BF16.FP8", "fp8pack", "fp8pack", "safe", True, False),
+    OpSpec("fp8unpack", "VUNPACK.FP8.BF16", "fp8unpack", "fp8unpack", "packed", False, True),
+    OpSpec("relu", "VRELU.BF16", "unary", "relu", "safe", False, True),
+    OpSpec("sin", "VSIN.BF16", "unary", "sincos", "safe", False, True),
+    OpSpec("cos", "VCOS.BF16", "unary", "sincos", "safe", False, True),
+    OpSpec("tanh", "VTANH.BF16", "unary", "tanh", "safe", False, True),
+    OpSpec("log", "VLOG2.BF16", "unary", "log", "safe", False, True),
+    OpSpec("sqrt", "VSQRT.BF16", "unary", "sqrt", "safe", False, True),
     OpSpec("csum", "VREDSUM.BF16", "signed_reduce", "csum", "signed", False, True),
     OpSpec("cmin", "VREDMIN.BF16", "signed_reduce", "cmin", "signed", False, True),
     OpSpec("cmax", "VREDMAX.BF16", "signed_reduce", "cmax", "signed", False, True),
@@ -336,16 +336,16 @@ def _emit_bf16_pair_load(lines: list[str], name: str, dram_base_bytes: int, vmem
             f"    # Load {name} -> m{dst_bank},m{dst_bank + 1}",
             f"    LI    x6, {vmem_base_words}",
             f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes:08X}",
-            "    DMA.LOAD  x6, x1, x2, 0",
-            "    DMA.WAIT  0",
+            "    DMA.LOAD  x6, x1, x2, ch0",
+            "    DMA.WAIT  ch0",
             f"    LI    x6, {vmem_base_words + 256}",
             f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes + INPUT_BANK_BYTES:08X}",
-            "    DMA.LOAD  x6, x1, x2, 0",
-            "    DMA.WAIT  0",
+            "    DMA.LOAD  x6, x1, x2, ch0",
+            "    DMA.WAIT  ch0",
             f"    LI    x6, {vmem_base_words}",
-            f"    VLOAD {dst_bank}, x6, 0",
+            f"    VLOAD m{dst_bank}, 0(x6)",
             f"    DELAY {VSTORE_DELAY}",
-            f"    VLOAD {dst_bank + 1}, x6, 8",
+            f"    VLOAD m{dst_bank + 1}, 8(x6)",
             f"    DELAY {VSTORE_DELAY}",
             "",
         ]
@@ -358,10 +358,10 @@ def _emit_single_bank_load(lines: list[str], name: str, dram_base_bytes: int, vm
             f"    # Load {name} -> m{dst_bank}",
             f"    LI    x6, {vmem_base_words}",
             f"    LI    x1, 0x{FPGA_DRAM_BASE + dram_base_bytes:08X}",
-            "    DMA.LOAD  x6, x1, x2, 0",
-            "    DMA.WAIT  0",
+            "    DMA.LOAD  x6, x1, x2, ch0",
+            "    DMA.WAIT  ch0",
             f"    LI    x6, {vmem_base_words}",
-            f"    VLOAD {dst_bank}, x6, 0",
+            f"    VLOAD m{dst_bank}, 0(x6)",
             f"    DELAY {VSTORE_DELAY}",
             "",
         ]
@@ -371,7 +371,7 @@ def _emit_single_bank_load(lines: list[str], name: str, dram_base_bytes: int, vm
 def _emit_slot_init(lines: list[str], pair_base: int) -> None:
     lines.extend(
         [
-            f"    VLI.ALL {pair_base}, 0x0000",
+            f"    VLI.ALL m{pair_base}, 0x0000",
             f"    DELAY {INIT_DELAY}",
         ]
     )
@@ -381,12 +381,12 @@ def _emit_signature_store(lines: list[str], bank: int, scratch_words: int, dram_
     lines.extend(
         [
             f"    LI    x8, {scratch_words}",
-            f"    VSTORE {bank}, x8, 0",
+            f"    VSTORE m{bank}, 0(x8)",
             f"    DELAY {VSTORE_DELAY}",
             f"    LI    x8, {scratch_words}",
             f"    LI    x3, 0x{FPGA_DRAM_BASE + dram_off_bytes:08X}",
-            "    DMA.STORE x3, x8, x21, 1",
-            "    DMA.WAIT  1",
+            "    DMA.STORE x3, x8, x21, ch1",
+            "    DMA.WAIT  ch1",
         ]
     )
 
@@ -417,15 +417,15 @@ def emit_assembly(test_name: str, title: str, first_op_names: list[str]) -> str:
         "",
         "    ADDI  x28, x0, 1",
         "    LI    x5, 0x00000000",
-        "    DMA.CONFIG x5, 0",
+        "    DMA.CONFIG x5, ch0",
         f"    LI    x2, {INPUT_COPY_SIZE_WORDS}",
         f"    LI    x21, {SIGNATURE_COPY_SIZE_WORDS}",
         "",
         "    # Scale registers for fp8pack / fp8unpack cases",
-        f"    SELI  {PACK_SCALE_REG_SLOT1}, 0x{PACK_SCALE_SLOT1:02X}",
-        f"    SELI  {UNPACK_SCALE_REG_SLOT1}, 0x{UNPACK_SCALE_SLOT1:02X}",
-        f"    SELI  {PACK_SCALE_REG_SLOT2}, 0x{PACK_SCALE_SLOT2:02X}",
-        f"    SELI  {UNPACK_SCALE_REG_SLOT2}, 0x{UNPACK_SCALE_SLOT2:02X}",
+        f"    SELI  e{PACK_SCALE_REG_SLOT1}, 0x{PACK_SCALE_SLOT1:02X}",
+        f"    SELI  e{UNPACK_SCALE_REG_SLOT1}, 0x{UNPACK_SCALE_SLOT1:02X}",
+        f"    SELI  e{PACK_SCALE_REG_SLOT2}, 0x{PACK_SCALE_SLOT2:02X}",
+        f"    SELI  e{UNPACK_SCALE_REG_SLOT2}, 0x{UNPACK_SCALE_SLOT2:02X}",
         "",
     ]
 

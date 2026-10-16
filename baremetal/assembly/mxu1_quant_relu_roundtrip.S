@@ -34,7 +34,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x12, 1024
     LI    x13, 2048
@@ -45,103 +45,103 @@
     # ------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 256
     LI    x10, 0x90000400
-    DMA.LOAD x6, x10, x12, 1
-    DMA.WAIT 1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
 
     ADDI  x6, x0, 512
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x14, 2
-    DMA.WAIT 2
+    dma.load x6, x10, x14, ch2
+    dma.wait ch2
 
     # Load scale register from VMEM byte address 0x0800.
     LI    x7, 2048
-    SELD  0, x7, 0
+    seld e0, 0(x7)
     DELAY 2
 
     # ------------------------------------------------------------------
     # Stage FP8 tiles into MREGs
     # ------------------------------------------------------------------
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     ADDI  x6, x0, 256
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
 
     # ------------------------------------------------------------------
     # MXU1 matmul: C = A @ B
     # Generator preloads B^T because MXU computes act @ weight^T.
     # ------------------------------------------------------------------
-    VMATPUSH.W.MXU1 0, 4
+    vmatpush.weight.mxu1 w0, m4
     DELAY 31
 
-    VMATMUL.MXU1 0, 0, 0
+    vmatmul.mxu1 acc0, m0, w0
     DELAY 34
 
-    VMATPOP.BF16.MXU1 8, 0
+    vmatpop.bf16.acc.mxu1 m8, acc0
     DELAY 31
 
     # ------------------------------------------------------------------
     # VPU post-processing and quantization round-trip
     # ------------------------------------------------------------------
-    VRELU 12, 8
+    vrelu.bf16 m12, m8
     DELAY 64
 
-    VFP8PACK 16, 12, 0
+    vpack.bf16.fp8 m16, m12, e0
     DELAY 64
 
-    VFP8UNPACK 20, 16, 0
+    vunpack.fp8.bf16 m20, m16, e0
     DELAY 65
 
     # ------------------------------------------------------------------
     # Drain raw BF16 output to DRAM [0x1000..0x17FF]
     # ------------------------------------------------------------------
     ADDI  x6, x0, 1024
-    VSTORE 8, x6, 0
+    vstore m8, 0(x6)
     DELAY 33
 
     ADDI  x6, x0, 1280
-    VSTORE 9, x6, 0
+    vstore m9, 0(x6)
     DELAY 33
 
     LI    x10, 0x90001000
     ADDI  x6, x0, 1024
-    DMA.STORE x10, x6, x13, 3
-    DMA.WAIT 3
+    dma.store x10, x6, x13, ch3
+    dma.wait ch3
 
     # ------------------------------------------------------------------
     # Drain packed FP8 output to DRAM [0x1800..0x1BFF]
     # ------------------------------------------------------------------
     ADDI  x6, x0, 1536
-    VSTORE 16, x6, 0
+    vstore m16, 0(x6)
     DELAY 33
 
     LI    x10, 0x90001800
     ADDI  x6, x0, 1536
-    DMA.STORE x10, x6, x12, 4
-    DMA.WAIT 4
+    dma.store x10, x6, x12, ch4
+    dma.wait ch4
 
     # ------------------------------------------------------------------
     # Drain unpacked BF16 output to DRAM [0x2000..0x27FF]
     # ------------------------------------------------------------------
     LI    x6, 2048
-    VSTORE 20, x6, 0
+    vstore m20, 0(x6)
     DELAY 33
 
     LI    x6, 2304
-    VSTORE 21, x6, 0
+    vstore m21, 0(x6)
     DELAY 33
 
     LI    x10, 0x90002000
     LI    x6, 2048
-    DMA.STORE x10, x6, x13, 5
-    DMA.WAIT 5
+    dma.store x10, x6, x13, ch5
+    dma.wait ch5
 
 pass:
     ADDI  x1, x0, 1

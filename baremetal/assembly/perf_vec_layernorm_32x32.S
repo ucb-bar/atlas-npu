@@ -31,7 +31,7 @@
 # utilization = 84.6%
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 2048
 
 # ═══════════════════════════════════════════════════════════════
@@ -40,14 +40,14 @@
 
     LI    x6, 0x20000000         # VMEM base address
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x12, ch0
+    dma.wait ch0
 
     # Load X (two halves → m0, m1)
     LI    x6, 0x20000000         # VMEM base address
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8               # Fixed typo (was 6)
+    vload m1, 8(x6)               # Fixed typo (was 6)
     DELAY 33
 
     # ═══════════════════════════════════════════════════════════════
@@ -57,35 +57,35 @@
 
     # Preload 1/32 scalar into m12,m13 (used for mean and variance scaling)
     # VLI.ALL fills every lane — 0x3D00 is BF16 for 0.03125 = 1/32
-    VLI.ALL  12, 0x3D00          # Fixed BF16 constant
+    vli.all m12, 0x3D00          # Fixed BF16 constant
     DELAY 63
     
 # ── Step 1: row sum → scale to mean ──
-    VREDSUM.ROW.BF16  2, 0       # m2,m3 = rowsum(X)
+    vredsum.row.bf16 m2, m0       # m2,m3 = rowsum(X)
     DELAY 37
-    VMUL.BF16         2, 2, 12   # m2,m3 = rowsum × (1/32) = rowmean
+    vmul.bf16 m2, m2, m12   # m2,m3 = rowsum × (1/32) = rowmean
     DELAY 64
 
 # ── Step 2: x - mean ──
-    VSUB.BF16         4, 0, 2    # m4,m5 = X - rowmean  (key intermediate)
+    vsub.bf16 m4, m0, m2    # m4,m5 = X - rowmean  (key intermediate)
     DELAY 64
 
 # ── Step 3: variance via (x-mean)² summed per row ──
-    VSQUARE.BF16      6, 4       # m6,m7 = (x-mean)²
+    vsquare.bf16 m6, m4       # m6,m7 = (x-mean)²
     DELAY 64
-    VREDSUM.ROW.BF16  8, 6       # m8,m9 = rowsum((x-mean)²)
+    vredsum.row.bf16 m8, m6       # m8,m9 = rowsum((x-mean)²)
     DELAY 37
-    VMUL.BF16         8, 8, 12   # m8,m9 = variance (= sum/32)
+    vmul.bf16 m8, m8, m12   # m8,m9 = variance (= sum/32)
     DELAY 64
 
 # ── Step 4: 1/std = 1/sqrt(var)  [ε small, absorbed into golden gen] ──
-    VSQRT        8, 8       # m8,m9 = sqrt(var)
+    vsqrt.bf16 m8, m8       # m8,m9 = sqrt(var)
     DELAY 64
-    VRECIP.BF16       8, 8       # m8,m9 = 1/std
+    vrecip.bf16 m8, m8       # m8,m9 = 1/std
     DELAY 64
 
 # ── Step 5: normalize ──
-    VMUL.BF16         10, 4, 8   # m10,m11 = (x-mean) * (1/std) = Y
+    vmul.bf16 m10, m4, m8   # m10,m11 = (x-mean) * (1/std) = Y
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,21 +99,21 @@
 # WRITEBACK (not timed) — MREG → VMEM → DRAM
 # ═══════════════════════════════════════════════════════════════
     LI    x8, 0
-    VSTORE 10, x8, 0
+    vstore m10, 0(x8)
     DELAY 33
-    VSTORE 11, x8, 8
+    vstore m11, 8(x8)
     DELAY 33
 
 
 
     LI    x8, 0
     LI    x3, 0x90000800
-    DMA.STORE x3, x8, x12, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x12, ch1
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # DONE — host checks DRAM 0x0800 against golden; reads CSR_DBG1
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

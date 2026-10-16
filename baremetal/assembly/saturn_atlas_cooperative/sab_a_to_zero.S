@@ -17,7 +17,7 @@ a_busy:
 
     LI    x2, 0xAAAAAAAA
     ADDI  x3, x0, 0
-    SW    x2, x3, 0
+    sw x2, 0(x3)
     DELAY 1
 
     ADDI  x1, x0, 0                 # target = IMEM byte 0

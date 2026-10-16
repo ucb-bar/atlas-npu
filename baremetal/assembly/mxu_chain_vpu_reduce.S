@@ -60,10 +60,10 @@
 #   0x4400  biased b1  (1024B BF16)
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127          # identity scale for FP8 pops
-    SELI  1, 127
+    seli e0, 127          # identity scale for FP8 pops
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # GLOBAL SETUP: Load zero bias + VPU inputs + bias_vpu
@@ -73,70 +73,70 @@
     # ch0: zero bias → VMEM[0]
     ADDI  x6, x0, 0
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     # ch1: A_vpu b0 → VMEM[256]
     LI    x7, 256
     LI    x10, 0x90001000
-    DMA.LOAD  x7, x10, x12, 1
+    dma.load x7, x10, x12, ch1
 
     # ch2: B_vpu b0 → VMEM[512]
     LI    x8, 512
     LI    x10, 0x90001800
-    DMA.LOAD  x8, x10, x12, 2
+    dma.load x8, x10, x12, ch2
 
     # ch3: bias_vpu b0 → VMEM[768]
     LI    x9, 768
     LI    x10, 0x90002000
-    DMA.LOAD  x9, x10, x12, 3
+    dma.load x9, x10, x12, ch3
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
     # VLOAD first batch
     ADDI  x6, x0, 0
-    VLOAD 3, x6, 0                 # m3 ← zero bias
+    vload m3, 0(x6)                 # m3 ← zero bias
     DELAY 33
     LI    x7, 256
-    VLOAD 8, x7, 0                 # m8 ← A_vpu b0
+    vload m8, 0(x7)                 # m8 ← A_vpu b0
     DELAY 33
     LI    x8, 512
-    VLOAD 10, x8, 0                # m10 ← B_vpu b0
+    vload m10, 0(x8)                # m10 ← B_vpu b0
     DELAY 33
     LI    x9, 768
-    VLOAD 14, x9, 0                # m14 ← bias_vpu b0
+    vload m14, 0(x9)                # m14 ← bias_vpu b0
     DELAY 33
 
     # Second round: bank1 data
     # ch0: A_vpu b1
     ADDI  x6, x0, 0
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     # ch1: B_vpu b1
     LI    x7, 256
     LI    x10, 0x90001C00
-    DMA.LOAD  x7, x10, x12, 1
+    dma.load x7, x10, x12, ch1
 
     # ch2: bias_vpu b1
     LI    x8, 512
     LI    x10, 0x90002400
-    DMA.LOAD  x8, x10, x12, 2
+    dma.load x8, x10, x12, ch2
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
 
     ADDI  x6, x0, 0
-    VLOAD 9, x6, 0                 # m9 ← A_vpu b1
+    vload m9, 0(x6)                 # m9 ← A_vpu b1
     DELAY 33
     LI    x7, 256
-    VLOAD 11, x7, 0                # m11 ← B_vpu b1
+    vload m11, 0(x7)                # m11 ← B_vpu b1
     DELAY 33
     LI    x8, 512
-    VLOAD 15, x8, 0                # m15 ← bias_vpu b1
+    vload m15, 0(x8)                # m15 ← bias_vpu b1
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -146,46 +146,46 @@
     # Load WQ → m1 → XLU → m2
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 2, 1
+    vtrpose.xlu m2, m1
     DELAY 64
 
     # ── [a] MXU0 w-push + acc-push ──
-    VMATPUSH.W.MXU0       0, 2
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m2
+    vmatpush.acc.fp8.mxu0 acc0, m3
 
     # Load X → m0
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # MXU0 compute Q
-    VMATMUL.ACC.MXU0  0, 0, 0
+    vmatmul.acc.mxu0 acc0, m0, w0
     DELAY 95
 
     # ── [d] MXU0 FP8 pop + VPU vmin (concurrent) ──
     # MXU0 pops acc 0 → m4 (FP8). VPU computes vmin on m8,m10 → m12.
     # Different functional units, different TRF banks. Safe.
-    VMATPOP.FP8.MXU0  4, 0, 0
-    VMIN.BF16         12, 8, 10
+    vmatpop.fp8.acc.mxu0 m4, acc0, e0
+    vminimum.bf16 m12, m8, m10
     DELAY 64
 
     # Store Q (m4) → DRAM scratch (need it for Phase C)
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90002800
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE B: MXU1 computes K = X @ WK → acc 0 → FP8 pop → m5
@@ -194,51 +194,51 @@
     # Load WK → m1 → XLU → m2 (reuse scratch banks)
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 2, 1
+    vtrpose.xlu m2, m1
     DELAY 64
 
     # ── [c] MXU1 w-push + acc-push ──
-    VMATPUSH.W.MXU1       0, 2
-    VMATPUSH.ACC.FP8.MXU1 0, 3
+    vmatpush.weight.mxu1 w0, m2
+    vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31                          # ← wait for Slot A acc push + Slot B weight push
 
     # X is still in m0 (wasn't overwritten). Reuse for MXU1.
-    VMATMUL.ACC.MXU1  0, 0, 0
+    vmatmul.acc.mxu1 acc0, m0, w0
     DELAY 34
 
     # ── [e] MXU1 FP8 pop + DMA store of VPU vmin result ──
-    VMATPOP.FP8.MXU1  5, 0, 0
+    vmatpop.fp8.acc.mxu1 m5, acc0, e0
 
     # Store vmin result (m12,m13) while MXU1 pop runs
     LI    x8, 512
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 13, x9, 0
+    vstore m13, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90003800
-    DMA.STORE x10, x8, x12, 2
+    dma.store x10, x8, x12, ch2
     LI    x9, 768
     LI    x10, 0x90003C00
-    DMA.STORE x10, x9, x12, 3
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.store x10, x9, x12, ch3
+    dma.wait ch2
+    dma.wait ch3
 
     # Store K (m5) → DRAM scratch
     LI    x8, 512
-    VSTORE 5, x8, 0
+    vstore m5, 0(x8)
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90002C00
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE C: MXU0 computes S = Q @ K^T → acc 0 → BF16 pop → m6,m7
@@ -250,81 +250,81 @@
     # Load K from DRAM → m1, push as weight (NO transpose for K^T)
     ADDI  x6, x0, 0
     LI    x10, 0x90002C00
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
 
-    VMATPUSH.W.MXU0       0, 1    # K directly as weights
-    VMATPUSH.ACC.FP8.MXU0 0, 3    # zero bias → acc 0
+    vmatpush.weight.mxu0 w0, m1    # K directly as weights
+    vmatpush.acc.fp8.mxu0 acc0, m3    # zero bias → acc 0
 
     # ── [f] Load Q from DRAM (DMA) while MXU0 push completes ──
     ADDI  x6, x0, 0
     LI    x10, 0x90002800
-    DMA.LOAD  x6, x10, x12, 1     # ch1 for Q load
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1     # ch1 for Q load
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0                 # m0 ← Q (activations)
+    vload m0, 0(x6)                 # m0 ← Q (activations)
     DELAY 33
 
     # MXU0 compute S = Q @ K^T
-    VMATMUL.ACC.MXU0  0, 0, 0
+    vmatmul.acc.mxu0 acc0, m0, w0
     DELAY 95
 
     # BF16 pop → m6,m7
-    VMATPOP.BF16.MXU0  6, 0
+    vmatpop.bf16.acc.mxu0 m6, acc0
     DELAY 31
 
     # Store scores m6,m7 → DRAM
     LI    x8, 512
-    VSTORE 6, x8, 0
+    vstore m6, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 7, x9, 0
+    vstore m7, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90003000
-    DMA.STORE x10, x8, x12, 0
+    dma.store x10, x8, x12, ch0
 
     LI    x9, 768
     LI    x10, 0x90003400
-    DMA.STORE x10, x9, x12, 1
+    dma.store x10, x9, x12, ch1
 
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE D: VPU post-process — biased = vadd(S, bias_vpu)
 #   S in m6,m7, bias_vpu in m14,m15 → result in m12,m13
 # ═══════════════════════════════════════════════════════════════
 
-    VADD.BF16  12, 6, 14          # m12,m13 ← S + bias_vpu
+    vadd.bf16 m12, m6, m14          # m12,m13 ← S + bias_vpu
     DELAY 64
 
     # Store biased result
     LI    x8, 512
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 13, x9, 0
+    vstore m13, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90004000
-    DMA.STORE x10, x8, x12, 2
+    dma.store x10, x8, x12, ch2
 
     LI    x9, 768
     LI    x10, 0x90004400
-    DMA.STORE x10, x9, x12, 3
+    dma.store x10, x9, x12, ch3
 
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # DONE
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

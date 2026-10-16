@@ -44,7 +44,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 2048           # 2 KiB per tile / output
     LI    x3, 2048           # same, used for DMA.STOREs
 
@@ -53,354 +53,354 @@
 # ======================================================================
     ADDI  x6, x0, 0          # VMEM word addr 0
     LI    x1, 0x90000000  # DRAM byte 0x0000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---------- Tile0 / VEXP ----------
-    VEXP  4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90002000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VEXP2 ----------
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90002800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VSIN ----------
-    VSIN  4, 0
+    vsin.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90003000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VCOS ----------
-    VCOS  4, 0
+    vcos.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90003800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VTANH ----------
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90004000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VLOG2 ----------
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90004800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VSQRT ----------
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90005000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile0 / VRECIP.BF16 ----------
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90005800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
 # ======================================================================
 # TILE 1 — mid-range values, mixed sign
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90000800
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---------- Tile1 / VEXP ----------
-    VEXP  4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90006000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VEXP2 ----------
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90006800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VSIN ----------
-    VSIN  4, 0
+    vsin.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90007000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VCOS ----------
-    VCOS  4, 0
+    vcos.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90007800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VTANH ----------
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90008000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VLOG2 ----------
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90008800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VSQRT ----------
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90009000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile1 / VRECIP.BF16 ----------
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90009800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
 # ======================================================================
 # TILE 2 — wide exponent sweep
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x1, 0x90001000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---------- Tile2 / VEXP ----------
-    VEXP  4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000A000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VEXP2 ----------
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000A800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VSIN ----------
-    VSIN  4, 0
+    vsin.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000B000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VCOS ----------
-    VCOS  4, 0
+    vcos.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000B800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VTANH ----------
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000C000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VLOG2 ----------
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000C800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VSQRT ----------
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000D000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # ---------- Tile2 / VRECIP.BF16 ----------
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x9000D800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT  1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

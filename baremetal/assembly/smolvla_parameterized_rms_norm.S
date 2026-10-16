@@ -28,14 +28,14 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x22, 0x8000
 
     # ── Invariant constants ──
-    VLI.ALL 6, 0x3D00          # 1/32
+    vli.all m6, 0x3D00          # 1/32
     DELAY 63
-    VLI.ALL 8, 0x3586          # eps = 1e-6
+    vli.all m8, 0x3586          # eps = 1e-6
     DELAY 63
 
     ADDI  x11, x0, 16
@@ -49,50 +49,50 @@ tile_loop:
     # ── Load X ──
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x20, 1024
     LI    x6, 256
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── RMS-norm chain ──
-    VSQUARE.BF16 2, 0
+    vsquare.bf16 m2, m0
     DELAY 64
-    VREDSUM.ROW.BF16 4, 2
+    vredsum.row.bf16 m4, m2
     DELAY 37
-    VMUL.BF16 10, 4, 6         # mean(X^2) = sum * inv_dim
+    vmul.bf16 m10, m4, m6         # mean(X^2) = sum * inv_dim
     DELAY 64
-    VADD.BF16 12, 10, 8        # mean + eps
+    vadd.bf16 m12, m10, m8        # mean + eps
     DELAY 64
-    VSQRT 14, 12               # sqrt(mean + eps)
+    vsqrt.bf16 m14, m12               # sqrt(mean + eps)
     DELAY 64
-    VRECIP.BF16 10, 14         # inv_rms (reuses m10,m11; m6,m7 stays as inv_dim)
+    vrecip.bf16 m10, m14         # inv_rms (reuses m10,m11; m6,m7 stays as inv_dim)
     DELAY 64
-    VMUL.BF16 12, 0, 10        # Y = X * inv_rms (reuses m12,m13)
+    vmul.bf16 m12, m0, m10        # Y = X * inv_rms (reuses m12,m13)
     DELAY 64
 
     LI    x8, 512
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
-    VSTORE 13, x8, 8
+    vstore m13, 8(x8)
     DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20
     LI    x8, 512
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     ADDI  x3, x3, 1024
     LI    x8, 768
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop

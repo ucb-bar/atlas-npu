@@ -1,6 +1,6 @@
 # Atlas Baremetal Tests
 
-This directory is the source of truth for Atlas baremetal tests.
+This directory is the source of truth for Atlas baremetal tests. From the Atlas root, run `git submodule update --init npu-model`; then, from this directory, run `uv sync --locked --project ../npu-model --python 3.14` once to create its Python environment. Make defaults `NPU_MODEL_DIR` to `../npu-model`.
 
 ## Manual Single-Test Flow
 
@@ -10,13 +10,15 @@ This directory is the source of truth for Atlas baremetal tests.
 python3 generators/gen_<test_name>.py > generators/<test_name>.json
 ```
 
-2) Assemble to C:
+2) Assemble to C (Make is preferred for ordinary tests):
 
 ```bash
-python3 assembler.py assembly/<test_name>.S \
+PYTHONPATH=../npu-model uv run --locked --project ../npu-model --python 3.14 python atlas_asm.py assembly/<test_name>.S \
   --out-c tests/atlas_<test_name>.c \
   --golden-json generators/<test_name>.json
 ```
+
+The assembler also accepts `--out-hex`, `--out-bin`, `--dram-base`, and `--beat-bytes`. The DRAM base comes from a JSON entry when present, otherwise `@DRAM_BASE`, otherwise the CLI default. JSON preload/check data is used when supplied; inline `@DRAM` and `@CHECK_DRAM` provide the fallback when no JSON golden is supplied.
 
 3) Build:
 
@@ -39,11 +41,11 @@ make run-binary \
 From the `sp26-atlas-acc/baremetal` directory, to run select baremetal tests (e.g., `test1`, `test2`, and `test3`):
 
 ```
-./run_asm_tests.sh test1 test2 test3
+./agentic/run_asm_tests.sh test1 test2 test3
 ```
 
 To run all handwritten baremetal tests (i.e., those in `sp26-atlas-acc/baremetal/assembly`):
 
 ```
-./run_asm_tests.sh --all
+./agentic/run_asm_tests.sh --all
 ```

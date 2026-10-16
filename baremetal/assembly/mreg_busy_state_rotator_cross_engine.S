@@ -25,69 +25,69 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
 
     # DMA serialized by construction.
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     LI    x6, 256
     LI    x10, 0x90000400
-    DMA.LOAD x6, x10, x12, 1
-    DMA.WAIT 1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
 
     # Load into separated MREG regions.
     ADDI  x7, x0, 0
-    VLOAD 24, x7, 0
+    vload m24, 0(x7)
     DELAY 33
 
     LI    x7, 256
-    VLOAD 40, x7, 0
+    vload m40, 0(x7)
     DELAY 33
 
     # XLU transpose in upper bank region.
-    VTRPOSE.XLU 56, 40
+    vtrpose.xlu m56, m40
     DELAY 64
 
     # MXU1 consume low-bank activation + upper-bank transposed weight.
-    VMATPUSH.W.MXU1 0, 56
+    vmatpush.weight.mxu1 w0, m56
     DELAY 31
-    VMATMUL.MXU1 0, 24, 0
+    vmatmul.mxu1 acc0, m24, w0
     DELAY 34
-    VMATPOP.BF16.MXU1 32, 0
+    vmatpop.bf16.acc.mxu1 m32, acc0
     DELAY 31
 
     # Post-process with VPU into another bank pair.
-    VRELU 48, 32
+    vrelu.bf16 m48, m32
     DELAY 64
 
     # Store raw BF16 result.
     LI    x8, 512
-    VSTORE 32, x8, 0
+    vstore m32, 0(x8)
     DELAY 33
-    VSTORE 33, x8, 8
+    vstore m33, 8(x8)
     DELAY 33
 
     # Store relu BF16 result.
     LI    x8, 1024
-    VSTORE 48, x8, 0
+    vstore m48, 0(x8)
     DELAY 33
-    VSTORE 49, x8, 8
+    vstore m49, 8(x8)
     DELAY 33
 
     LI    x12, 2048
     LI    x10, 0x90001000
     LI    x6, 512
-    DMA.STORE x10, x6, x12, 2
-    DMA.WAIT 2
+    dma.store x10, x6, x12, ch2
+    dma.wait ch2
 
     LI    x10, 0x90001800
     LI    x6, 1024
-    DMA.STORE x10, x6, x12, 3
-    DMA.WAIT 3
+    dma.store x10, x6, x12, ch3
+    dma.wait ch3
 
 pass:
     ADDI  x1, x0, 1

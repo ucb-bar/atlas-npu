@@ -52,7 +52,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024              # 1 KiB tile size
 
 # ----------------------------------------------------------------------
@@ -61,11 +61,11 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD x6, x1, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x1, x12, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
 # ----------------------------------------------------------------------
@@ -75,131 +75,131 @@
 #          EVERY bank index in turn. Consecutive transposes also stress
 #          the XLU FSM Idle -> Busy -> Idle handoff 63 times in a row.
 # ----------------------------------------------------------------------
-    VTRPOSE.XLU  1,  0
+    vtrpose.xlu m1, m0
     DELAY 64
-    VTRPOSE.XLU  2,  1
+    vtrpose.xlu m2, m1
     DELAY 64
-    VTRPOSE.XLU  3,  2
+    vtrpose.xlu m3, m2
     DELAY 64
-    VTRPOSE.XLU  4,  3
+    vtrpose.xlu m4, m3
     DELAY 64
-    VTRPOSE.XLU  5,  4
+    vtrpose.xlu m5, m4
     DELAY 64
-    VTRPOSE.XLU  6,  5
+    vtrpose.xlu m6, m5
     DELAY 64
-    VTRPOSE.XLU  7,  6
+    vtrpose.xlu m7, m6
     DELAY 64
-    VTRPOSE.XLU  8,  7
+    vtrpose.xlu m8, m7
     DELAY 64
-    VTRPOSE.XLU  9,  8
+    vtrpose.xlu m9, m8
     DELAY 64
-    VTRPOSE.XLU 10,  9
+    vtrpose.xlu m10, m9
     DELAY 64
-    VTRPOSE.XLU 11, 10
+    vtrpose.xlu m11, m10
     DELAY 64
-    VTRPOSE.XLU 12, 11
+    vtrpose.xlu m12, m11
     DELAY 64
-    VTRPOSE.XLU 13, 12
+    vtrpose.xlu m13, m12
     DELAY 64
-    VTRPOSE.XLU 14, 13
+    vtrpose.xlu m14, m13
     DELAY 64
-    VTRPOSE.XLU 15, 14
+    vtrpose.xlu m15, m14
     DELAY 64
-    VTRPOSE.XLU 16, 15
+    vtrpose.xlu m16, m15
     DELAY 64
-    VTRPOSE.XLU 17, 16
+    vtrpose.xlu m17, m16
     DELAY 64
-    VTRPOSE.XLU 18, 17
+    vtrpose.xlu m18, m17
     DELAY 64
-    VTRPOSE.XLU 19, 18
+    vtrpose.xlu m19, m18
     DELAY 64
-    VTRPOSE.XLU 20, 19
+    vtrpose.xlu m20, m19
     DELAY 64
-    VTRPOSE.XLU 21, 20
+    vtrpose.xlu m21, m20
     DELAY 64
-    VTRPOSE.XLU 22, 21
+    vtrpose.xlu m22, m21
     DELAY 64
-    VTRPOSE.XLU 23, 22
+    vtrpose.xlu m23, m22
     DELAY 64
-    VTRPOSE.XLU 24, 23
+    vtrpose.xlu m24, m23
     DELAY 64
-    VTRPOSE.XLU 25, 24
+    vtrpose.xlu m25, m24
     DELAY 64
-    VTRPOSE.XLU 26, 25
+    vtrpose.xlu m26, m25
     DELAY 64
-    VTRPOSE.XLU 27, 26
+    vtrpose.xlu m27, m26
     DELAY 64
-    VTRPOSE.XLU 28, 27
+    vtrpose.xlu m28, m27
     DELAY 64
-    VTRPOSE.XLU 29, 28
+    vtrpose.xlu m29, m28
     DELAY 64
-    VTRPOSE.XLU 30, 29
+    vtrpose.xlu m30, m29
     DELAY 64
-    VTRPOSE.XLU 31, 30
+    vtrpose.xlu m31, m30
     DELAY 64
-    VTRPOSE.XLU 32, 31
+    vtrpose.xlu m32, m31
     DELAY 64
-    VTRPOSE.XLU 33, 32
+    vtrpose.xlu m33, m32
     DELAY 64
-    VTRPOSE.XLU 34, 33
+    vtrpose.xlu m34, m33
     DELAY 64
-    VTRPOSE.XLU 35, 34
+    vtrpose.xlu m35, m34
     DELAY 64
-    VTRPOSE.XLU 36, 35
+    vtrpose.xlu m36, m35
     DELAY 64
-    VTRPOSE.XLU 37, 36
+    vtrpose.xlu m37, m36
     DELAY 64
-    VTRPOSE.XLU 38, 37
+    vtrpose.xlu m38, m37
     DELAY 64
-    VTRPOSE.XLU 39, 38
+    vtrpose.xlu m39, m38
     DELAY 64
-    VTRPOSE.XLU 40, 39
+    vtrpose.xlu m40, m39
     DELAY 64
-    VTRPOSE.XLU 41, 40
+    vtrpose.xlu m41, m40
     DELAY 64
-    VTRPOSE.XLU 42, 41
+    vtrpose.xlu m42, m41
     DELAY 64
-    VTRPOSE.XLU 43, 42
+    vtrpose.xlu m43, m42
     DELAY 64
-    VTRPOSE.XLU 44, 43
+    vtrpose.xlu m44, m43
     DELAY 64
-    VTRPOSE.XLU 45, 44
+    vtrpose.xlu m45, m44
     DELAY 64
-    VTRPOSE.XLU 46, 45
+    vtrpose.xlu m46, m45
     DELAY 64
-    VTRPOSE.XLU 47, 46
+    vtrpose.xlu m47, m46
     DELAY 64
-    VTRPOSE.XLU 48, 47
+    vtrpose.xlu m48, m47
     DELAY 64
-    VTRPOSE.XLU 49, 48
+    vtrpose.xlu m49, m48
     DELAY 64
-    VTRPOSE.XLU 50, 49
+    vtrpose.xlu m50, m49
     DELAY 64
-    VTRPOSE.XLU 51, 50
+    vtrpose.xlu m51, m50
     DELAY 64
-    VTRPOSE.XLU 52, 51
+    vtrpose.xlu m52, m51
     DELAY 64
-    VTRPOSE.XLU 53, 52
+    vtrpose.xlu m53, m52
     DELAY 64
-    VTRPOSE.XLU 54, 53
+    vtrpose.xlu m54, m53
     DELAY 64
-    VTRPOSE.XLU 55, 54
+    vtrpose.xlu m55, m54
     DELAY 64
-    VTRPOSE.XLU 56, 55
+    vtrpose.xlu m56, m55
     DELAY 64
-    VTRPOSE.XLU 57, 56
+    vtrpose.xlu m57, m56
     DELAY 64
-    VTRPOSE.XLU 58, 57
+    vtrpose.xlu m58, m57
     DELAY 64
-    VTRPOSE.XLU 59, 58
+    vtrpose.xlu m59, m58
     DELAY 64
-    VTRPOSE.XLU 60, 59
+    vtrpose.xlu m60, m59
     DELAY 64
-    VTRPOSE.XLU 61, 60
+    vtrpose.xlu m61, m60
     DELAY 64
-    VTRPOSE.XLU 62, 61
+    vtrpose.xlu m62, m61
     DELAY 64
-    VTRPOSE.XLU 63, 62
+    vtrpose.xlu m63, m62
     DELAY 64
 
 # ----------------------------------------------------------------------
@@ -209,67 +209,67 @@
 #          source reads on (0,1)..(60,61) and VPU-source writes on
 #          (2,3)..(62,63).
 # ----------------------------------------------------------------------
-    VMOV  2,  0
+    vmov m2, m0
     DELAY 64
-    VMOV  4,  2
+    vmov m4, m2
     DELAY 64
-    VMOV  6,  4
+    vmov m6, m4
     DELAY 64
-    VMOV  8,  6
+    vmov m8, m6
     DELAY 64
-    VMOV 10,  8
+    vmov m10, m8
     DELAY 64
-    VMOV 12, 10
+    vmov m12, m10
     DELAY 64
-    VMOV 14, 12
+    vmov m14, m12
     DELAY 64
-    VMOV 16, 14
+    vmov m16, m14
     DELAY 64
-    VMOV 18, 16
+    vmov m18, m16
     DELAY 64
-    VMOV 20, 18
+    vmov m20, m18
     DELAY 64
-    VMOV 22, 20
+    vmov m22, m20
     DELAY 64
-    VMOV 24, 22
+    vmov m24, m22
     DELAY 64
-    VMOV 26, 24
+    vmov m26, m24
     DELAY 64
-    VMOV 28, 26
+    vmov m28, m26
     DELAY 64
-    VMOV 30, 28
+    vmov m30, m28
     DELAY 64
-    VMOV 32, 30
+    vmov m32, m30
     DELAY 64
-    VMOV 34, 32
+    vmov m34, m32
     DELAY 64
-    VMOV 36, 34
+    vmov m36, m34
     DELAY 64
-    VMOV 38, 36
+    vmov m38, m36
     DELAY 64
-    VMOV 40, 38
+    vmov m40, m38
     DELAY 64
-    VMOV 42, 40
+    vmov m42, m40
     DELAY 64
-    VMOV 44, 42
+    vmov m44, m42
     DELAY 64
-    VMOV 46, 44
+    vmov m46, m44
     DELAY 64
-    VMOV 48, 46
+    vmov m48, m46
     DELAY 64
-    VMOV 50, 48
+    vmov m50, m48
     DELAY 64
-    VMOV 52, 50
+    vmov m52, m50
     DELAY 64
-    VMOV 54, 52
+    vmov m54, m52
     DELAY 64
-    VMOV 56, 54
+    vmov m56, m54
     DELAY 64
-    VMOV 58, 56
+    vmov m58, m56
     DELAY 64
-    VMOV 60, 58
+    vmov m60, m58
     DELAY 64
-    VMOV 62, 60
+    vmov m62, m60
     DELAY 64
 
 # ----------------------------------------------------------------------
@@ -286,13 +286,13 @@
 #          equal the original tile bytes.
 # ----------------------------------------------------------------------
     LI    x7, 256
-    VSTORE 63, x7, 0
+    vstore m63, 0(x7)
     DELAY 33
 
     LI    x8, 256                # VMEM word base of output region
     LI    x10, 0x90001000  # DRAM byte offset
-    DMA.STORE x10, x8, x12, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x12, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

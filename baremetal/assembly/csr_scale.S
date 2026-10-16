@@ -29,11 +29,11 @@
     ADDI  x28, x28, 1
 
 # ── Test 3: SELI writes don't crash ─────────────────────
-    SELI  0, 0x37
-    SELI  5, 0xAB
-    SELI  0, 0x11
-    SELI  1, 0x22
-    SELI  2, 0x33
+    seli e0, 0x37
+    seli e5, 0xAB
+    seli e0, 0x11
+    seli e1, 0x22
+    seli e2, 0x33
     ADDI  x28, x28, 1
 
 # ── Test 4: Cycle counter is incrementing ────────────────

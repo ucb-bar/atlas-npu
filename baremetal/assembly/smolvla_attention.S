@@ -45,115 +45,115 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
 
     # ── Load Q → VMEM[0] → m0 ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # ── Load K → VMEM[256] → m2 ──
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
 
     # ── Load V → VMEM[512] → m4 ──
     LI    x6, 512
     LI    x1, 0x90000800
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 512
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
 
     # ── Load scale bank 0 → VMEM[768] → m6 ──
     LI    x6, 768
     LI    x1, 0x90000C00
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     # ── Load scale bank 1 → VMEM[1024] → m7 ──
     LI    x6, 1024
     LI    x1, 0x90001000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     LI    x6, 768
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VLOAD 7, x6, 8
+    vload m7, 8(x6)
     DELAY 33
 
     # ── Matmul 1: scores = Q @ K (push K^T) ──
-    VTRPOSE.XLU 3, 2
+    vtrpose.xlu m3, m2
     DELAY 64
-    VMATPUSH.W.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m3
     DELAY 31
-    VMATMUL.MXU0 0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
-    VMATPOP.BF16.MXU0 10, 0
+    vmatpop.bf16.acc.mxu0 m10, acc0
     DELAY 31
 
     # ── Scale: (m12, m13) = scores * scale ──
-    VMUL.BF16 12, 10, 6
+    vmul.bf16 m12, m10, m6
     DELAY 64
 
     # ── Stable softmax ──
-    VREDMAX.ROW.BF16 14, 12
+    vredmax.row.bf16 m14, m12
     DELAY 32
-    VSUB.BF16 16, 12, 14
+    vsub.bf16 m16, m12, m14
     DELAY 64
-    VEXP 18, 16
+    vexp.bf16 m18, m16
     DELAY 64
-    VREDSUM.ROW.BF16 20, 18
+    vredsum.row.bf16 m20, m18
     DELAY 37
-    VRECIP.BF16 22, 20
+    vrecip.bf16 m22, m20
     DELAY 64
-    VMUL.BF16 24, 18, 22
+    vmul.bf16 m24, m18, m22
     DELAY 64
 
     # ── Pack probs BF16 → FP8 (unit scale, permuted layout) ──
-    SELI 0, 0x7F
-    VFP8PACK 26, 24, 0
+    seli e0, 0x7F
+    vpack.bf16.fp8 m26, m24, e0
     DELAY 64
 
     # ── Matmul 2: out = packed_probs @ V (push V^T) ──
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
-    VMATPUSH.W.MXU1 0, 5
+    vmatpush.weight.mxu1 w0, m5
     DELAY 31
-    VMATMUL.MXU1 0, 26, 0
+    vmatmul.mxu1 acc0, m26, w0
     DELAY 34
-    VMATPOP.BF16.MXU1 28, 0
+    vmatpop.bf16.acc.mxu1 m28, acc0
     DELAY 31
 
     # ── Store m28 (cols 0-15) → VMEM[1280] → DRAM[0x1400] ──
     LI    x8, 1280
-    VSTORE 28, x8, 0
+    vstore m28, 0(x8)
     DELAY 33
 
     # ── Store m29 (cols 16-31) → VMEM[1536] → DRAM[0x1800] ──
-    VSTORE 29, x8, 8
+    vstore m29, 8(x8)
     DELAY 33
 
     LI    x8, 1280
     LI    x3, 0x90001400
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     LI    x8, 1536
     LI    x3, 0x90001800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

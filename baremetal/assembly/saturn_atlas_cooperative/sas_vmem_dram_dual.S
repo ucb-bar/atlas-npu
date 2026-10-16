@@ -46,7 +46,7 @@
 # Outer 4 x inner 128 = 512 LSU+DMA cycles, ~1.5-2 M Atlas cycles.
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024              # DMA transfer size
 
     LI    x27, 4                 # outer round cap
@@ -60,54 +60,54 @@ inner:
     # ── DMA.LOAD on both legacy regions (different channels; banks 3 and 4) ──
     LI    x6,  196864            # legacy b3 DMA word (current bank 3)
     LI    x9, 0x90000000  # DRAM IN_b3
-    DMA.LOAD x6, x9, x12, 0
+    dma.load x6, x9, x12, ch0
     LI    x7,  262400            # legacy b4 DMA word (current bank 4)
     LI    x10, 0x90000400  # DRAM IN_b4
-    DMA.LOAD x7, x10, x12, 1
+    dma.load x7, x10, x12, ch1
 
     # ── Legacy b3 vector LSU (mreg 0; current bank 3) ──
     LI    x6,  196608
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 40
 
     # ── Legacy b4 scalar LSU: load byte 0, store to byte 8 (current bank 4) ──
     LI    x16, 0x100000          # legacy b4 byte 0 (VMEM-relative)
-    LW    x17, x16, 0
+    lw x17, 0(x16)
     DELAY 2
-    SW    x17, x16, 8
+    sw x17, 8(x16)
     DELAY 1
 
-    VSTORE 0, x6, 0
+    vstore m0, 0(x6)
     DELAY 40
 
-    DMA.WAIT 0
-    DMA.WAIT 1
+    dma.wait ch0
+    dma.wait ch1
 
     # ── DMA.STORE on both legacy regions ──
     LI    x6,  196864
     LI    x9, 0x90002000  # DRAM OUT_b3
-    DMA.STORE x9, x6, x12, 0
+    dma.store x9, x6, x12, ch0
     LI    x7,  262400
     LI    x10, 0x90002400  # DRAM OUT_b4
-    DMA.STORE x10, x7, x12, 1
+    dma.store x10, x7, x12, ch1
 
     # ── Legacy b3 vector LSU (mreg 1; current bank 3) ──
     LI    x6,  196608
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 40
 
     # ── Legacy b4 scalar LSU: load byte 4, store to byte 12 (current bank 4) ──
     LI    x16, 0x100000
-    LW    x17, x16, 4
+    lw x17, 4(x16)
     DELAY 2
-    SW    x17, x16, 12
+    sw x17, 12(x16)
     DELAY 1
 
-    VSTORE 1, x6, 0
+    vstore m1, 0(x6)
     DELAY 40
 
-    DMA.WAIT 0
-    DMA.WAIT 1
+    dma.wait ch0
+    dma.wait ch1
 
     ADDI  x11, x11, 1
     BLT   x11, x13, inner
@@ -119,5 +119,5 @@ inner:
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

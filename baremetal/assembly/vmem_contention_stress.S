@@ -65,10 +65,10 @@
 #   0x4800  C2 hi      (1024B BF16)
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127
-    SELI  1, 127
+    seli e0, 127
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 0: Load persistent data — zero bias + VPU inputs
@@ -78,40 +78,40 @@
     # bias → m3
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 3, x6, 0
+    vload m3, 0(x6)
     DELAY 33
 
     # A_vpu b0 → m8, b1 → m9 (register pair via flag 0/8)
     ADDI  x6, x0, 0
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     LI    x7, 256
     LI    x10, 0x90001800
-    DMA.LOAD  x7, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VLOAD 9, x6, 8
+    vload m9, 8(x6)
     DELAY 33
 
     # B_vpu b0 → m10, b1 → m11
     ADDI  x6, x0, 0
     LI    x10, 0x90001C00
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     LI    x7, 256
     LI    x10, 0x90002000
-    DMA.LOAD  x7, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 10, x6, 0
+    vload m10, 0(x6)
     DELAY 33
-    VLOAD 11, x6, 8
+    vload m11, 8(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -127,26 +127,26 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0     # ch0: X0 → VMEM[0]
+    dma.load x6, x10, x12, ch0     # ch0: X0 → VMEM[0]
 
     LI    x7, 256
     LI    x10, 0x90000400
-    DMA.LOAD  x7, x10, x12, 1     # ch1: W0 → VMEM[256]
+    dma.load x7, x10, x12, ch1     # ch1: W0 → VMEM[256]
 
     LI    x8, 512
     LI    x10, 0x90000800
-    DMA.LOAD  x8, x10, x12, 2     # ch2: X1 → VMEM[512]
+    dma.load x8, x10, x12, ch2     # ch2: X1 → VMEM[512]
 
     LI    x9, 768
     LI    x10, 0x90000C00
-    DMA.LOAD  x9, x10, x12, 3     # ch3: W1 → VMEM[768]
+    dma.load x9, x10, x12, ch3     # ch3: W1 → VMEM[768]
 
     # Commands are queued; DMA processes them sequentially on TileLink.
     # Responses may interleave.  Wait for all.
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 2: VLOAD data + set up MXU0 and MXU1 weights
@@ -154,38 +154,38 @@
 
     # X0 → m0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # W0 (raw) → m1 → XLU transpose → m2
     LI    x7, 256
-    VLOAD 1, x7, 0
+    vload m1, 0(x7)
     DELAY 33
-    VTRPOSE.XLU 2, 1
+    vtrpose.xlu m2, m1
     DELAY 64
 
     # MXU0: push weights + zero bias.
     # Use non-accumulating MATMUL for this single-tile op so the compute
     # always starts from a fresh accum buffer.
-    VMATPUSH.W.MXU0       0, 2
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m2
+    vmatpush.acc.fp8.mxu0 acc0, m3
 
     # X1 → m6
     LI    x8, 512
-    VLOAD 6, x8, 0
+    vload m6, 0(x8)
     DELAY 33
 
     # W1 (raw) → m1 (reuse) → XLU transpose → m7
     LI    x9, 768
-    VLOAD 1, x9, 0
+    vload m1, 0(x9)
     DELAY 33
-    VTRPOSE.XLU 7, 1
+    vtrpose.xlu m7, m1
     DELAY 64
 
     # MXU1: push weights + zero bias.
     # As above, the compute itself uses non-accumulating MATMUL.
-    VMATPUSH.W.MXU1       0, 7
-    VMATPUSH.ACC.FP8.MXU1 0, 3
+    vmatpush.weight.mxu1 w0, m7
+    vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31 
 
 # ═══════════════════════════════════════════════════════════════
@@ -198,9 +198,9 @@
 #   VPU:  m12,m13 = vadd(m8,m10) = vadd(A_vpu, B_vpu)
 # ═══════════════════════════════════════════════════════════════
 
-    VMATMUL.MXU0      0, 0, 0
-    VMATMUL.MXU1      0, 6, 0
-    VADD.BF16         12, 8, 10
+    vmatmul.mxu0 acc0, m0, w0
+    vmatmul.mxu1 acc0, m6, w0
+    vadd.bf16 m12, m8, m10
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
@@ -209,8 +209,8 @@
 #   MXU1 → m14,m15 (C1)
 # ═══════════════════════════════════════════════════════════════
 
-    VMATPOP.BF16.MXU0  4, 0
-    VMATPOP.BF16.MXU1  14, 0
+    vmatpop.bf16.acc.mxu0 m4, acc0
+    vmatpop.bf16.acc.mxu1 m14, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -231,23 +231,23 @@
     # Enqueue DMA loads (start TileLink traffic immediately)
     ADDI  x6, x0, 0
     LI    x10, 0x90002400
-    DMA.LOAD  x6, x10, x12, 0     # ch0: X2 → VMEM[0]
+    dma.load x6, x10, x12, ch0     # ch0: X2 → VMEM[0]
 
     LI    x7, 256
     LI    x10, 0x90002800
-    DMA.LOAD  x7, x10, x12, 1     # ch1: W2 → VMEM[256]
+    dma.load x7, x10, x12, ch1     # ch1: W2 → VMEM[256]
 
     # While DMA responses are in flight, VSTORE VPU result → VMEM
     # VSTORE writes m12 → VMEM[512], m13 → VMEM[768] (via flag 0/8)
     LI    x8, 512
-    VSTORE 12, x8, 0              # m12 (add b0) → VMEM[512] — 33 cycles
+    vstore m12, 0(x8)              # m12 (add b0) → VMEM[512] — 33 cycles
     DELAY 33
-    VSTORE 13, x8, 8              # m13 (add b1) → VMEM[768] — 33 cycles
+    vstore m13, 8(x8)              # m13 (add b1) → VMEM[768] — 33 cycles
     DELAY 33
 
     # DMA may still be running (extended by backpressure).  Wait.
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 6: READ/WRITE SHARED-PORT BACKPRESSURE [RW-BP]
@@ -265,22 +265,22 @@
     # Do not wait yet; overlap the DMA pre-reads with the C0 VSTOREs below.
     LI    x8, 512
     LI    x10, 0x90003C00
-    DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[add_b0]
+    dma.store x10, x8, x12, ch0     # ch0: VMEM[512] → DRAM[add_b0]
     LI    x9, 768
     LI    x10, 0x90004000
-    DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[add_b1]
+    dma.store x10, x9, x12, ch1     # ch1: VMEM[768] → DRAM[add_b1]
 
     # Store C0 (m4,m5) to VMEM[1024], VMEM[1280] for next phase
     LI    x8, 1024
-    VSTORE 4, x8, 0               # m4 (C0 lo) → VMEM[1024]
+    vstore m4, 0(x8)               # m4 (C0 lo) → VMEM[1024]
     DELAY 33
     LI    x9, 1280
-    VSTORE 5, x9, 0               # m5 (C0 hi) → VMEM[1280]
+    vstore m5, 0(x9)               # m5 (C0 hi) → VMEM[1280]
     DELAY 33
 
     # DMA stores may have been stretched by the C0 VSTOREs.
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 7: READ/READ SHARED-PORT BACKPRESSURE [RR-BP]
@@ -301,25 +301,25 @@
     # Issue DMA.STORE first — DMA starts reading VMEM immediately
     LI    x8, 1024
     LI    x10, 0x90002C00
-    DMA.STORE x10, x8, x12, 2     # ch2: VMEM[1024] → DRAM[C0_lo]
+    dma.store x10, x8, x12, ch2     # ch2: VMEM[1024] → DRAM[C0_lo]
 
     # Immediately start VLOAD — both read VMEM concurrently!
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0                 # m0 ← X2 from VMEM[0] — 33 cycles
+    vload m0, 0(x6)                 # m0 ← X2 from VMEM[0] — 33 cycles
     DELAY 33
 
     # Second pair: DMA.STORE C0 hi + VLOAD W2
     LI    x9, 1280
     LI    x10, 0x90003000
-    DMA.STORE x10, x9, x12, 3     # ch3: VMEM[1280] → DRAM[C0_hi]
+    dma.store x10, x9, x12, ch3     # ch3: VMEM[1280] → DRAM[C0_hi]
 
     LI    x7, 256
-    VLOAD 1, x7, 0                 # m1 ← W2 (raw) from VMEM[256]
+    vload m1, 0(x7)                 # m1 ← W2 (raw) from VMEM[256]
     DELAY 33
 
     # Wait for DMA stores (may be delayed by shared-port backpressure)
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 8: Second MXU0 compute — C2 = X2 @ W2  [CHAIN]
@@ -328,22 +328,22 @@
 # ═══════════════════════════════════════════════════════════════
 
     # Transpose W2: m1 → XLU → m2
-    VTRPOSE.XLU 2, 1
+    vtrpose.xlu m2, m1
     DELAY 64
 
     # MXU0: push new weights + zero bias.
     # The chained second pass also uses non-accumulating MATMUL so it cannot
     # inherit stale psums from the earlier C0 run.
-    VMATPUSH.W.MXU0       0, 2
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m2
+    vmatpush.acc.fp8.mxu0 acc0, m3
     DELAY 31 
 
     # MXU0 compute C2 = X2 @ W2
-    VMATMUL.MXU0      0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
 
     # Pop C2 → m4,m5
-    VMATPOP.BF16.MXU0  4, 0
+    vmatpop.bf16.acc.mxu0 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -353,41 +353,41 @@
 
     # Store C1 (m14,m15) → VMEM → DRAM
     LI    x8, 512
-    VSTORE 14, x8, 0              # m14 (C1 lo) → VMEM[512]
+    vstore m14, 0(x8)              # m14 (C1 lo) → VMEM[512]
     DELAY 33
     LI    x9, 768
-    VSTORE 15, x9, 0              # m15 (C1 hi) → VMEM[768]
+    vstore m15, 0(x9)              # m15 (C1 hi) → VMEM[768]
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90003400
-    DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[C1_lo]
+    dma.store x10, x8, x12, ch0     # ch0: VMEM[512] → DRAM[C1_lo]
     LI    x9, 768
     LI    x10, 0x90003800
-    DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[C1_hi]
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.store x10, x9, x12, ch1     # ch1: VMEM[768] → DRAM[C1_hi]
+    dma.wait ch0
+    dma.wait ch1
 
     # Store C2 (m4,m5) → VMEM → DRAM
     LI    x8, 512
-    VSTORE 4, x8, 0               # m4 (C2 lo) → VMEM[512]
+    vstore m4, 0(x8)               # m4 (C2 lo) → VMEM[512]
     DELAY 33
     LI    x9, 768
-    VSTORE 5, x9, 0               # m5 (C2 hi) → VMEM[768]
+    vstore m5, 0(x9)               # m5 (C2 hi) → VMEM[768]
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90004400
-    DMA.STORE x10, x8, x12, 0     # ch0: VMEM[512] → DRAM[C2_lo]
+    dma.store x10, x8, x12, ch0     # ch0: VMEM[512] → DRAM[C2_lo]
     LI    x9, 768
     LI    x10, 0x90004800
-    DMA.STORE x10, x9, x12, 1     # ch1: VMEM[768] → DRAM[C2_hi]
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.store x10, x9, x12, ch1     # ch1: VMEM[768] → DRAM[C2_hi]
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # DONE
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

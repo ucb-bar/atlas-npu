@@ -18,12 +18,12 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x22, 0x8000          # output DRAM base (FP8)
 
     # ── Unit-scale E8M0 0x7F → scale reg 0 (invariant across tiles) ──
-    SELI 0, 0x7F
+    seli e0, 0x7F
 
     ADDI  x11, x0, 16
     ADDI  x10, x0, 0
@@ -38,32 +38,32 @@ tile_loop:
     # ── Load X tile ──
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x20, 1024
     LI    x6, 256
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── Pack BF16 (m0, m1) → FP8 m4 via scale reg 0 ──
-    VFP8PACK 4, 0, 0
+    vpack.bf16.fp8 m4, m0, e0
     DELAY 64
 
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
 
     # ── DMA out: single 1024B write per tile ──
     ADD   x3, x22, x23
     LI    x8, 512
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop

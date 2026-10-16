@@ -26,11 +26,11 @@
 #   2. While DMA is in flight: VLOAD m0 from LSU sub-region, VSTORE m0
 #      back. The VPU register m0 is the transit; net effect on the LSU
 #      sub-region is identity, but the LSU port is hot.
-#   3. DMA.WAIT 0.
+#   3. DMA.WAIT ch0.
 #   4. Issue DMA.STORE on ch1 (DMA sub-region → DRAM OUT).
 #   5. More VLOAD/VSTORE on LSU sub-region (m1) while DMA store is in
 #      flight.
-#   6. DMA.WAIT 1.
+#   6. DMA.WAIT ch1.
 #   7. Decrement loop counter, branch.
 #
 # After N iterations, dbg0 = 1, ECALL.
@@ -39,7 +39,7 @@
 # RVV stride-1 sweep over it during the same window.
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024              # transfer size
 
     # Inner-loop count × outer rounds: 128 × 4 = 512 LSU+DMA cycles for
@@ -57,30 +57,30 @@ loop:
     # ── DMA.LOAD: DRAM[0x0000] → current bank 3, local word 256 ──
     LI    x7,  196864
     LI    x9, 0x90000000
-    DMA.LOAD x7, x9, x12, 0
+    dma.load x7, x9, x12, ch0
 
     # ── LSU work overlap: VLOAD/VSTORE on current bank 3, local word 0 ──
     LI    x6,  196608
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 40
-    VSTORE 0, x6, 0
+    vstore m0, 0(x6)
     DELAY 40
 
-    DMA.WAIT 0
+    dma.wait ch0
 
     # ── DMA.STORE: current bank 3, local word 256 → DRAM[0x1000] ──
     LI    x7,  196864
     LI    x10, 0x90001000
-    DMA.STORE x10, x7, x12, 1
+    dma.store x10, x7, x12, ch1
 
     # ── More LSU work overlap (different VPU reg to dodge any RAW) ──
     LI    x6,  196608
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 40
-    VSTORE 1, x6, 0
+    vstore m1, 0(x6)
     DELAY 40
 
-    DMA.WAIT 1
+    dma.wait ch1
 
     ADDI  x11, x11, 1
     BLT   x11, x13, loop
@@ -92,5 +92,5 @@ loop:
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

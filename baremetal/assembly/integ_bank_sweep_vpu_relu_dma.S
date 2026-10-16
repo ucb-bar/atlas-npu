@@ -44,17 +44,17 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x29, 0x7000        # scratch byte base
     ADDI  x30, x0, 0x5A
-    SB    x30, x29, 0
+    sb x30, 0(x29)
     ADDI  x30, x0, 0x34
     SLLI  x30, x30, 8
     ADDI  x30, x30, 0x12
-    SH    x30, x29, 2
+    sh x30, 2(x29)
     LI    x30, 0x13579BDF
-    SW    x30, x29, 4
+    sw x30, 4(x29)
 
     LI    x12, 2048          # tile bytes
 
@@ -63,176 +63,176 @@
     # ------------------------------------------------------------------
     LI    x6, 0              # input VMEM word base
     LI    x10, 0x90000000  # input DRAM byte offset
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VRELU 2, 0
+    vrelu.bf16 m2, m0
     DELAY 64
 
     LI    x7, 512            # output VMEM word base
-    VSTORE 2, x7, 0
+    vstore m2, 0(x7)
     DELAY 33
-    VSTORE 3, x7, 8
+    vstore m3, 8(x7)
     DELAY 33
 
-    LB    x20, x29, 0
+    lb x20, 0(x29)
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
 
-    LHU   x20, x29, 2
+    lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
 
-    LW    x20, x29, 4
+    lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
 
     LI    x11, 0x90002000  # output DRAM byte offset
-    DMA.STORE x11, x7, x12, 1
-    DMA.WAIT 1
+    dma.store x11, x7, x12, ch1
+    dma.wait ch1
 
     # ------------------------------------------------------------------
     # Tile 1: 0x20000 VMEM region
     # ------------------------------------------------------------------
     LI    x6, 32768          # 0x20000 bytes / 4
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x12, 2
-    DMA.WAIT 2
+    dma.load x6, x10, x12, ch2
+    dma.wait ch2
 
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VLOAD 5, x6, 8
+    vload m5, 8(x6)
     DELAY 33
 
-    VRELU 6, 4
+    vrelu.bf16 m6, m4
     DELAY 64
 
     LI    x7, 33280          # 0x20800 bytes / 4
-    VSTORE 6, x7, 0
+    vstore m6, 0(x7)
     DELAY 33
-    VSTORE 7, x7, 8
+    vstore m7, 8(x7)
     DELAY 33
 
-    LB    x20, x29, 0
+    lb x20, 0(x29)
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
 
-    LHU   x20, x29, 2
+    lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
 
-    LW    x20, x29, 4
+    lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
 
     LI    x11, 0x90002800
-    DMA.STORE x11, x7, x12, 3
-    DMA.WAIT 3
+    dma.store x11, x7, x12, ch3
+    dma.wait ch3
 
     # ------------------------------------------------------------------
     # Tile 2: 0x40000 VMEM region
     # ------------------------------------------------------------------
     LI    x6, 65536          # 0x40000 bytes / 4
     LI    x10, 0x90001000
-    DMA.LOAD x6, x10, x12, 4
-    DMA.WAIT 4
+    dma.load x6, x10, x12, ch4
+    dma.wait ch4
 
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VLOAD 9, x6, 8
+    vload m9, 8(x6)
     DELAY 33
 
-    VRELU 10, 8
+    vrelu.bf16 m10, m8
     DELAY 64
 
     LI    x7, 66048          # 0x40800 bytes / 4
-    VSTORE 10, x7, 0
+    vstore m10, 0(x7)
     DELAY 33
-    VSTORE 11, x7, 8
+    vstore m11, 8(x7)
     DELAY 33
 
-    LB    x20, x29, 0
+    lb x20, 0(x29)
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
 
-    LHU   x20, x29, 2
+    lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
 
-    LW    x20, x29, 4
+    lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
 
     LI    x11, 0x90003000
-    DMA.STORE x11, x7, x12, 5
-    DMA.WAIT 5
+    dma.store x11, x7, x12, ch5
+    dma.wait ch5
 
     # ------------------------------------------------------------------
     # Tile 3: 0x80000 VMEM region
     # ------------------------------------------------------------------
     LI    x6, 131072         # 0x80000 bytes / 4
     LI    x10, 0x90001800
-    DMA.LOAD x6, x10, x12, 6
-    DMA.WAIT 6
+    dma.load x6, x10, x12, ch6
+    dma.wait ch6
 
-    VLOAD 12, x6, 0
+    vload m12, 0(x6)
     DELAY 33
-    VLOAD 13, x6, 8
+    vload m13, 8(x6)
     DELAY 33
 
-    VRELU 14, 12
+    vrelu.bf16 m14, m12
     DELAY 64
 
     LI    x7, 131584         # 0x80800 bytes / 4
-    VSTORE 14, x7, 0
+    vstore m14, 0(x7)
     DELAY 33
-    VSTORE 15, x7, 8
+    vstore m15, 8(x7)
     DELAY 33
 
-    LB    x20, x29, 0
+    lb x20, 0(x29)
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
     NOP
 
-    LHU   x20, x29, 2
+    lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
     NOP
 
-    LW    x20, x29, 4
+    lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
     NOP
 
     LI    x11, 0x90003800
-    DMA.STORE x11, x7, x12, 7
-    DMA.WAIT 7
+    dma.store x11, x7, x12, ch7
+    dma.wait ch7
 
 pass:
     ADDI  x1, x0, 1

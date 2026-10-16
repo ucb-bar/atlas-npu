@@ -25,42 +25,42 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 2048
 
     # Load input tile.
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     # Load input pair into m0/m1.
     ADDI  x7, x0, 0
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
-    VLOAD 1, x7, 8
+    vload m1, 8(x7)
     DELAY 33
 
     # Row reduction -> m2/m3.
-    VREDSUM.ROW.BF16 2, 0
+    vredsum.row.bf16 m2, m0
     DELAY 37
 
     # Store reduction result to VMEM so scalar can observe it.
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
-    VSTORE 3, x8, 8
+    vstore m3, 8(x8)
     DELAY 33
 
     # Drain the reduction result to DRAM as an intermediate oracle.
     LI    x10, 0x90000800
     LI    x6, 512
-    DMA.STORE x10, x6, x12, 1
-    DMA.WAIT 1
+    dma.store x10, x6, x12, ch1
+    dma.wait ch1
 
     # Scalar reads first BF16 pair word of the stored rowsum tile.
     LI    x20, 2048          # byte address of VMEM word base 512
-    LW    x21, x20, 0
+    lw x21, 0(x20)
     DELAY 4
 
     # Generator makes row 0 sum positive, so branch to relu_path is deterministic.
@@ -68,26 +68,26 @@
     ADDI  x29, x0, 1         # delay-slot marker only
 
 relu_path:
-    VRELU 4, 2
+    vrelu.bf16 m4, m2
     DELAY 64
     JAL   x0, store_final
     NOP
 
 neg_path:
-    VMOV  4, 2
+    vmov m4, m2
     DELAY 64
 
 store_final:
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
 
     LI    x10, 0x90001000
     LI    x6, 1024
-    DMA.STORE x10, x6, x12, 2
-    DMA.WAIT 2
+    dma.store x10, x6, x12, ch2
+    dma.wait ch2
 
 pass:
     ADDI  x1, x0, 1

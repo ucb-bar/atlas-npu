@@ -18,7 +18,7 @@ a_busy:
 
     LI    x2, 0xAAAAAAAA            # marker
     ADDI  x3, x0, 0                 # VMEM byte 0
-    SW    x2, x3, 0
+    sw x2, 0(x3)
     DELAY 1
 
     LI    x1, 0x4000                # word index of IMEM byte 0x10000

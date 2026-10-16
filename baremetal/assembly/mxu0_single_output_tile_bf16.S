@@ -34,7 +34,7 @@
     LI    x24, 1024          # result bytes per bank
     LI    x30, 1             # const 1
     LI    x5, 0x00000000
-    DMA.CONFIG  x5, 0
+    dma.config x5, ch0
 
 # VMEM staging: 0=weight, 256=activation, 512=bias/result, 768=result
 
@@ -44,25 +44,25 @@
 
     # Load bias → VMEM[512] → TRF 8
     LI    x6, 512
-    DMA.LOAD  x6, x18, x12, 3
-    DMA.WAIT  3
+    dma.load x6, x18, x12, ch3
+    dma.wait ch3
     LI    x6, 512
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
 
     # Load weights[0] → VMEM[0] → TRF 4 → transpose → TRF 5
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x17, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x17, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
 
     # Overlap-safe prologue push pair
-    VMATPUSH.W.MXU0       0, 5
-    VMATPUSH.ACC.FP8.MXU0 0, 8
+    vmatpush.weight.mxu0 w0, m5
+    vmatpush.acc.fp8.mxu0 acc0, m8
     DELAY 40
 
     ADD   x17, x17, x12
@@ -72,12 +72,12 @@
 # PRE-LOAD: weights[1] → TRF 6 → 7 (for double-buffer pipeline)
 # ═══════════════════════════════════════════════════════════════
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x17, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x17, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     DELAY 64
 
     ADD   x17, x17, x12
@@ -87,16 +87,16 @@
 # FIRST MATMUL: act[0] + wbuf 0 → acc 0, push wbuf 1 (OVERLAPPED [b])
 # ═══════════════════════════════════════════════════════════════
     LI    x7, 256
-    DMA.LOAD  x7, x16, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x16, x12, ch0
+    dma.wait ch0
     LI    x7, 256
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
     ADD   x16, x16, x12
 
     # Overlap-safe first compute/push
-    VMATMUL.ACC.MXU0  0, 0, 0
-    VMATPUSH.W.MXU0   1, 7
+    vmatmul.acc.mxu0 acc0, m0, w0
+    vmatpush.weight.mxu0 w1, m7
     DELAY 40
 
     LI    x29, 1             # next matmul uses wbuf 1
@@ -120,12 +120,12 @@ tile_loop:
 preload_for_buf0:
     # Next matmul uses wbuf 1 → pre-load for wbuf 0: TRF 4 → 5
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x17, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x17, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
     BEQ   x0, x0, do_matmul
     NOP
@@ -133,12 +133,12 @@ preload_for_buf0:
 preload_for_buf1:
     # Next matmul uses wbuf 0 → pre-load for wbuf 1: TRF 6 → 7
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x17, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x17, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     DELAY 64
 
 do_matmul:
@@ -147,10 +147,10 @@ do_matmul:
 
     # Load activations → TRF 0
     LI    x7, 256
-    DMA.LOAD  x7, x16, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x16, x12, ch0
+    dma.wait ch0
     LI    x7, 256
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
     ADD   x16, x16, x12
 
@@ -160,16 +160,16 @@ do_matmul:
 
 matmul_buf1:
     # Matmul with wbuf 1 + push pre-loaded weights to wbuf 0
-    VMATMUL.ACC.MXU0  0, 0, 1      # Slot A: acc 0, acts TRF 0, wbuf 1
-    VMATPUSH.W.MXU0   0, 5         # Slot B: wbuf 0 ← TRF 5  (OVERLAPPED)
+    vmatmul.acc.mxu0 acc0, m0, w1      # Slot A: acc 0, acts TRF 0, wbuf 1
+    vmatpush.weight.mxu0 w0, m5         # Slot B: wbuf 0 ← TRF 5  (OVERLAPPED)
     DELAY 40
     BEQ   x0, x0, advance
     NOP
 
 matmul_buf0:
     # Matmul with wbuf 0 + push pre-loaded weights to wbuf 1
-    VMATMUL.ACC.MXU0  0, 0, 0      # Slot A: acc 0, acts TRF 0, wbuf 0
-    VMATPUSH.W.MXU0   1, 7         # Slot B: wbuf 1 ← TRF 7  (OVERLAPPED)
+    vmatmul.acc.mxu0 acc0, m0, w0      # Slot A: acc 0, acts TRF 0, wbuf 0
+    vmatpush.weight.mxu0 w1, m7         # Slot B: wbuf 1 ← TRF 7  (OVERLAPPED)
     DELAY 40
 
 advance:
@@ -182,41 +182,41 @@ advance:
 # ═══════════════════════════════════════════════════════════════
 epilogue:
     LI    x7, 256
-    DMA.LOAD  x7, x16, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x16, x12, ch0
+    dma.wait ch0
     LI    x7, 256
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
 
     BEQ   x29, x0, last_buf0
     NOP
 last_buf1:
-    VMATMUL.ACC.MXU0  0, 0, 1
+    vmatmul.acc.mxu0 acc0, m0, w1
     BEQ   x0, x0, do_pop
     NOP
 last_buf0:
-    VMATMUL.ACC.MXU0  0, 0, 0
+    vmatmul.acc.mxu0 acc0, m0, w0
 
 do_pop:
     DELAY 95
-    VMATPOP.BF16.MXU0  2, 0
+    vmatpop.bf16.acc.mxu0 m2, acc0
     DELAY 31
 
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
 
     LI    x9, 768
-    VSTORE 3, x9, 0
+    vstore m3, 0(x9)
     DELAY 33
 
     LI    x8, 512
-    DMA.STORE x23, x8, x24, 2
-    DMA.WAIT  2
+    dma.store x23, x8, x24, ch2
+    dma.wait ch2
     LI    x9, 768
     ADD   x25, x23, x24
-    DMA.STORE x25, x9, x24, 3
-    DMA.WAIT  3
+    dma.store x25, x9, x24, ch3
+    dma.wait ch3
 
     ADDI  x30, x0, 1
     CSRRW x0, 0xC10, x30

@@ -313,9 +313,9 @@
 # Read cycle counter before and after DELAY 5.
 # Elapsed must be >= 6.
 
-    CSRR    x3, 0xC00               # x3 = cycle_before
+    csrrs x3, 0xC00, x0               # x3 = cycle_before
     DELAY   5                       # stall 5 cycles
-    CSRR    x4, 0xC00               # x4 = cycle_after
+    csrrs x4, 0xC00, x0               # x4 = cycle_after
     SUB     x5, x4, x3              # x5 = elapsed
     SLTI    x6, x5, 6               # x6 = (elapsed < 6) ? 1 : 0
     OR      x30, x30, x6            # fail if elapsed < 6
@@ -505,10 +505,10 @@ ebreak_skip:
     BEQ     x30, x0, all_pass
     NOP
     # ── FAIL path ──
-    CSRW    x30, 0xC10              # DBG0 = fail flags (nonzero != 1)
+    csrrw x0, 0xC10, x30              # DBG0 = fail flags (nonzero != 1)
     ECALL
 
 all_pass:
     ADDI    x1, x0, 1
-    CSRW    x1, 0xC10               # DBG0 = 1 (PASS)
+    csrrw x0, 0xC10, x1               # DBG0 = 1 (PASS)
     ECALL

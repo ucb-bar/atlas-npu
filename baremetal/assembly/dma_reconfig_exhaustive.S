@@ -34,95 +34,95 @@
 
 # ─── WINDOW 0 ────────────────────────────────────────────────────────────────
 # vmem_start = 0 * 256 = 0
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90000000
     LI    x5, 0x90004000
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x4, x1, 0
-    DMA.WAIT  0
+    dma.load x6, x4, x1, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    DMA.STORE x5, x6, x1, 1
-    DMA.WAIT  1
+    dma.store x5, x6, x1, ch1
+    dma.wait ch1
 
 # ─── WINDOW 1 ────────────────────────────────────────────────────────────────
 # vmem_start = 1 * 256
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90010000
     LI    x5, 0x90014000
     LI    x6, 0x0100
-    DMA.LOAD  x6, x4, x1, 2
-    DMA.WAIT  2
+    dma.load x6, x4, x1, ch2
+    dma.wait ch2
     LI    x6, 0x0100
-    DMA.STORE x5, x6, x1, 3
-    DMA.WAIT  3
+    dma.store x5, x6, x1, ch3
+    dma.wait ch3
 
 # ─── WINDOW 2 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90020000
     LI    x5, 0x90024000
     LI    x6, 0x0200
-    DMA.LOAD  x6, x4, x1, 4
-    DMA.WAIT  4
+    dma.load x6, x4, x1, ch4
+    dma.wait ch4
     LI    x6, 0x0200
-    DMA.STORE x5, x6, x1, 5
-    DMA.WAIT  5
+    dma.store x5, x6, x1, ch5
+    dma.wait ch5
 
 # ─── WINDOW 3 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90030000
     LI    x5, 0x90034000
     LI    x6, 0x0300
-    DMA.LOAD  x6, x4, x1, 6
-    DMA.WAIT  6
+    dma.load x6, x4, x1, ch6
+    dma.wait ch6
     LI    x6, 0x0300
-    DMA.STORE x5, x6, x1, 7
-    DMA.WAIT  7
+    dma.store x5, x6, x1, ch7
+    dma.wait ch7
 
 # ─── WINDOW 4 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90040000
     LI    x5, 0x90044000
     LI    x6, 0x0400
-    DMA.LOAD  x6, x4, x1, 0
-    DMA.WAIT  0
+    dma.load x6, x4, x1, ch0
+    dma.wait ch0
     LI    x6, 0x0400
-    DMA.STORE x5, x6, x1, 1
-    DMA.WAIT  1
+    dma.store x5, x6, x1, ch1
+    dma.wait ch1
 
 # ─── WINDOW 5 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90050000
     LI    x5, 0x90054000
     LI    x6, 0x0500
-    DMA.LOAD  x6, x4, x1, 2
-    DMA.WAIT  2
+    dma.load x6, x4, x1, ch2
+    dma.wait ch2
     LI    x6, 0x0500
-    DMA.STORE x5, x6, x1, 3
-    DMA.WAIT  3
+    dma.store x5, x6, x1, ch3
+    dma.wait ch3
 
 # ─── WINDOW 6 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90060000
     LI    x5, 0x90064000
     LI    x6, 0x0600
-    DMA.LOAD  x6, x4, x1, 4
-    DMA.WAIT  4
+    dma.load x6, x4, x1, ch4
+    dma.wait ch4
     LI    x6, 0x0600
-    DMA.STORE x5, x6, x1, 5
-    DMA.WAIT  5
+    dma.store x5, x6, x1, ch5
+    dma.wait ch5
 
 # ─── WINDOW 7 ────────────────────────────────────────────────────────────────
-    DMA.CONFIG x7, 0
+    dma.config x7, ch0
     LI    x4, 0x90070000
     LI    x5, 0x90074000
     LI    x6, 0x0700
-    DMA.LOAD  x6, x4, x1, 6
-    DMA.WAIT  6
+    dma.load x6, x4, x1, ch6
+    dma.wait ch6
     LI    x6, 0x0700
-    DMA.STORE x5, x6, x1, 7
-    DMA.WAIT  7
+    dma.store x5, x6, x1, ch7
+    dma.wait ch7
 
 # ─── Signal completion ────────────────────────────────────────────────────────
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

@@ -24,7 +24,7 @@
 #   scalar_load_out   262400 / 1049600     bank 4
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
 
 # ──────────────────────────────────────────────────────────────
@@ -33,28 +33,28 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0      # tile_A
+    dma.load x6, x10, x12, ch0      # tile_A
     LI    x6, 32768
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 1      # tile_B
+    dma.load x6, x10, x12, ch1      # tile_B
     LI    x6, 65536
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 2      # scalar load source
+    dma.load x6, x10, x12, ch2      # scalar load source
     LI    x6, 131072
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 3      # tile_C
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.load x6, x10, x12, ch3      # tile_C
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
     LI    x10, 0x90001000
     LI    x6, 262144
-    DMA.LOAD  x6, x10, x12, 0      # scalar_store_out <- zeros
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0      # scalar_store_out <- zeros
+    dma.wait ch0
     LI    x6, 262400
-    DMA.LOAD  x6, x10, x12, 0      # scalar_load_out <- zeros
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0      # scalar_load_out <- zeros
+    dma.wait ch0
 
 # ──────────────────────────────────────────────────────────────
 # Scalar helper addresses and constants
@@ -77,7 +77,7 @@
 # ──────────────────────────────────────────────────────────────
 
     LI    x6, 32768
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 32
 
 # ──────────────────────────────────────────────────────────────
@@ -85,21 +85,21 @@
 # ──────────────────────────────────────────────────────────────
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     LI    x6, 163840
-    VSTORE 1, x6, 0
-    SW    x21, x20, 0
-    SW    x22, x20, 4
-    SW    x23, x20, 8
-    SW    x24, x20, 12
-    SW    x25, x20, 16
-    SW    x26, x20, 20
-    SW    x27, x20, 24
-    SW    x28, x20, 28
+    vstore m1, 0(x6)
+    sw x21, 0(x20)
+    sw x22, 4(x20)
+    sw x23, 8(x20)
+    sw x24, 12(x20)
+    sw x25, 16(x20)
+    sw x26, 20(x20)
+    sw x27, 24(x20)
+    sw x28, 28(x20)
     DELAY 24
 
     LI    x6, 196608
-    VSTORE 0, x6, 0
+    vstore m0, 0(x6)
     DELAY 32
 
 # ──────────────────────────────────────────────────────────────
@@ -107,27 +107,27 @@
 # ──────────────────────────────────────────────────────────────
 
     LI    x6, 131072
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     LI    x6, 327680
-    VSTORE 1, x6, 0
-    LW    x14, x29, 0
+    vstore m1, 0(x6)
+    lw x14, 0(x29)
     DELAY 2
-    LW    x15, x29, 4
+    lw x15, 4(x29)
     DELAY 2
-    LW    x16, x29, 8
+    lw x16, 8(x29)
     DELAY 2
-    LW    x17, x29, 12
+    lw x17, 12(x29)
     DELAY 2
     DELAY 24
 
     LI    x6, 196864
-    VSTORE 2, x6, 0
+    vstore m2, 0(x6)
     DELAY 32
 
-    SW    x14, x30, 0
-    SW    x15, x30, 4
-    SW    x16, x30, 8
-    SW    x17, x30, 12
+    sw x14, 0(x30)
+    sw x15, 4(x30)
+    sw x16, 8(x30)
+    sw x17, 12(x30)
 
 # ──────────────────────────────────────────────────────────────
 # PHASE 3: DMA.STORE outputs back to DRAM for checking
@@ -135,34 +135,34 @@
 
     LI    x6, 163840
     LI    x10, 0x90001400
-    DMA.STORE x10, x6, x12, 0      # out_store_1 = tile_B
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # out_store_1 = tile_B
+    dma.wait ch0
 
     LI    x6, 196608
     LI    x10, 0x90001800
-    DMA.STORE x10, x6, x12, 0      # out_load_1 = tile_A
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # out_load_1 = tile_A
+    dma.wait ch0
 
     LI    x6, 262144
     LI    x10, 0x90001C00
-    DMA.STORE x10, x6, x12, 0      # scalar_store_out
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # scalar_store_out
+    dma.wait ch0
 
     LI    x6, 327680
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0      # out_store_2 = tile_B
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # out_store_2 = tile_B
+    dma.wait ch0
 
     LI    x6, 196864
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x12, 0      # out_load_2 = tile_C
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # out_load_2 = tile_C
+    dma.wait ch0
 
     LI    x6, 262400
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x12, 0      # scalar_load_out
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # scalar_load_out
+    dma.wait ch0
 
     LI    x31, 1
-    CSRW  x31, 0xC10
+    csrrw x0, 0xC10, x31
     ECALL

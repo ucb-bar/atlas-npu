@@ -17,9 +17,9 @@ a_busy:
 
     LI    x2, 0xAAAAAAAA
     ADDI  x3, x0, 0
-    SW    x2, x3, 0
+    sw x2, 0(x3)
     DELAY 1
 
     ADDI  x1, x0, 1
-    CSRW  x1, 0xC10                 # dbg0 = 1 (A done)
+    csrrw x0, 0xC10, x1                 # dbg0 = 1 (A done)
     ECALL

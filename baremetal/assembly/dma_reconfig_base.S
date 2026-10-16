@@ -22,33 +22,33 @@
     LI    x5, 0x00000000
 
     # ── reissue 1: LOAD from 0x9000_0000 → VMEM[0] ──
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x10, 0x90000000
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     # ── reissue 2: LOAD from 0x9000_4000 → VMEM[256] ──
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x10, 0x90004000
     LI    x6, 256
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
 
     # ── reissue 3: STORE VMEM[0] → 0x9000_2000 ──
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x10, 0x90002000
     ADDI  x6, x0, 0
-    DMA.STORE x10, x6, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x6, x12, ch2
+    dma.wait ch2
 
     # ── reissue 4: STORE VMEM[256] → 0x9000_6000 ──
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x10, 0x90006000
     LI    x6, 256
-    DMA.STORE x10, x6, x12, 3
-    DMA.WAIT  3
+    dma.store x10, x6, x12, ch3
+    dma.wait ch3
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

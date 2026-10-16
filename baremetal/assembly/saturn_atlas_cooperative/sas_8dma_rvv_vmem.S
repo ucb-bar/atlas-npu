@@ -40,7 +40,7 @@
 # End: dbg0 = 1, halt_reason = ECALL.
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024            # transfer size
 
     LI    x29, 8               # N_ROUNDS
@@ -48,114 +48,114 @@
 
     # ── Phase marker 10: configured, round_loop entry ──
     ADDI  x1, x0, 10
-    CSRW  x1, 0xC10            # dbg0 = 10
+    csrrw x0, 0xC10, x1            # dbg0 = 10
 
 round_loop:
     # dbg1 = current round number (host can read post-mortem)
-    CSRW  x28, 0xC11
+    csrrw x0, 0xC11, x28
 
 # ── Phase 1: 8-channel DMA.LOAD burst (DRAM IN → VMEM banks) ──────────
 
     LI    x6,  0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0    # ch0 → bank 0 slot 0
+    dma.load x6, x10, x12, ch0    # ch0 → bank 0 slot 0
 
     LI    x6,  32768
     LI    x10, 0x90000400
-    DMA.LOAD x6, x10, x12, 1    # ch1 → bank 0
+    dma.load x6, x10, x12, ch1    # ch1 → bank 0
 
     LI    x6,  65536
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x12, 2    # ch2 → bank 1
+    dma.load x6, x10, x12, ch2    # ch2 → bank 1
 
     LI    x6,  131072
     LI    x10, 0x90000C00
-    DMA.LOAD x6, x10, x12, 3    # ch3 → bank 2
+    dma.load x6, x10, x12, ch3    # ch3 → bank 2
 
     LI    x6,  163840
     LI    x10, 0x90001000
-    DMA.LOAD x6, x10, x12, 4    # ch4 → bank 2
+    dma.load x6, x10, x12, ch4    # ch4 → bank 2
 
     LI    x6,  196608
     LI    x10, 0x90001400
-    DMA.LOAD x6, x10, x12, 5    # ch5 → bank 3
+    dma.load x6, x10, x12, ch5    # ch5 → bank 3
 
     LI    x6,  262144
     LI    x10, 0x90001800
-    DMA.LOAD x6, x10, x12, 6    # ch6 → bank 4
+    dma.load x6, x10, x12, ch6    # ch6 → bank 4
 
     LI    x6,  256
     LI    x10, 0x90001C00
-    DMA.LOAD x6, x10, x12, 7    # ch7 → bank 0 slot 1
+    dma.load x6, x10, x12, ch7    # ch7 → bank 0 slot 1
 
     # ── Phase marker 20: 8 DMA.LOADs enqueued, before WAITs ──
     ADDI  x1, x0, 20
-    CSRW  x1, 0xC10
+    csrrw x0, 0xC10, x1
 
     # Drain all 8 channels.
-    DMA.WAIT 0
-    DMA.WAIT 1
-    DMA.WAIT 2
-    DMA.WAIT 3
-    DMA.WAIT 4
-    DMA.WAIT 5
-    DMA.WAIT 6
-    DMA.WAIT 7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
     # ── Phase marker 30: all DMA.LOADs drained ──
     ADDI  x1, x0, 30
-    CSRW  x1, 0xC10
+    csrrw x0, 0xC10, x1
 
 # ── Phase 2: 8-channel DMA.STORE burst (VMEM banks → DRAM OUT) ────────
 
     LI    x6,  0
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0
+    dma.store x10, x6, x12, ch0
 
     LI    x6,  32768
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x12, 1
+    dma.store x10, x6, x12, ch1
 
     LI    x6,  65536
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x12, 2
+    dma.store x10, x6, x12, ch2
 
     LI    x6,  131072
     LI    x10, 0x90002C00
-    DMA.STORE x10, x6, x12, 3
+    dma.store x10, x6, x12, ch3
 
     LI    x6,  163840
     LI    x10, 0x90003000
-    DMA.STORE x10, x6, x12, 4
+    dma.store x10, x6, x12, ch4
 
     LI    x6,  196608
     LI    x10, 0x90003400
-    DMA.STORE x10, x6, x12, 5
+    dma.store x10, x6, x12, ch5
 
     LI    x6,  262144
     LI    x10, 0x90003800
-    DMA.STORE x10, x6, x12, 6
+    dma.store x10, x6, x12, ch6
 
     LI    x6,  256
     LI    x10, 0x90003C00
-    DMA.STORE x10, x6, x12, 7
+    dma.store x10, x6, x12, ch7
 
     # ── Phase marker 40: 8 DMA.STOREs enqueued, before WAITs ──
     ADDI  x1, x0, 40
-    CSRW  x1, 0xC10
+    csrrw x0, 0xC10, x1
 
-    DMA.WAIT 0
-    DMA.WAIT 1
-    DMA.WAIT 2
-    DMA.WAIT 3
-    DMA.WAIT 4
-    DMA.WAIT 5
-    DMA.WAIT 6
-    DMA.WAIT 7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
     # ── Phase marker 50: all DMA.STOREs drained, end of round ──
     ADDI  x1, x0, 50
-    CSRW  x1, 0xC10
+    csrrw x0, 0xC10, x1
 
     # Outer round loop counter.
     ADDI  x28, x28, 1
@@ -168,5 +168,5 @@ round_loop:
 # completion. dbg1 holds the last round counter for further diagnostics.)
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL
