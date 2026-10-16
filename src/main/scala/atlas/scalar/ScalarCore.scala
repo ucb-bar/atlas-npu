@@ -34,7 +34,6 @@ import chisel3.util._
 import ScalarISA._
 import atlas.common.VmemParams
 import atlas.lsu.LsuScalarCmd
-import atlas.perf.AtlasPerfCounterMap
 
 object AtlasMemMap {
   val IMEM_BASE      = 0x0002_0000L
@@ -43,7 +42,7 @@ object AtlasMemMap {
   val IMEM_ADDR_BITS = log2Ceil(IMEM_WORDS)
 
   val CSR_BASE        = 0x0004_0000L
-  val CSR_SIZE        = 0x20 + AtlasPerfCounterMap.Size
+  val CSR_SIZE        = 0x20
   val CSR_WINDOW_SIZE = 0x1000  // Size of the address range reserved for CSRs on the bus (4 KiB page). Only the first CSR_SIZE bytes are used; the rest is unused space
   val CSR_ADDR_BITS   = log2Ceil(CSR_WINDOW_SIZE)
 

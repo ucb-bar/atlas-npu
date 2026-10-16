@@ -660,6 +660,32 @@ def _parse_perf_report(source):
     return False
 
 
+def _parse_pmu_test(source):
+    """Parse `# @PMU_TEST` to exercise the tile PMU around the Atlas program."""
+    pat = re.compile(r"^\s*#\s*@PMU_TEST\s*$", re.IGNORECASE)
+    return any(pat.match(line) for line in source.splitlines())
+
+
+def _parse_pmu_events(source):
+    """Parse expected nonzero PMU event counters as (name, id) pairs."""
+    pat = re.compile(r"^\s*#\s*@PMU_EVENT\s+([A-Za-z0-9_.-]+)\s+(\d+)\s*$", re.IGNORECASE)
+    events = []
+    names = set()
+    ids = set()
+    for line in source.splitlines():
+        match = pat.match(line)
+        if not match:
+            continue
+        name, event_id_text = match.groups()
+        event_id = int(event_id_text)
+        if name in names or event_id in ids:
+            raise ValueError(f"Duplicate PMU event name or ID: {name} ({event_id})")
+        names.add(name)
+        ids.add(event_id)
+        events.append((name, event_id))
+    return events
+
+
 def _parse_perf_macs(source):
     """Parse `# @PERF_MACS_MXU0 <n>` and `# @PERF_MACS_MXU1 <n>` directives.
 
@@ -682,7 +708,8 @@ def _parse_perf_macs(source):
 
 
 def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
-                perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None):
+                perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None,
+                pmu_test=False, pmu_events=None):
     """Generate a complete baremetal C test.
 
     Args:
@@ -699,6 +726,10 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
             DRAM comparison for pass/fail.
         perf_macs_mxu0: total MACs issued to MXU0 in the timed window, or None.
         perf_macs_mxu1: total MACs issued to MXU1 in the timed window, or None.
+        pmu_test: if True, clear, enable, snapshot, and check the tile PMU
+            cycle counter around the Atlas program.
+        pmu_events: expected (name, ID) pairs; each captured counter must be
+            nonzero after the Atlas program completes.
     """
     n = len(code)
     array_body = ""
@@ -707,12 +738,80 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
         array_body += f"    0x{word & 0xFFFFFFFF:08X}{comma}\n"
 
     has_golden = golden is not None and (golden[1] or golden[3])
+    pmu_header = """#include "tile_pmu.h"
+
+#define ATLAS_PMU_BASE 0x00041000UL
+#define ATLAS_PMU_RUN_CYCLES_ID 0U
+""" if pmu_test else ""
+    pmu_events = pmu_events or []
+    pmu_event_id_checks = "".join(
+        f"""    if (PMU_INFO_COUNT(pmu_info) <= {event_id}U) {{
+        printf("*** FAILED *** (PMU has no {name} counter at ID {event_id})\\n");
+        return 1;
+    }}
+"""
+        for name, event_id in pmu_events
+    )
+    pmu_event_checks = "".join(
+        f"""    uint64_t pmu_event_{event_id} =
+        tile_pmu_read_counter(ATLAS_PMU_BASE, {event_id}U);
+    printf("  PMU {name} = %llu\\n", (unsigned long long)pmu_event_{event_id});
+    if (pmu_event_{event_id} == 0) {{
+        printf("*** FAILED *** (PMU {name} did not increment)\\n");
+        return 1;
+    }}
+"""
+        for name, event_id in pmu_events
+    )
+    pmu_start = ("""
+    uint32_t pmu_info = tile_pmu_read32(ATLAS_PMU_BASE, PMU_MMIO_INFO);
+    if (PMU_INFO_COUNT(pmu_info) <= ATLAS_PMU_RUN_CYCLES_ID) {
+        printf("*** FAILED *** (PMU has no core.run_cycles counter)\\n");
+        return 1;
+    }
+""" + pmu_event_id_checks + """
+    tile_pmu_enable(ATLAS_PMU_BASE, 0);
+    tile_pmu_command(ATLAS_PMU_BASE, PMU_COMMAND_CLEAR);
+    tile_pmu_command(ATLAS_PMU_BASE, PMU_COMMAND_SNAPSHOT);
+    uint64_t cleared_cycles = tile_pmu_read_counter(ATLAS_PMU_BASE, ATLAS_PMU_RUN_CYCLES_ID);
+    if (cleared_cycles != 0) {
+        printf("*** FAILED *** (PMU clear left core.run_cycles at %llu)\\n",
+               (unsigned long long)cleared_cycles);
+        return 1;
+    }
+    tile_pmu_command(ATLAS_PMU_BASE, PMU_COMMAND_CLEAR);
+    tile_pmu_enable(ATLAS_PMU_BASE, 1);
+""") if pmu_test else ""
+    pmu_finish = ("""
+    tile_pmu_enable(ATLAS_PMU_BASE, 0);
+    tile_pmu_command(ATLAS_PMU_BASE, PMU_COMMAND_SNAPSHOT);
+    uint32_t pmu_status = tile_pmu_read32(ATLAS_PMU_BASE, PMU_MMIO_STATUS);
+    if ((pmu_status & PMU_STATUS_SNAPSHOT_VALID) == 0) {
+        printf("*** FAILED *** (PMU snapshot was not valid)\\n");
+        return 1;
+    }
+    uint64_t run_cycles = tile_pmu_read_counter(ATLAS_PMU_BASE, ATLAS_PMU_RUN_CYCLES_ID);
+    printf("  PMU core.run_cycles = %llu\\n", (unsigned long long)run_cycles);
+    if (run_cycles == 0) {
+        printf("*** FAILED *** (PMU core.run_cycles did not increment)\\n");
+        return 1;
+    }
+""" + pmu_event_checks + """
+    for (volatile uint32_t delay = 0; delay < 100; delay++) {
+        asm volatile ("" ::: "memory");
+    }
+    if (tile_pmu_read_counter(ATLAS_PMU_BASE, ATLAS_PMU_RUN_CYCLES_ID) != run_cycles) {
+        printf("*** FAILED *** (PMU snapshot changed after capture)\\n");
+        return 1;
+    }
+""") if pmu_test else ""
 
     # header & helpers & memory map
     out = f"""\
 /* Auto-generated from {test_name} by assembler.py */
 #include <stdio.h>
 #include <stdint.h>
+{pmu_header}
 
 static inline uint32_t mmio_read32(uint64_t addr) {{ return *(volatile uint32_t *)addr; }}
 static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint32_t *)addr = val; }}
@@ -796,6 +895,7 @@ int main(void)
     }}
     printf("IMEM readback OK\\n");
 
+{pmu_start}
     printf("Issuing Atlas START command ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_START);
     asm volatile ("fence" ::: "memory");
@@ -811,6 +911,7 @@ int main(void)
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
     asm volatile ("fence" ::: "memory");
 
+{pmu_finish}
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
     uint32_t status   = mmio_read32(CSR_STATUS); 
@@ -981,15 +1082,23 @@ def main():
         if perf_report and perf_threshold is None:
             print("Perf reporting enabled (no gating)")
         perf_macs_mxu0, perf_macs_mxu1 = _parse_perf_macs(source)
+        pmu_test = _parse_pmu_test(source)
+        pmu_events = _parse_pmu_events(source)
+        if pmu_events and not pmu_test:
+            raise ValueError("@PMU_EVENT requires @PMU_TEST")
         if perf_macs_mxu0 is not None:
             print(f"Perf MACs MXU0: {perf_macs_mxu0}")
         if perf_macs_mxu1 is not None:
             print(f"Perf MACs MXU1: {perf_macs_mxu1}")
+        if pmu_test:
+            print(f"PMU counter check enabled ({1 + len(pmu_events)} events)")
         c_source = emit_c_file(code, test_name, golden=golden,
                                perf_threshold=perf_threshold,
                                perf_report=perf_report,
                                perf_macs_mxu0=perf_macs_mxu0,
-                               perf_macs_mxu1=perf_macs_mxu1)
+                               perf_macs_mxu1=perf_macs_mxu1,
+                               pmu_test=pmu_test,
+                               pmu_events=pmu_events)
         with open(args.out_c, "w") as f:
             f.write(c_source)
         print(f"Wrote C file to {args.out_c} ({len(code)} instructions)")

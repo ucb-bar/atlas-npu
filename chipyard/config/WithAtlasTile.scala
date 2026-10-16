@@ -8,6 +8,7 @@ import freechips.rocketchip.diplomacy.{BufferParams, AddressSet}
 import atlas.common.AtlasParams
 import testchipip.soc.SubsystemInjectorKey
 import atlas.tile.{AtlasTileKey, AtlasTileParams,AtlasTileInjector}
+import pmu.{PMUParams, TilePMUParams}
 
 class WithAtlasTile(
   base:            BigInt               = AtlasParams().vmem.base,
@@ -15,7 +16,10 @@ class WithAtlasTile(
   busWhere:        TLBusWrapperLocation = SBUS,
   name:            String               = "atlas-tile",
   disableMonitors: Boolean              = false,
-  atlasParams:     AtlasParams          = AtlasParams()
+  atlasParams:     AtlasParams          = AtlasParams(),
+  pmu: Option[PMUParams] = Some(PMUParams(
+    tilePMU = Some(TilePMUParams(baseAddress = BigInt(0x0004_1000L)))
+  ))
 ) extends Config((site, here, up) => {
   case AtlasTileKey =>
     Seq(AtlasTileParams(
@@ -24,7 +28,8 @@ class WithAtlasTile(
       busWhere        = busWhere,
       name            = name,
       disableMonitors = disableMonitors,
-      atlasParams     = atlasParams
+      atlasParams     = atlasParams,
+      pmu             = pmu
     ))
   case SubsystemInjectorKey =>
     up(SubsystemInjectorKey) + AtlasTileInjector

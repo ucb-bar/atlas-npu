@@ -7,3 +7,6 @@
 [submodule "npu-model"]
 	path = npu-model
 	url = git@github.com:ucb-ee194-tapeout/npu_model.git
+[submodule "dependencies/pmu"]
+	path = dependencies/pmu
+	url = https://github.com/ucb-bar/pmu.git

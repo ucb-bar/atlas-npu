@@ -18,7 +18,6 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters}
 
 import atlas.common._
-import atlas.perf.AtlasPerfEvents
 import atlas.scalar.{ScalarCore, ScalarISA, VpuStatus, AtlasMemMap,
                       CSRFile, LsuCmd, InstrMem, ImemFetchPort, DmaCmd,
                       MxuCmd => ScalarMxuCmd, VpuCmd, XluCmd,
@@ -32,13 +31,15 @@ import atlas.xlu.{XluEngine, XluCommand}
 import atlas.lsu.LSU
 import atlas.mreg.MregFile
 import atlas.vmem.Vmem
+import pmu.PMURegistry
 
 class AtlasCore(
   tp:     AtlasParams        = AtlasParams(),
   imemBP: TLBundleParameters,
   csrBP:  TLBundleParameters,
   dmaBP:  TLBundleParameters,
-  vmemBP: TLBundleParameters
+  vmemBP: TLBundleParameters,
+  pmuRegistry: Option[PMURegistry] = None
 ) extends Module {
 
   private val iptP  = tp.ipt
@@ -74,7 +75,7 @@ class AtlasCore(
   // ==========================================================================
 
   val imem    = Module(new InstrMem(imemBP))
-  val csrfile = Module(new CSRFile(csrBP, mregP.numMregBanks, vmemP.numBanks))
+  val csrfile = Module(new CSRFile(csrBP))
   val vmem    = Module(new Vmem(vmemP, vmemBP))
   val scalar  = Module(new ScalarCore(vmemP))
   val dma     = Module(new DmaEngine(tp, dmaBP))
@@ -102,32 +103,68 @@ class AtlasCore(
   // ==========================================================================
 
   csrfile.io.csr <> scalar.io.csrPort
-  csrfile.io.perfEvents.runActive        := csrfile.io.execRun
-  csrfile.io.perfEvents.dmaActive        := dma.io.channelBusy.asUInt.orR
-  csrfile.io.perfEvents.dmaCommand       := scalar.io.dmaCmd.valid
-  csrfile.io.perfEvents.dmaIssuedBeat    := dma.io.perfIssuedBeat
-  csrfile.io.perfEvents.dmaCompletedBeat := dma.io.perfCompletedBeat
-  csrfile.io.perfEvents.dmaVmemStall     := dma.io.perfVmemStall
-  csrfile.io.perfEvents.dmaSaturated     := dma.io.perfSaturated
-  csrfile.io.perfEvents.dmaLimitBlocked   := dma.io.perfLimitBlocked
-  csrfile.io.perfEvents.dmaOutstanding   := dma.io.perfOutstanding
-  csrfile.io.perfEvents.dmaResponseWaitBeatCycles := dma.io.perfResponseWaitBeatCycles
-  csrfile.io.perfEvents.dmaFenceWait      := scalar.io.dmaFenceWait
-  csrfile.io.perfEvents.vpuActive        := vpu.io.busy
-  csrfile.io.perfEvents.vpuCommand       := scalar.io.vpuCmd.valid
-  csrfile.io.perfEvents.mxu0Compute      := mxu0.io.computeBusy
-  csrfile.io.perfEvents.mxu0Data         := mxu0.io.dataBusy
-  csrfile.io.perfEvents.mxu0Command      := scalar.io.mxu0Cmd.valid
-  csrfile.io.perfEvents.mxu1Compute      := mxu1.io.computeBusy
-  csrfile.io.perfEvents.mxu1Data         := mxu1.io.dataBusy
-  csrfile.io.perfEvents.mxu1Command      := scalar.io.mxu1Cmd.valid
-  csrfile.io.perfEvents.mregRead         := mreg.io.perfReadAccess
-  csrfile.io.perfEvents.mregWrite        := mreg.io.perfWriteAccess
-  csrfile.io.perfEvents.mregReadContended := mreg.io.perfReadContended
-  csrfile.io.perfEvents.mregWriteContended := mreg.io.perfWriteContended
-  csrfile.io.perfEvents.vmemRead         := vmem.io.perfReadAccess
-  csrfile.io.perfEvents.vmemWrite        := vmem.io.perfWriteAccess
-  csrfile.io.perfEvents.vmemContended    := vmem.io.perfContended
+  pmuRegistry.foreach { registry =>
+    def event(name: String, increment: UInt, unit: String, description: String): Unit =
+      registry.register(name, increment, unit, description)
+
+    event("core.run_cycles", csrfile.io.execRun.asUInt, "cycles",
+      "Cycles while Atlas execution is enabled")
+    event("dma.active_cycles", dma.io.channelBusy.asUInt.orR.asUInt, "cycles",
+      "Cycles with at least one DMA channel active")
+    event("dma.commands", scalar.io.dmaCmd.valid.asUInt, "commands",
+      "DMA commands issued by the scalar core")
+    event("dma.beats_issued", dma.io.perfIssuedBeat.asUInt, "beats",
+      "VMEM beats issued by DMA")
+    event("dma.beats_completed", dma.io.perfCompletedBeat.asUInt, "beats",
+      "VMEM beats completed by DMA")
+    event("dma.vmem_stall_cycles", dma.io.perfVmemStall.asUInt, "cycles",
+      "Cycles DMA is stalled by VMEM")
+    event("dma.saturated_cycles", dma.io.perfSaturated.asUInt, "cycles",
+      "Cycles DMA is at its configured in-flight limit")
+    event("dma.limit_blocked_cycles", dma.io.perfLimitBlocked.asUInt, "cycles",
+      "Cycles an otherwise ready DMA request is blocked by the in-flight limit")
+    event("dma.outstanding_cycles", dma.io.perfOutstanding.asUInt, "cycles",
+      "Cycles with at least one DMA beat outstanding")
+    event("dma.response_wait_beat_cycles", dma.io.perfResponseWaitBeatCycles, "beat-cycles",
+      "Outstanding DMA beats summed across cycles while awaiting responses")
+    event("dma.fence_wait_cycles", scalar.io.dmaFenceWait.asUInt, "cycles",
+      "Cycles the scalar core waits for a DMA fence")
+    event("vpu.active_cycles", vpu.io.busy.asUInt, "cycles",
+      "Cycles the vector processing unit is active")
+    event("vpu.commands", scalar.io.vpuCmd.valid.asUInt, "commands",
+      "VPU commands issued by the scalar core")
+    event("mxu0.compute_cycles", mxu0.io.computeBusy.asUInt, "cycles",
+      "Cycles MXU 0 performs computation")
+    event("mxu0.data_cycles", mxu0.io.dataBusy.asUInt, "cycles",
+      "Cycles MXU 0 is active in its data path")
+    event("mxu0.commands", scalar.io.mxu0Cmd.valid.asUInt, "commands",
+      "MXU 0 commands issued by the scalar core")
+    event("mxu1.compute_cycles", mxu1.io.computeBusy.asUInt, "cycles",
+      "Cycles MXU 1 performs computation")
+    event("mxu1.data_cycles", mxu1.io.dataBusy.asUInt, "cycles",
+      "Cycles MXU 1 is active in its data path")
+    event("mxu1.commands", scalar.io.mxu1Cmd.valid.asUInt, "commands",
+      "MXU 1 commands issued by the scalar core")
+
+    for (bank <- 0 until mregP.numMregBanks) {
+      event(f"mreg.bank_$bank%02d.read_cycles", mreg.io.perfReadAccess(bank).asUInt,
+        "cycles", s"Cycles MREG bank $bank accepts a read")
+      event(f"mreg.bank_$bank%02d.write_cycles", mreg.io.perfWriteAccess(bank).asUInt,
+        "cycles", s"Cycles MREG bank $bank accepts a write")
+      event(f"mreg.bank_$bank%02d.read_contended_cycles", mreg.io.perfReadContended(bank).asUInt,
+        "cycles", s"Cycles MREG bank $bank has contended read requests")
+      event(f"mreg.bank_$bank%02d.write_contended_cycles", mreg.io.perfWriteContended(bank).asUInt,
+        "cycles", s"Cycles MREG bank $bank has contended write requests")
+    }
+    for (bank <- 0 until vmemP.numBanks) {
+      event(f"vmem.bank_$bank%02d.read_cycles", vmem.io.perfReadAccess(bank).asUInt,
+        "cycles", s"Cycles VMEM bank $bank accepts a read")
+      event(f"vmem.bank_$bank%02d.write_cycles", vmem.io.perfWriteAccess(bank).asUInt,
+        "cycles", s"Cycles VMEM bank $bank accepts a write")
+      event(f"vmem.bank_$bank%02d.contended_cycles", vmem.io.perfContended(bank).asUInt,
+        "cycles", s"Cycles VMEM bank $bank has contending requests")
+    }
+  }
   scalar.io.execRun      := csrfile.io.execRun
   scalar.io.execRunWrite := csrfile.io.execRunWrite
 

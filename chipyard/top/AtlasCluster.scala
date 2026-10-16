@@ -7,34 +7,13 @@ import atlas.config._
 import atlas.ipt._
 
 class AtlasCluster(implicit p: Parameters) extends Module {
-
-  // Matrix unit (InnerProductTrees)
-  val matrixUnit = p(InnerProductTreeKey).map { params =>
-    val m = Module(new InnerProductTrees(params))
-    m
-  }
-
-  // Future subunits
-  // val vectorUnit = p(VectorUnitKey).map { params =>
-  //   Module(new VectorUnit(params))
-  // }
-  // val controller = p(ControllerKey).map { params =>
-  //   Module(new Controller(params))
-  // }
-
-  // Top-level IO
-  // For now, just expose the matrix unit IO if present.
-  // Replace this with a proper unified IO bundle as Atlas grows.
-  val io = IO(new Bundle {
-    val matrix = matrixUnit.map { m =>
-      val port = IO(m.io.cloneType)
-      port
-    }
-  })
-
-  matrixUnit.foreach { m =>
-    io.matrix.foreach { port =>
-      port <> m.io
-    }
-  }
+  val params = p(InnerProductTreeKey).getOrElse(
+    throw new IllegalArgumentException(
+      "AtlasCluster requires InnerProductTreeKey to be set in the config. " +
+      "Use a config that includes WithInnerProductTrees."
+    )
+  )
+  val matrixUnit = Module(new InnerProductTrees(params))
+  val io = IO(matrixUnit.io.cloneType)
+  io <> matrixUnit.io
 }

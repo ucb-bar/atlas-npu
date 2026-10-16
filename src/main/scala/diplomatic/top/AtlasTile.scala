@@ -21,8 +21,11 @@ import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.{BaseSubsystem, TLBusWrapperLocation, SBUS, PBUS}
+import freechips.rocketchip.util.ElaborationArtefacts
 import atlas.common.AtlasParams
 import testchipip.soc.{SubsystemInjectorKey, SubsystemInjector}
+import pmu.{CanHavePMUEvents, PMUEvents, PMUParams, PMURegistry, TilePMU}
+import pmu.tilelink.PMUTileLink
 
 import atlas.scalar.{AtlasMemMap, ScalarISA}
 
@@ -54,11 +57,18 @@ private object AtlasTile {
   * @param p   Implicit Rocket-Chip configuration parameters.
   */
 class AtlasTile(
-    tp: AtlasParams = AtlasParams()
+    tp: AtlasParams = AtlasParams(),
+    pmuParams: Option[PMUParams] = None,
+    pmuSource: String = "atlas-tile",
+    pmuBeatBytes: Int = 4
 )(implicit p: Parameters) extends LazyModule {
 
   private val dmaP  = tp.dma
   private val vmemP = tp.vmem
+  private val pmuRegistry = pmuParams.map(_ => new PMURegistry(pmuSource))
+  val pmuMMIO = pmuParams.flatMap(_.tilePMU).map { params =>
+    new PMUTileLink(params, pmuBeatBytes, pmuSource)
+  }
 
   // ==========================================================================
   // Manager (slave) nodes — IMEM, CSR, VMEM
@@ -139,7 +149,7 @@ class AtlasTile(
   // Module implementation
   // ==========================================================================
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with CanHavePMUEvents {
 
     // Resolve diplomatic bundles.
     val (imemBundle, imemEdge) = imemNode.in.head
@@ -153,7 +163,8 @@ class AtlasTile(
       imemBP = imemEdge.bundle,
       csrBP  = csrEdge.bundle,
       dmaBP  = dmaEdge.bundle,
-      vmemBP = vmemEdge.bundle
+      vmemBP = vmemEdge.bundle,
+      pmuRegistry = pmuRegistry
     ))
 
     // Connect TileLink ports.
@@ -161,6 +172,16 @@ class AtlasTile(
     core.io.csrTL  <> csrBundle
     dmaBundle      <> core.io.dmaTL
     vmemBundle     <> core.io.vmemTL
+
+    override val pmuEvents: Option[PMUEvents] = pmuRegistry.map(_.build())
+    pmuEvents.foreach { events =>
+      ElaborationArtefacts.add(s"${events.manifest.source}.pmu.json", events.manifest.toJson)
+    }
+    val tilePMU = for (events <- pmuEvents; mmio <- pmuMMIO) yield {
+      val attachment = TilePMU.build(events, mmio.params.counterBits)
+      mmio.attach(attachment)
+      attachment
+    }
 
     // Expose core status to the SoC level.
     val halted = IO(Output(Bool()))
@@ -179,6 +200,7 @@ case class AtlasTileParams(
   name: String = "atlas",
   disableMonitors: Boolean = false,
   atlasParams: AtlasParams = AtlasParams(),
+  pmu: Option[PMUParams] = None,
 )
 
 case object AtlasTileKey extends Field[Seq[AtlasTileParams]](Nil)
@@ -194,7 +216,15 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
     val vmemP = params.atlasParams.vmem
 
     val atlasDomain = bus.generateSynchronousDomain(s"atlas_domain_$si")
-    val atlasTile = atlasDomain { LazyModule(new AtlasTile(params.atlasParams)) }
+    val pmuSource = s"${params.name}_$si"
+    val atlasTile = atlasDomain {
+      LazyModule(new AtlasTile(
+        tp = params.atlasParams,
+        pmuParams = params.pmu,
+        pmuSource = pmuSource,
+        pmuBeatBytes = pbus.beatBytes
+      ))
+    }
     val csrMaxTransferBytes = math.min(pbus.blockBytes, AtlasMemMap.CSR_WINDOW_SIZE)
 
     // connect DMA, IMEM, CSR, and VMEM to SBUS
@@ -222,6 +252,12 @@ case object AtlasTileInjector extends SubsystemInjector((p, baseSubsystem) => {
           TLFragmenter(vmemP.beatBytes, bus.beatBytes) :=
           TLBuffer() :=
           TLWidthWidget(bus.beatBytes) := _
+      }
+
+      atlasTile.pmuMMIO.foreach { mmio =>
+        pbus.coupleTo(s"${params.name}-$si-pmu") {
+          mmio.node := TLBuffer() := _
+        }
       }
     }
 

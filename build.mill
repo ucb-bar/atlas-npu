@@ -31,6 +31,13 @@ object atlas extends ScalaModule with ScalafmtModule {
     ivy"org.chipsalliance:::chisel-plugin:7.0.0-RC4"
   )
 
+  def verilog(args: String*) = Task.Command {
+    val repoRoot = millSourcePath / os.up
+    os.proc(Seq((repoRoot / "scripts" / "elaborate.sh").toString) ++ args)
+      .call(cwd = repoRoot)
+    ()
+  }
+
   // ScalaTest-based test module (Mill 0.13 requires this)
   object test extends ScalaTests with ScalaTest with ScalafmtModule {
     def ivyDeps = super.ivyDeps() ++ Agg(
@@ -50,6 +57,47 @@ object atlas extends ScalaModule with ScalafmtModule {
       val wrapperDir  = (projectRoot / "bin").toString
       val currentPath = sys.env.getOrElse("PATH", "")
       super.forkEnv() ++ Map("PATH" -> s"$wrapperDir:$currentPath")
+    }
+  }
+
+  object pmuTest extends ScalaModule with ScalafmtModule {
+    def scalaVersion = "2.13.16"
+
+    private def chipyardRoot = {
+      val configured = sys.env.get("CHIPYARD_DIR").orElse(sys.env.get("CY_DIR")).orElse(sys.env.get("CYROOT"))
+      configured.map(os.Path(_)).getOrElse(
+        throw new IllegalArgumentException("Set CYROOT, CY_DIR, or CHIPYARD_DIR to compile PMU tests")
+      )
+    }
+
+    override def sources = Task.Sources {
+      val repoRoot = millSourcePath / os.up / os.up
+      val pmuRoot = repoRoot / "dependencies" / "pmu"
+      Seq(
+        PathRef(pmuRoot / "schema" / "src" / "main" / "scala"),
+        PathRef(pmuRoot / "src" / "main" / "scala"),
+        PathRef(chipyardRoot / "tools" / "cde" / "cde" / "src" / "chipsalliance" / "rocketchip"),
+      )
+    }
+
+    def ivyDeps = Agg(
+      ivy"org.chipsalliance::chisel:6.7.0",
+      ivy"com.lihaoyi::ujson:3.3.1"
+    )
+
+    def scalacPluginIvyDeps = Agg(
+      ivy"org.chipsalliance:::chisel-plugin:6.7.0"
+    )
+
+    object test extends ScalaTests with ScalaTest with ScalafmtModule {
+      def ivyDeps = super.ivyDeps() ++ Agg(
+        ivy"org.scalatest::scalatest:3.2.19",
+        ivy"edu.berkeley.cs::chiseltest:6.0.0"
+      )
+
+      override def sources = Task.Sources(
+        millSourcePath / os.up / os.up / os.up / "pmu-test" / "src" / "test" / "scala"
+      )
     }
   }
 }

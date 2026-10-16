@@ -2,6 +2,16 @@
 # @TIMEOUT 500000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_triple_unit_concurrent.py 777
+# @PMU_TEST
+# These IDs follow the Atlas PMU's sorted event list for the default config.
+# @PMU_EVENT dma.beats_completed 2
+# @PMU_EVENT dma.commands 4
+# @PMU_EVENT mxu0.commands 139
+# @PMU_EVENT mxu0.compute_cycles 140
+# @PMU_EVENT mxu1.commands 142
+# @PMU_EVENT mxu1.compute_cycles 143
+# @PMU_EVENT vpu.active_cycles 163
+# @PMU_EVENT vpu.commands 164
 #
 # Three independent functional units compute simultaneously:
 #   MXU0 (SA):  C0 = X0 @ W0      (32×32, single k-tile, BF16 out)
