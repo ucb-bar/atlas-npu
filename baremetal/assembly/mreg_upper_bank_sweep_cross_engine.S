@@ -35,7 +35,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x2, 1024            # common 1 KiB DMA size
     LI    x3, 2048            # common 2 KiB DMA size
@@ -53,92 +53,92 @@ setup_done:
     # DMA A_fp8 to VMEM[0 words]
     ADDI  x6, x0, 0          # VMEM word addr
     LI    x7, 0x90000000  # DRAM byte offset
-    DMA.LOAD x6, x7, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x7, x2, ch0
+    dma.wait ch0
 
     # DMA B_fp8 raw to VMEM[256 words]
     ADDI  x6, x0, 256
     LI    x7, 0x90000400
-    DMA.LOAD x6, x7, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x7, x2, ch0
+    dma.wait ch0
 
     # DMA BF16 seed pair to VMEM[512 words] (2048 B covers low+high banks)
     ADDI  x6, x0, 512
     LI    x7, 0x90000800
-    DMA.LOAD x6, x7, x3, 0
-    DMA.WAIT 0
+    dma.load x6, x7, x3, ch0
+    dma.wait ch0
 
     # VLOAD all upper banks we intend to touch.
     ADDI  x10, x0, 0
-    VLOAD 48, x10, 0         # A_fp8 -> m48
+    vload m48, 0(x10)         # A_fp8 -> m48
     DELAY 33
 
     ADDI  x10, x0, 256
-    VLOAD 50, x10, 0         # B raw -> m50
+    vload m50, 0(x10)         # B raw -> m50
     DELAY 33
 
     ADDI  x10, x0, 512
-    VLOAD 58, x10, 0         # BF16 seed low -> m58
+    vload m58, 0(x10)         # BF16 seed low -> m58
     DELAY 33
-    VLOAD 59, x10, 8         # BF16 seed high -> m59
+    vload m59, 8(x10)         # BF16 seed high -> m59
     DELAY 33
 
     # High-bank passthrough stores to ensure direct read+write coverage on m58/m59.
     ADDI  x11, x0, 1024
-    VSTORE 58, x11, 0
+    vstore m58, 0(x11)
     DELAY 33
-    VSTORE 59, x11, 8
+    vstore m59, 8(x11)
     DELAY 33
 
     # XLU transpose the raw FP8 weight tile from m50 into high bank m52.
-    VTRPOSE.XLU 52, 50
+    vtrpose.xlu m52, m50
     DELAY 64
 
     # MXU1 consumes upper-bank activation and transposed weight.
-    VMATPUSH.W.MXU1 0, 52
+    vmatpush.weight.mxu1 w0, m52
     DELAY 31
-    VMATMUL.MXU1 0, 48, 0
+    vmatmul.mxu1 acc0, m48, w0
     DELAY 34
-    VMATPOP.BF16.MXU1 60, 0
+    vmatpop.bf16.acc.mxu1 m60, acc0
     DELAY 31
 
     # VPU post-process on upper BF16 pair.
-    VRELU 62, 60
+    vrelu.bf16 m62, m60
     DELAY 64
 
     # Store MXU BF16 result pair and VPU ReLU pair to VMEM.
     ADDI  x12, x0, 1536
-    VSTORE 60, x12, 0
+    vstore m60, 0(x12)
     DELAY 33
-    VSTORE 61, x12, 8
+    vstore m61, 8(x12)
     DELAY 33
 
     LI    x12, 2048
-    VSTORE 62, x12, 0
+    vstore m62, 0(x12)
     DELAY 33
-    VSTORE 63, x12, 8
+    vstore m63, 8(x12)
     DELAY 33
 
     # Drain all checked regions to DRAM.
     LI    x13, 0x90001000
     ADDI  x14, x0, 1024
-    DMA.STORE x13, x14, x2, 1
-    DMA.WAIT 1
+    dma.store x13, x14, x2, ch1
+    dma.wait ch1
 
     LI    x13, 0x90001400
     ADDI  x14, x0, 1280
-    DMA.STORE x13, x14, x2, 1
-    DMA.WAIT 1
+    dma.store x13, x14, x2, ch1
+    dma.wait ch1
 
     LI    x13, 0x90001800
     ADDI  x14, x0, 1536
-    DMA.STORE x13, x14, x3, 1
-    DMA.WAIT 1
+    dma.store x13, x14, x3, ch1
+    dma.wait ch1
 
     LI    x13, 0x90002000
     LI    x14, 2048
-    DMA.STORE x13, x14, x3, 1
-    DMA.WAIT 1
+    dma.store x13, x14, x3, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

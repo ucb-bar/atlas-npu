@@ -16,7 +16,7 @@
 
     # ── Setup Input A (4.0 -> BF16: 0x4080) ──
     CSRRS x24, 0xC00, x0
-    VLI.ALL 0, 0x4080
+    vli.all m0, 0x4080
     DELAY 63
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
@@ -24,7 +24,7 @@
 
     # ── Setup Input B (2.0 -> BF16: 0x4000) ──
     CSRRS x24, 0xC00, x0
-    VLI.ALL 2, 0x4000
+    vli.all m2, 0x4000
     DELAY 63
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
@@ -34,16 +34,16 @@
     # Test 1: vadd.bf16  8, 0, 2  (4.0 + 2.0 = 6.0 -> 0x40C0)
     # ================================================================
     CSRRS x24, 0xC00, x0
-    VADD.BF16  8, 0, 2
+    vadd.bf16 m8, m0, m2
     DELAY 64
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
     ADD   x26, x26, x9
 
     LI    x8, 0x20000000
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    LHU   x10, x8, 0
+    lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x40C0
     BNE   x10, x11, fail
@@ -53,16 +53,16 @@
     # Test 2: vsub.bf16  8, 0, 2  (4.0 - 2.0 = 2.0 -> 0x4000)
     # ================================================================
     CSRRS x24, 0xC00, x0
-    VSUB.BF16  8, 0, 2
+    vsub.bf16 m8, m0, m2
     DELAY 64
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
     ADD   x26, x26, x9
 
     LI    x8, 0x20000000
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    LHU   x10, x8, 0
+    lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4000
     BNE   x10, x11, fail
@@ -72,16 +72,16 @@
     # Test 3: vmul.bf16  8, 0, 2  (4.0 * 2.0 = 8.0 -> 0x4100)
     # ================================================================
     CSRRS x24, 0xC00, x0
-    VMUL.BF16  8, 0, 2
+    vmul.bf16 m8, m0, m2
     DELAY 64
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
     ADD   x26, x26, x9
 
     LI    x8, 0x20000000
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    LHU   x10, x8, 0
+    lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4100
     BNE   x10, x11, fail
@@ -91,16 +91,16 @@
     # Test 4: vmin.bf16  8, 0, 2  (min(4.0, 2.0) = 2.0 -> 0x4000)
     # ================================================================
     CSRRS x24, 0xC00, x0
-    VMIN.BF16  8, 0, 2
+    vminimum.bf16 m8, m0, m2
     DELAY 64
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
     ADD   x26, x26, x9
 
     LI    x8, 0x20000000
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    LHU   x10, x8, 0
+    lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4000
     BNE   x10, x11, fail
@@ -110,16 +110,16 @@
     # Test 5: vmax.bf16  8, 0, 2  (max(4.0, 2.0) = 4.0 -> 0x4080)
     # ================================================================
     CSRRS x24, 0xC00, x0
-    VMAX.BF16  8, 0, 2
+    vmaximum.bf16 m8, m0, m2
     DELAY 64
     CSRRS x25, 0xC00, x0
     SUB   x9,  x25, x24
     ADD   x26, x26, x9
 
     LI    x8, 0x20000000
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    LHU   x10, x8, 0
+    lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
     BNE   x10, x11, fail

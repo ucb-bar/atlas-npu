@@ -58,21 +58,21 @@
 #   0x4800  zero bias FP8    (1024B, all 0x00)
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
     LI    x15, 1024
-    SELI  0, 127          # scale reg 0 — identity E8M0 for FP8 pops
-    SELI  1, 127          # scale reg 1 — identity E8M0
+    seli e0, 127          # scale reg 0 — identity E8M0 for FP8 pops
+    seli e1, 127          # scale reg 1 — identity E8M0
 
 # ═══════════════════════════════════════════════════════════════
 # GLOBAL SETUP: Load zero bias → TRF 12 (persistent for all phases)
 # ═══════════════════════════════════════════════════════════════
     LI    x8, 512                   # VMEM staging addr
     LI    x10, 0x90004800  # DRAM: zero bias FP8
-    DMA.LOAD  x8, x10, x12, 3
-    DMA.WAIT  3
+    dma.load x8, x10, x12, ch3
+    dma.wait ch3
     LI    x8, 512
-    VLOAD 12, x8, 0
+    vload m12, 0(x8)
 
 ######################################################################
 # Phase 1: Q[:,0:32] = X@WQ_A + X@WQ_B + bias → acc 0
@@ -84,13 +84,13 @@
     # Load WQ_A → TRF 4 → transpose → TRF 5
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     # Wait for XLU transpose to finish writing m5 before MXU reads it.
     DELAY 64
 
@@ -98,52 +98,52 @@
     # Slot B: push weights → wbuf 0 from TRF 5
     # Slot A: push zero bias → acc 0 from TRF 12
     # Different push types → different submodule interfaces → safe.
-    VMATPUSH.W.MXU1       0, 5
+    vmatpush.weight.mxu1 w0, m5
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.ACC.FP8.MXU1 0, 12
+    vmatpush.acc.fp8.mxu1 acc0, m12
 
     # Pre-load WQ_B → TRF 6 → transpose → TRF 7
     LI    x7, 256
     LI    x10, 0x90000C00
-    DMA.LOAD  x7, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x7, x10, x12, ch1
+    dma.wait ch1
     LI    x7, 256
-    VLOAD 6, x7, 0
+    vload m6, 0(x7)
     # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     # Wait for XLU transpose to finish writing m7 before MXU reads it.
     DELAY 64
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # ── OVERLAP [b]: compute + weight push (slab 1) ──
     # Slot A: MATMUL.ACC acc 0 (accumulates onto zero bias = same as MATMUL)
     # Slot B: push wbuf 1 ← TRF 7
-    VMATMUL.ACC.MXU1  0, 0, 0
+    vmatmul.acc.mxu1 acc0, m0, w0
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.W.MXU1   1, 7
+    vmatpush.weight.mxu1 w1, m7
 
     # Load X[:,32:64] → TRF 0
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # Phase 1, slab 2: compute only (no extra overlap this phase)
-    VMATMUL.ACC.MXU1  0, 0, 1
+    vmatmul.acc.mxu1 acc0, m0, w1
     # Wait for matmul pipeline to finish writing acc 0 before pop.
     DELAY 34
     # → acc 0 now holds Q[:,0:32]
@@ -157,9 +157,9 @@
     # Slot A or B: push zero bias → acc 1
     # Slot C:      pop acc 0 → TRF 8, FP8 scale reg 0
     # Different acc buffers (push → acc 1, pop → acc 0). Safe.
-    VMATPUSH.ACC.FP8.MXU1 1, 12
+    vmatpush.acc.fp8.mxu1 acc1, m12
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPOP.FP8.MXU1      8, 0, 0
+    vmatpop.fp8.acc.mxu1 m8, acc0, e0
 
 ######################################################################
 # Phase 2: Q[:,32:64] → acc 1
@@ -171,52 +171,52 @@
     # Load WQ_C → TRF 4 → transpose → TRF 5, push to wbuf 0
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     # Wait for XLU transpose to finish writing m5 before MXU reads it.
     DELAY 64
-    VMATPUSH.W.MXU1  0, 5
+    vmatpush.weight.mxu1 w0, m5
 
     # Pre-load WQ_D → TRF 6 → transpose → TRF 7
     LI    x7, 256
     LI    x10, 0x90001400
-    DMA.LOAD  x7, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x7, x10, x12, ch1
+    dma.wait ch1
     LI    x7, 256
-    VLOAD 6, x7, 0
+    vload m6, 0(x7)
     # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     # Wait for XLU transpose to finish writing m7 before MXU reads it.
     DELAY 64
 
     # Load X[:,0:32] → TRF 0
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # ── OVERLAP [b]: compute + weight push (slab 1) ──
-    VMATMUL.ACC.MXU1  1, 0, 0
+    vmatmul.acc.mxu1 acc1, m0, w0
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.W.MXU1   1, 7
+    vmatpush.weight.mxu1 w1, m7
 
     # Load X[:,32:64] → TRF 0
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
@@ -224,21 +224,21 @@
     # Slot A: MATMUL.ACC on acc 1 (compute)
     # Slot B: push zero bias → acc 0 (preload for phase 3)
     # acc 1 ≠ acc 0 → no buffer conflict. Safe.
-    VMATMUL.ACC.MXU1      1, 0, 1
+    vmatmul.acc.mxu1 acc1, m0, w1
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.ACC.FP8.MXU1 0, 12
+    vmatpush.acc.fp8.mxu1 acc0, m12
     # → acc 1 now holds Q[:,32:64]
     # → acc 0 now holds zero bias (ready for phase 3)
 
     # Store Q[:,0:32] from TRF 8 (pop completed long ago during DMA loads)
     LI    x8, 512
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90002800
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
 ######################################################################
 # Phase 3: K[:,0:32] → acc 0  |  pop acc 1 → TRF 9
@@ -250,35 +250,35 @@
     # Load WK_A → TRF 4 → transpose → TRF 5, push to wbuf 0
     ADDI  x6, x0, 0
     LI    x10, 0x90001800
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     # Wait for XLU transpose to finish writing m5 before MXU reads it.
     DELAY 64
-    VMATPUSH.W.MXU1  0, 5
+    vmatpush.weight.mxu1 w0, m5
 
     LI    x7, 256
     LI    x10, 0x90001C00
-    DMA.LOAD  x7, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x7, x10, x12, ch1
+    dma.wait ch1
     LI    x7, 256
-    VLOAD 6, x7, 0
+    vload m6, 0(x7)
     # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     # Wait for XLU transpose to finish writing m7 before MXU reads it.
     DELAY 64
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
@@ -287,36 +287,36 @@
     # Slot B: PUSH.W → wbuf 1 ← TRF 7
     # Slot C: POP.FP8 acc 1 → TRF 9, scale reg 1
     # All three slots active. acc 0 ≠ acc 1, wbuf 1 ≠ wbuf 0. Safe.
-    VMATMUL.ACC.MXU1  0, 0, 0
+    vmatmul.acc.mxu1 acc0, m0, w0
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.W.MXU1   1, 7
+    vmatpush.weight.mxu1 w1, m7
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPOP.FP8.MXU1  9, 1, 1
+    vmatpop.fp8.acc.mxu1 m9, acc1, e1
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # Phase 3, slab 2: compute only
-    VMATMUL.ACC.MXU1  0, 0, 1
+    vmatmul.acc.mxu1 acc0, m0, w1
     # Wait for matmul pipeline to finish writing acc 0 before pop.
     DELAY 34
     # → acc 0 now holds K[:,0:32]
 
     # Store Q[:,32:64] from TRF 9
     LI    x8, 512
-    VSTORE 9, x8, 0
+    vstore m9, 0(x8)
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90002C00
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
 ######################################################################
 # Transition 3→4: acc push (bias→acc1) + pop (acc0→TRF10)
@@ -324,9 +324,9 @@
 ######################################################################
 
     # ── OVERLAP [d]: acc push + pop ──
-    VMATPUSH.ACC.FP8.MXU1 1, 12
+    vmatpush.acc.fp8.mxu1 acc1, m12
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPOP.FP8.MXU1      10, 0, 0
+    vmatpop.fp8.acc.mxu1 m10, acc0, e0
 
 ######################################################################
 # Phase 4: K[:,32:64] → acc 1
@@ -337,68 +337,68 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90002000
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     # Wait for VLOAD to finish writing m4 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     # Wait for XLU transpose to finish writing m5 before MXU reads it.
     DELAY 64
-    VMATPUSH.W.MXU1  0, 5
+    vmatpush.weight.mxu1 w0, m5
 
     LI    x7, 256
     LI    x10, 0x90002400
-    DMA.LOAD  x7, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x7, x10, x12, ch1
+    dma.wait ch1
     LI    x7, 256
-    VLOAD 6, x7, 0
+    vload m6, 0(x7)
     # Wait for VLOAD to finish writing m6 before XLU reads it for transpose.
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     # Wait for XLU transpose to finish writing m7 before MXU reads it.
     DELAY 64
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # ── OVERLAP [b]: compute + weight push ──
-    VMATMUL.ACC.MXU1  1, 0, 0
+    vmatmul.acc.mxu1 acc1, m0, w0
     # Back-to-back issue is intentional here; these ops overlap safely on MXU1.
-    VMATPUSH.W.MXU1   1, 7
+    vmatpush.weight.mxu1 w1, m7
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # ── OVERLAP [c]: compute + acc push ──
     # Preload bias→acc 0 for phase 5 scores
-    VMATMUL.ACC.MXU1      1, 0, 1
-    VMATPUSH.ACC.FP8.MXU1 0, 12
+    vmatmul.acc.mxu1 acc1, m0, w1
+    vmatpush.acc.fp8.mxu1 acc0, m12
     # → acc 1 holds K[:,32:64]
     # → acc 0 holds zero bias (ready for phase 5)
 
     # Store K[:,0:32] from TRF 10
     LI    x8, 512
-    VSTORE 10, x8, 0
+    vstore m10, 0(x8)
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90003000
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
 ######################################################################
 # Phase 5: scores = Q @ K^T → acc 0
@@ -413,95 +413,95 @@
 ######################################################################
 
     # Pop K[:,32:64] from acc 1 → TRF 11 (MUST happen before DRAM loads)
-    VMATPOP.FP8.MXU1  11, 1, 1
+    vmatpop.fp8.acc.mxu1 m11, acc1, e1
 
     # Load K[:,0:32] result → TRF 4, push to wbuf 0 (no transpose)
     # Pop runs concurrently with this DMA+push (~50 cycles > 32 cycle pop)
     ADDI  x6, x0, 0
     LI    x10, 0x90003000
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     # Wait for VLOAD to finish writing m4 before MXU reads weights from it.
     DELAY 33
-    VMATPUSH.W.MXU1  0, 4
+    vmatpush.weight.mxu1 w0, m4
 
     # Store K[:,32:64] from TRF 11 → DRAM (pop finished during load above)
     LI    x8, 512
-    VSTORE 11, x8, 0
+    vstore m11, 0(x8)
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
     LI    x8, 512
     LI    x10, 0x90003400
-    DMA.STORE x10, x8, x12, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x12, ch2
+    dma.wait ch2
 
     # Load K[:,32:64] from DRAM → TRF 6 (now correct data is there)
     ADDI  x6, x0, 0
     LI    x10, 0x90003400
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     # Wait for VLOAD to finish writing m6 before MXU reads weights from it.
     DELAY 33
 
     # Load Q[:,0:32] activations → TRF 0
     LI    x7, 256
     LI    x10, 0x90002800
-    DMA.LOAD  x7, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x10, x12, ch0
+    dma.wait ch0
     LI    x7, 256
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # ── OVERLAP [b]: compute + weight push ──
-    VMATMUL.ACC.MXU1  0, 0, 0
-    VMATPUSH.W.MXU1   1, 6
+    vmatmul.acc.mxu1 acc0, m0, w0
+    vmatpush.weight.mxu1 w1, m6
 
     # Load Q[:,32:64] activations → TRF 0
     LI    x7, 256
     LI    x10, 0x90002C00
-    DMA.LOAD  x7, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x7, x10, x12, ch0
+    dma.wait ch0
     LI    x7, 256
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     # Wait for VLOAD to finish writing m0 before MXU reads activations.
     DELAY 33
 
     # Phase 5, slab 2: accumulate
-    VMATMUL.ACC.MXU1  0, 0, 1
+    vmatmul.acc.mxu1 acc0, m0, w1
 
 ######################################################################
 # Final pop: scores from acc 0 (BF16)
 ######################################################################
     # Wait for the final matmul to finish before popping BF16 scores.
     DELAY 34
-    VMATPOP.BF16.MXU1  2, 0
+    vmatpop.bf16.acc.mxu1 m2, acc0
     # Wait for pop to finish writing m2/m3 before LSU reads them (VSTORE).
     DELAY 31
 
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     # LSU is busy during VSTORE; delay before issuing the next VSTORE.
     DELAY 33
     LI    x9, 768
-    VSTORE 3, x9, 0
+    vstore m3, 0(x9)
     # Wait for VSTORE to finish before DMA reads VMEM for store-back.
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90004000
-    DMA.STORE x10, x8, x15, 2
-    DMA.WAIT  2
+    dma.store x10, x8, x15, ch2
+    dma.wait ch2
 
     LI    x9, 768
     LI    x10, 0x90004400
-    DMA.STORE x10, x9, x15, 3
-    DMA.WAIT  3
+    dma.store x10, x9, x15, ch3
+    dma.wait ch3
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

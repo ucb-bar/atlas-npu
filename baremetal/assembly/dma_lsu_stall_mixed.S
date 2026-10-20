@@ -12,7 +12,7 @@
 #   - final checks prove both load-data and store-data slots retire correctly
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
 
 # ============================================================================
@@ -22,24 +22,24 @@
 
     LI    x6, 262144
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     LI    x6, 262400
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 1
+    dma.load x6, x10, x12, ch1
 
     LI    x6, 327680
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 2
+    dma.load x6, x10, x12, ch2
 
     LI    x6, 327936
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 3
+    dma.load x6, x10, x12, ch3
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
 # Scalar scratch byte addresses. Each one is in the same bank as a DMA region
 # but outside the 1024-byte DMA tile being checked.
@@ -61,35 +61,35 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     LI    x6, 262144
     LI    x10, 0x90003000
-    DMA.STORE x10, x6, x12, 1
+    dma.store x10, x6, x12, ch1
 
     LI    x6, 65536
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 2
+    dma.load x6, x10, x12, ch2
 
     LI    x6, 262400
     LI    x10, 0x90003400
-    DMA.STORE x10, x6, x12, 3
+    dma.store x10, x6, x12, ch3
 
     LI    x6, 131072
     LI    x10, 0x90001800
-    DMA.LOAD  x6, x10, x12, 4
+    dma.load x6, x10, x12, ch4
 
     LI    x6, 327680
     LI    x10, 0x90003800
-    DMA.STORE x10, x6, x12, 5
+    dma.store x10, x6, x12, ch5
 
     LI    x6, 196608
     LI    x10, 0x90001C00
-    DMA.LOAD  x6, x10, x12, 6
+    dma.load x6, x10, x12, ch6
 
     LI    x6, 327936
     LI    x10, 0x90003C00
-    DMA.STORE x10, x6, x12, 7
+    dma.store x10, x6, x12, ch7
 
 # ============================================================================
 # LSU pressure loop. Stores deny DMA write grants on banks 0..3; loads deny DMA
@@ -98,55 +98,55 @@
 # ============================================================================
 
 lsu_stall_loop:
-    SW    x13, x20, 0
-    SW    x13, x21, 0
-    SW    x13, x22, 0
-    SW    x13, x23, 0
+    sw x13, 0(x20)
+    sw x13, 0(x21)
+    sw x13, 0(x22)
+    sw x13, 0(x23)
 
-    LW    x14, x24, 0
+    lw x14, 0(x24)
     DELAY 2
-    LW    x15, x25, 0
+    lw x15, 0(x25)
     DELAY 2
-    LW    x16, x26, 0
+    lw x16, 0(x26)
     DELAY 2
-    LW    x17, x27, 0
+    lw x17, 0(x27)
     DELAY 2
 
     ADDI  x18, x18, -1
     BNE   x18, x0, lsu_stall_loop
     NOP
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
-    DMA.WAIT  4
-    DMA.WAIT  5
-    DMA.WAIT  6
-    DMA.WAIT  7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
 # Store the four DMA-loaded tiles back out so the LOAD half is checked.
     ADDI  x6, x0, 0
     LI    x10, 0x90004000
-    DMA.STORE x10, x6, x12, 0
+    dma.store x10, x6, x12, ch0
 
     LI    x6, 65536
     LI    x10, 0x90004400
-    DMA.STORE x10, x6, x12, 1
+    dma.store x10, x6, x12, ch1
 
     LI    x6, 131072
     LI    x10, 0x90004800
-    DMA.STORE x10, x6, x12, 2
+    dma.store x10, x6, x12, ch2
 
     LI    x6, 196608
     LI    x10, 0x90004C00
-    DMA.STORE x10, x6, x12, 3
+    dma.store x10, x6, x12, ch3
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

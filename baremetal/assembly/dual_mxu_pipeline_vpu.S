@@ -72,10 +72,10 @@
 #   0x5000  diff bank1     (1024B BF16)
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127
-    SELI  1, 127
+    seli e0, 127
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: Load zero bias → m10
@@ -83,10 +83,10 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90001800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 10, x6, 0
+    vload m10, 0(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,36 +99,36 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90001C00
-    DMA.LOAD  x6, x10, x12, 0
+    dma.load x6, x10, x12, ch0
 
     LI    x7, 256
     LI    x10, 0x90002000
-    DMA.LOAD  x7, x10, x12, 1
+    dma.load x7, x10, x12, ch1
 
     LI    x8, 512
     LI    x10, 0x90002400
-    DMA.LOAD  x8, x10, x12, 2
+    dma.load x8, x10, x12, ch2
 
     LI    x9, 768
     LI    x10, 0x90002800
-    DMA.LOAD  x9, x10, x12, 3
+    dma.load x9, x10, x12, ch3
 
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
     ADDI  x6, x0, 0
-    VLOAD 12, x6, 0                # m12 ← A_vpu bank0
+    vload m12, 0(x6)                # m12 ← A_vpu bank0
     DELAY 33
     LI    x7, 256
-    VLOAD 13, x7, 0                # m13 ← A_vpu bank1
+    vload m13, 0(x7)                # m13 ← A_vpu bank1
     DELAY 33
     LI    x8, 512
-    VLOAD 14, x8, 0                # m14 ← B_vpu bank0
+    vload m14, 0(x8)                # m14 ← B_vpu bank0
     DELAY 33
     LI    x9, 768
-    VLOAD 15, x9, 0                # m15 ← B_vpu bank1
+    vload m15, 0(x9)                # m15 ← B_vpu bank1
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -138,27 +138,27 @@
     # W0_A → VMEM[0] → m2 → XLU → m3
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 3, 2
+    vtrpose.xlu m3, m2
     DELAY 64
 
     # ── [a] MXU0 w-push + acc-push ──
-    VMATPUSH.W.MXU0       0, 3
-    VMATPUSH.ACC.FP8.MXU0 0, 10
+    vmatpush.weight.mxu0 w0, m3
+    vmatpush.acc.fp8.mxu0 acc0, m10
 
     # Preload W0_B (k=1) → m4 → XLU → m5
     ADDI  x6, x0, 0
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
@@ -168,27 +168,27 @@
     # W1_A → VMEM[0] → m6 → XLU → m7
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 7, 6
+    vtrpose.xlu m7, m6
     DELAY 64
 
     # ── [b] MXU1 w-push + acc-push ──
-    VMATPUSH.W.MXU1       0, 7
-    VMATPUSH.ACC.FP8.MXU1 0, 10
+    vmatpush.weight.mxu1 w0, m7
+    vmatpush.acc.fp8.mxu1 acc0, m10
 
     # Preload W1_B (k=1) → m8 → XLU → m9
     ADDI  x6, x0, 0
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 1
-    DMA.WAIT  1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
     ADDI  x6, x0, 0
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 9, 8
+    vtrpose.xlu m9, m8
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
@@ -197,12 +197,12 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000  # DRAM 0x0000: X[:,0:32]
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0                 # MXU0 activations slab 0
+    vload m0, 0(x6)                 # MXU0 activations slab 0
     DELAY 33
-    VLOAD 6, x6, 0                 # MXU1 duplicate slab 0
+    vload m6, 0(x6)                 # MXU1 duplicate slab 0
     DELAY 33
 
     # ── [c]+[e]: MXU0 compute + w-push, MXU1 compute + w-push ──
@@ -210,15 +210,15 @@
     # This keeps every active MREG reader on a distinct bank.
     # MXU0: matmul acc 0 with X slab 0, push W0_B→wbuf1
     # MXU1: matmul acc 0 with duplicated X slab 0, push W1_B→wbuf1
-    VMATMUL.ACC.MXU0  0, 0, 0
-    VMATPUSH.W.MXU0   1, 5
-    VMATMUL.ACC.MXU1  0, 6, 0
-    VMATPUSH.W.MXU1   1, 9
+    vmatmul.acc.mxu0 acc0, m0, w0
+    vmatpush.weight.mxu0 w1, m5
+    vmatmul.acc.mxu1 acc0, m6, w0
+    vmatpush.weight.mxu1 w1, m9
 
     # ── [f]: VPU vsub during MXU compute ──
     # VPU reads the even/odd source pairs (m12,m13) and (m14,m15) —
     # no conflict with MXU activations (m0, m6) or accumulators
-    VSUB.BF16  2, 12, 14          # m2,m3 ← vsub(A_vpu, B_vpu)
+    vsub.bf16 m2, m12, m14          # m2,m3 ← vsub(A_vpu, B_vpu)
     # Note: m2,m3 held MXU0 weight data, now overwritten (weights already pushed)
 
 # ═══════════════════════════════════════════════════════════════
@@ -230,23 +230,23 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000400  # DRAM 0x0400: X[:,32:64]
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 1, x6, 0                 # MXU0 activations slab 1
+    vload m1, 0(x6)                 # MXU0 activations slab 1
     DELAY 33
-    VLOAD 8, x6, 0                 # MXU1 duplicate slab 1
+    vload m8, 0(x6)                 # MXU1 duplicate slab 1
     DELAY 33
 
     # ── [e]: Dual MXU concurrent compute, k-tile 1 ──
     # MXU0 reads m1; MXU1 reads duplicated slab m8.
-    VMATMUL.ACC.MXU0  0, 1, 1     # acc 0 += X[:,32:64] @ W0_B
-    VMATMUL.ACC.MXU1  0, 8, 1     # acc 0 += X[:,32:64] @ W1_B
+    vmatmul.acc.mxu0 acc0, m1, w1     # acc 0 += X[:,32:64] @ W0_B
+    vmatmul.acc.mxu1 acc0, m8, w1     # acc 0 += X[:,32:64] @ W1_B
 
     # ── [f]: VPU vmax during MXU compute ──
     # Same source pairs as VSUB: A=(m12,m13), B=(m14,m15). VSUB wrote
     # to m2,m3 so sources m12-m15 are still intact.
-    VMAX.BF16  4, 12, 14          # m4,m5 ← vmax(A_vpu, B_vpu)
+    vmaximum.bf16 m4, m12, m14          # m4,m5 ← vmax(A_vpu, B_vpu)
     # m4,m5 held MXU0 W0_B weight data, now overwritten (already pushed)
 
     # Wait for MXU matmul pipelines to drain
@@ -257,40 +257,40 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 3, x9, 0
+    vstore m3, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90003C00
-    DMA.STORE x10, x8, x12, 2
+    dma.store x10, x8, x12, ch2
     LI    x9, 768
     LI    x10, 0x90004000
-    DMA.STORE x10, x9, x12, 3
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.store x10, x9, x12, ch3
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # STORE VPU vmax result (m4,m5)
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 5, x9, 0
+    vstore m5, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90004400
-    DMA.STORE x10, x8, x12, 2
+    dma.store x10, x8, x12, ch2
     LI    x9, 768
     LI    x10, 0x90004800
-    DMA.STORE x10, x9, x12, 3
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.store x10, x9, x12, ch3
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # POP RESULTS: MXU0 pop + MXU1 pop [g]
@@ -299,8 +299,8 @@
 # ═══════════════════════════════════════════════════════════════
 
     # ── [g]: concurrent pops on different units + acc buffers ──
-    VMATPOP.BF16.MXU0  2, 0
-    VMATPOP.BF16.MXU1  4, 0
+    vmatpop.bf16.acc.mxu0 m2, acc0
+    vmatpop.bf16.acc.mxu1 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -308,69 +308,69 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 3, x9, 0
+    vstore m3, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90002C00
-    DMA.STORE x10, x8, x12, 0
+    dma.store x10, x8, x12, ch0
     LI    x9, 768
     LI    x10, 0x90003000
-    DMA.STORE x10, x9, x12, 1
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.store x10, x9, x12, ch1
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # STORE MXU1 result (m4,m5)
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 5, x9, 0
+    vstore m5, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90003400
-    DMA.STORE x10, x8, x12, 0
+    dma.store x10, x8, x12, ch0
     LI    x9, 768
     LI    x10, 0x90003800
-    DMA.STORE x10, x9, x12, 1
-    DMA.WAIT  0
-    DMA.WAIT  1
+    dma.store x10, x9, x12, ch1
+    dma.wait ch0
+    dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
 # CROSS-UNIT: VPU vsub(C0, C1) — m2,m3 = C0, m4,m5 = C1
 #   ── [i]: VPU compute ──
 # ═══════════════════════════════════════════════════════════════
 
-    VSUB.BF16  6, 2, 4            # m6,m7 ← vsub(C0, C1)
+    vsub.bf16 m6, m2, m4            # m6,m7 ← vsub(C0, C1)
     DELAY 64
 
     LI    x8, 512
-    VSTORE 6, x8, 0
+    vstore m6, 0(x8)
     DELAY 33
     LI    x9, 768
-    VSTORE 7, x9, 0
+    vstore m7, 0(x9)
     DELAY 33
 
     LI    x8, 512
     LI    x10, 0x90004C00
-    DMA.STORE x10, x8, x12, 2
+    dma.store x10, x8, x12, ch2
     LI    x9, 768
     LI    x10, 0x90005000
-    DMA.STORE x10, x9, x12, 3
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.store x10, x9, x12, ch3
+    dma.wait ch2
+    dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
 # DONE
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL
     

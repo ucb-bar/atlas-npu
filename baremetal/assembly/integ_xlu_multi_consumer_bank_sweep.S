@@ -17,7 +17,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x14, 1024
     LI    x15, 2048
@@ -25,62 +25,62 @@
     # -------- Iteration 0: transpose -> MXU0 consumer --------
     LI    x10, 0x90000000  # A0 src
     ADDI  x11, x0, 0        # VMEM word 0
-    DMA.LOAD x11, x10, x14, 0
-    DMA.WAIT 0
-    VLOAD 0, x11, 0
+    dma.load x11, x10, x14, ch0
+    dma.wait ch0
+    vload m0, 0(x11)
     DELAY 33
 
     LI    x10, 0x90000400  # B0 src
     LI    x11, 256          # VMEM word 256
-    DMA.LOAD x11, x10, x14, 1
-    DMA.WAIT 1
-    VLOAD 4, x11, 0
+    dma.load x11, x10, x14, ch1
+    dma.wait ch1
+    vload m4, 0(x11)
     DELAY 33
 
-    VTRPOSE.XLU 8, 4
+    vtrpose.xlu m8, m4
     DELAY 64
 
-    VMATPUSH.W.MXU0 0, 8
+    vmatpush.weight.mxu0 w0, m8
     DELAY 31
-    VMATMUL.MXU0 0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
-    VMATPOP.BF16.MXU0 12, 0
+    vmatpop.bf16.acc.mxu0 m12, acc0
     DELAY 31
 
     LI    x11, 4096
-    VSTORE 12, x11, 0
+    vstore m12, 0(x11)
     DELAY 33
-    VSTORE 13, x11, 8
+    vstore m13, 8(x11)
     DELAY 33
 
     LI    x10, 0x90002000
-    DMA.STORE x10, x11, x15, 2
-    DMA.WAIT 2
+    dma.store x10, x11, x15, ch2
+    dma.wait ch2
 
     # -------- Iteration 1: transpose -> VMEM/DMA consumer --------
     LI    x10, 0x90000800  # A1 src, loaded only to vary bank occupancy
     LI    x11, 65536
-    DMA.LOAD x11, x10, x14, 0
-    DMA.WAIT 0
-    VLOAD 16, x11, 0
+    dma.load x11, x10, x14, ch0
+    dma.wait ch0
+    vload m16, 0(x11)
     DELAY 33
 
     LI    x10, 0x90000C00  # B1 src
     LI    x11, 65792
-    DMA.LOAD x11, x10, x14, 1
-    DMA.WAIT 1
-    VLOAD 20, x11, 0
+    dma.load x11, x10, x14, ch1
+    dma.wait ch1
+    vload m20, 0(x11)
     DELAY 33
 
-    VTRPOSE.XLU 24, 20
+    vtrpose.xlu m24, m20
     DELAY 64
 
     LI    x11, 69632
-    VSTORE 24, x11, 0
+    vstore m24, 0(x11)
     DELAY 33
     LI    x10, 0x90002800
-    DMA.STORE x10, x11, x14, 3
-    DMA.WAIT 3
+    dma.store x10, x11, x14, ch3
+    dma.wait ch3
 
 pass:
     ADDI  x1, x0, 1

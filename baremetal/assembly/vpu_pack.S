@@ -28,22 +28,22 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
 
 # ── Load Input A (BF16) → m0,m1 ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
 # ================================================================
@@ -51,42 +51,42 @@
 #   scale reg 0 = 0x80 → 2^(+1)
 #   pack subtracts this exponent, so 2.0 → 1.0 → E4M3 0x38
 # ================================================================
-    SELI  0, 0x80
-    VFP8PACK 4, 0, 0
+    seli e0, 0x80
+    vpack.bf16.fp8 m4, m0, e0
     DELAY 64
 
     LI    x8, 512
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
 
     LI    x8, 512
     LI    x3, 0x90000800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 # ================================================================
 # Test 2: vfp8unpack  m8, m4 with scale reg 1
 #   scale reg 1 = 0x81 → 2^2 = 4.0
 #   result = 1.0 × 4.0 = 4.0 → BF16 0x4080
 # ================================================================
-    SELI  1, 0x81
-    VFP8UNPACK 8, 4, 1
+    seli e1, 0x81
+    vunpack.fp8.bf16 m8, m4, e1
     DELAY 65
 
     LI    x8, 1024
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
-    VSTORE 9, x8, 8
+    vstore m9, 8(x8)
     DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x90001000
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1280
     LI    x3, 0x90001400
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

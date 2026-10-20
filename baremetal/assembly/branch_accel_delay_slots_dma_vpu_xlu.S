@@ -33,7 +33,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x8, 1024          # common 1 KiB transfer size
 
@@ -52,15 +52,15 @@
 # The redirect target then waits for completion before consuming the data.
 # ----------------------------------------------------------------------
     BEQ   x0, x0, beq_target
-    DMA.LOAD x6, x7, x8, 0
+    dma.load x6, x7, x8, ch0
 
     ADDI  x28, x0, 101
     JAL   x0, fail
     NOP
 
 beq_target:
-    DMA.WAIT 0
-    VLOAD 20, x6, 0         # m20 <- loaded FP8 tile
+    dma.wait ch0
+    vload m20, 0(x6)         # m20 <- loaded FP8 tile
     DELAY 33
 
 # ----------------------------------------------------------------------
@@ -68,15 +68,15 @@ beq_target:
 # Fallthrough then waits for VLI completion before issuing XLU transpose.
 # ----------------------------------------------------------------------
     BNE   x0, x0, bne_unreached
-    VLI.COL 24, 0x3F80
+    vli.col m24, 0x3F80
 
     DELAY 31
-    VTRPOSE.XLU 25, 24
+    vtrpose.xlu m25, m24
     DELAY 64
-    VSTORE 25, x10, 0       # store XLU output to VMEM[2048..3071]
+    vstore m25, 0(x10)       # store XLU output to VMEM[2048..3071]
     DELAY 33
-    DMA.STORE x12, x10, x8, 1
-    DMA.WAIT 1
+    dma.store x12, x10, x8, ch1
+    dma.wait ch1
     JAL   x0, after_bne_case
     NOP
 
@@ -91,7 +91,7 @@ after_bne_case:
 # and helper then waits conservatively before DMA.STORE reads VMEM.
 # ----------------------------------------------------------------------
     JAL   x1, helper_store
-    VSTORE 20, x9, 0
+    vstore m20, 0(x9)
 
     JAL   x0, pass
     NOP
@@ -99,8 +99,8 @@ after_bne_case:
 helper_store:
 helper_body:
     DELAY 32
-    DMA.STORE x11, x9, x8, 2
-    DMA.WAIT 2
+    dma.store x11, x9, x8, ch2
+    dma.wait ch2
     JALR  x0, x1, 0
     NOP
 

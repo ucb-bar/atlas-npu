@@ -80,7 +80,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 2048               # 2 KiB DMA size (input tiles, paired outputs)
     LI    x3, 2048               # 2 KiB DMA size for paired output stores
 
@@ -89,58 +89,58 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---- Tile A / VSQRT       -> 0x2000 ----
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90002000
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VLOG2       -> 0x2800 ----
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90002800
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VRECIP.BF16 -> 0x3000 ----
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003000
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VEXP        -> 0x3800 ----
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003800
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VEXP2       -> 0x4000 ----
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004000
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VTANH       -> 0x4800 ----
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004800
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VSQUARE.BF16 -> 0x5000 ----
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005000
     JAL   x1, store_pair
     NOP
     # ---- Tile A / VCUBE.BF16   -> 0x5800 ----
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005800
     JAL   x1, store_pair
@@ -151,58 +151,58 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---- Tile B / VSQRT       -> 0x6000 ----
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006000
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VLOG2       -> 0x6800 ----
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006800
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VRECIP.BF16 -> 0x7000 ----
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007000
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VEXP        -> 0x7800 ----
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007800
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VEXP2       -> 0x8000 ----
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008000
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VTANH       -> 0x8800 ----
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008800
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VSQUARE.BF16 -> 0x9000 ----
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009000
     JAL   x1, store_pair
     NOP
     # ---- Tile B / VCUBE.BF16   -> 0x9800 ----
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009800
     JAL   x1, store_pair
@@ -213,58 +213,58 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---- Tile C / VSQRT       -> 0xA000 ----
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A000
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VLOG2       -> 0xA800 ----
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A800
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VRECIP.BF16 -> 0xB000 ----
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B000
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VEXP        -> 0xB800 ----
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B800
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VEXP2       -> 0xC000 ----
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C000
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VTANH       -> 0xC800 ----
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C800
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VSQUARE.BF16 -> 0xD000 ----
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D000
     JAL   x1, store_pair
     NOP
     # ---- Tile C / VCUBE.BF16   -> 0xD800 ----
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D800
     JAL   x1, store_pair
@@ -275,58 +275,58 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x10, 0x90001800
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ---- Tile D / VSQRT       -> 0xE000 ----
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E000
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VLOG2       -> 0xE800 ----
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E800
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VRECIP.BF16 -> 0xF000 ----
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F000
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VEXP        -> 0xF800 ----
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F800
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VEXP2       -> 0x10000 ----
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010000
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VTANH       -> 0x10800 ----
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010800
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VSQUARE.BF16 -> 0x11000 ----
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011000
     JAL   x1, store_pair
     NOP
     # ---- Tile D / VCUBE.BF16   -> 0x11800 ----
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011800
     JAL   x1, store_pair
@@ -340,131 +340,131 @@
 # ======================================================================
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # Five LUT pipes off the same Tile A pair. Each is sequenced into
     # its own destination bank pair, separated by a full latency window
     # so the next op can read a fresh m0/m1 / write its own dest.
-    VLOG2  8, 0
+    vlog2.bf16 m8, m0
     DELAY 64
-    VSQRT 12, 0
+    vsqrt.bf16 m12, m0
     DELAY 64
-    VEXP2 16, 0
+    vexp2.bf16 m16, m0
     DELAY 64
-    VRECIP.BF16 20, 0
+    vrecip.bf16 m20, m0
     DELAY 64
-    VTANH 24, 0
+    vtanh.bf16 m24, m0
     DELAY 64
 
     # Binary combinations feed AddSubSum / Mul-Rec adders with non-trivial
     # mantissa/exponent diversity (unlike constant-input arithmetic tests).
-    VMUL.BF16 28,  8, 12
+    vmul.bf16 m28, m8, m12
     DELAY 64
-    VADD.BF16 30, 16, 20
+    vadd.bf16 m30, m16, m20
     DELAY 64
-    VSUB.BF16 32, 24, 28
+    vsub.bf16 m32, m24, m28
     DELAY 64
 
     # Row reduction across the ADD result.
-    VREDSUM.ROW.BF16 34, 30
+    vredsum.row.bf16 m34, m30
     DELAY 37
 
     # FP8 pack / unpack with non-trivial scales hits the saturation,
     # underflow, and clip paths in the dual-path FP8 datapath.
-    SELI 3, 0x7B
-    SELI 4, 0x86
-    VFP8PACK 36, 30, 3
+    seli e3, 0x7B
+    seli e4, 0x86
+    vpack.bf16.fp8 m36, m30, e3
     DELAY 64
-    VFP8UNPACK 38, 36, 4
+    vunpack.fp8.bf16 m38, m36, e4
     DELAY 65
 
     # Column reduction over the unpacked stream drives the csum adder
     # tree with values shaped by every prior LUT and FP8 stage.
-    VREDSUM.BF16 40, 38
+    vredsum.bf16 m40, m38
     DELAY 128
 
     # ---- chain stores ----
     # m28/m29 (mul) -> 0x12000
     LI    x8, 1024
-    VSTORE 28, x8, 0
+    vstore m28, 0(x8)
     DELAY 33
-    VSTORE 29, x8, 8
+    vstore m29, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90012000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # m30/m31 (add) -> 0x12800
     LI    x8, 1024
-    VSTORE 30, x8, 0
+    vstore m30, 0(x8)
     DELAY 33
-    VSTORE 31, x8, 8
+    vstore m31, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90012800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # m32/m33 (sub) -> 0x13000
     LI    x8, 1024
-    VSTORE 32, x8, 0
+    vstore m32, 0(x8)
     DELAY 33
-    VSTORE 33, x8, 8
+    vstore m33, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90013000
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # m34/m35 (row-sum) -> 0x13800
     LI    x8, 1024
-    VSTORE 34, x8, 0
+    vstore m34, 0(x8)
     DELAY 33
-    VSTORE 35, x8, 8
+    vstore m35, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90013800
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # m36 (fp8pack, single 1 KiB mreg) -> 0x14000
     LI    x8, 1024
-    VSTORE 36, x8, 0
+    vstore m36, 0(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90014000
     LI    x11, 1024
-    DMA.STORE x10, x9, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x11, ch1
+    dma.wait ch1
 
     # m38/m39 (fp8unpack pair) -> 0x14400
     LI    x8, 1024
-    VSTORE 38, x8, 0
+    vstore m38, 0(x8)
     DELAY 33
-    VSTORE 39, x8, 8
+    vstore m39, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90014400
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
     # m40/m41 (col-sum pair) -> 0x14C00
     LI    x8, 1024
-    VSTORE 40, x8, 0
+    vstore m40, 0(x8)
     DELAY 33
-    VSTORE 41, x8, 8
+    vstore m41, 8(x8)
     DELAY 33
     LI    x9, 1024
     LI    x10, 0x90014C00
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1
@@ -477,12 +477,12 @@ fail:
 
 store_pair:
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
     JALR  x0, x1, 0
     NOP

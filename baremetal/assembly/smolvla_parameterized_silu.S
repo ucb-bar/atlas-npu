@@ -20,14 +20,14 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x22, 0x8000
 
     # ── Invariant constants (set once) ──
-    VLI.ALL 2, 0xBF80          # -1.0
+    vli.all m2, 0xBF80          # -1.0
     DELAY 63
-    VLI.ALL 4, 0x3F80          # +1.0
+    vli.all m4, 0x3F80          # +1.0
     DELAY 63
 
     ADDI  x11, x0, 16
@@ -41,46 +41,46 @@ tile_loop:
     # ── Load X ──
     ADDI  x1, x20, 0
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x1, x20, 1024
     LI    x6, 256
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── silu chain ──
-    VMUL.BF16  6, 0, 2         # -X
+    vmul.bf16 m6, m0, m2         # -X
     DELAY 64
-    VEXP 8, 6                  # exp(-X)
+    vexp.bf16 m8, m6                  # exp(-X)
     DELAY 64
-    VADD.BF16 10, 8, 4         # 1 + exp(-X)
+    vadd.bf16 m10, m8, m4         # 1 + exp(-X)
     DELAY 64
-    VRECIP.BF16 12, 10         # sigmoid(X)
+    vrecip.bf16 m12, m10         # sigmoid(X)
     DELAY 64
-    VMUL.BF16 14, 0, 12        # silu(X)
+    vmul.bf16 m14, m0, m12        # silu(X)
     DELAY 64
 
     LI    x8, 512
-    VSTORE 14, x8, 0
+    vstore m14, 0(x8)
     DELAY 33
-    VSTORE 15, x8, 8
+    vstore m15, 8(x8)
     DELAY 33
 
     # ── DMA out ──
     ADD   x3, x22, x20
     LI    x8, 512
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     ADDI  x3, x3, 1024
     LI    x8, 768
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop

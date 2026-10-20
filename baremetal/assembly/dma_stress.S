@@ -11,7 +11,7 @@
     LI    x16, 0x90000000  # src DRAM byte offset
     LI    x17, 0x90004000  # dst DRAM byte offset
     LI    x5, 0x00000000
-    DMA.CONFIG  x5, 0
+    dma.config x5, ch0
 
     ADDI  x6, x0, 0         # VMEM word address = 0 (staging)
 
@@ -20,12 +20,12 @@ loop:
     NOP
 
     # DRAM[base+x16] → VMEM[0]
-    DMA.LOAD  x6, x16, x11, 0
-    DMA.WAIT  0
+    dma.load x6, x16, x11, ch0
+    dma.wait ch0
 
     # VMEM[0] → DRAM[base+x17]
-    DMA.STORE x17, x6, x11, 2
-    DMA.WAIT  2
+    dma.store x17, x6, x11, ch2
+    dma.wait ch2
 
     ADD   x16, x16, x11
     ADD   x17, x17, x11

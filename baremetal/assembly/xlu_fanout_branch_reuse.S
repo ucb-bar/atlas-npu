@@ -25,42 +25,42 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
 
     # Load A and B.
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
 
     LI    x6, 256
     LI    x10, 0x90000400
-    DMA.LOAD x6, x10, x12, 1
-    DMA.WAIT 1
+    dma.load x6, x10, x12, ch1
+    dma.wait ch1
 
     # Load A->m0 and B->m4.
     ADDI  x7, x0, 0
-    VLOAD 0, x7, 0
+    vload m0, 0(x7)
     DELAY 33
 
     LI    x7, 256
-    VLOAD 4, x7, 0
+    vload m4, 0(x7)
     DELAY 33
 
     # Transpose B into m8.
-    VTRPOSE.XLU 8, 4
+    vtrpose.xlu m8, m4
     DELAY 64
 
     # Store transpose to VMEM and DRAM for scalar-observable branch predicate.
     LI    x8, 512
-    VSTORE 8, x8, 0
+    vstore m8, 0(x8)
     DELAY 33
 
     LI    x10, 0x90001000
     LI    x6, 512
-    DMA.STORE x10, x6, x12, 2
-    DMA.WAIT 2
+    dma.store x10, x6, x12, ch2
+    dma.wait ch2
 
     # Scalar reads first word of transposed tile from VMEM byte addr 2048.
     # The LW result is not in x21 until 5 cycles after issue (2-cycle LSU
@@ -68,32 +68,32 @@
     # after the LW, so DELAY must be >= 3 to avoid reading the pre-load
     # (uninitialized) x21 -- which reads as X in gate-level sims.
     LI    x20, 2048
-    LW    x21, x20, 0
+    lw x21, 0(x20)
     DELAY 4
 
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7
 
     # Use the same transposed bank as MXU0 weight.
-    VMATPUSH.W.MXU0 0, 8
+    vmatpush.weight.mxu0 w0, m8
     DELAY 31
-    VMATMUL.MXU0 0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
-    VMATPOP.BF16.MXU0 12, 0
+    vmatpop.bf16.acc.mxu0 m12, acc0
     DELAY 31
 
     # Store BF16 result pair.
     LI    x8, 1024
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
-    VSTORE 13, x8, 8
+    vstore m13, 8(x8)
     DELAY 33
 
     LI    x12, 2048
     LI    x10, 0x90001800
     LI    x6, 1024
-    DMA.STORE x10, x6, x12, 3
-    DMA.WAIT 3
+    dma.store x10, x6, x12, ch3
+    dma.wait ch3
 
 pass:
     ADDI  x1, x0, 1

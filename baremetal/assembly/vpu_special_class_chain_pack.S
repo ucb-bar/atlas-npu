@@ -33,7 +33,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x12, 2048              # BF16 tensor-pair bytes
     LI    x13, 1024              # FP8 bank bytes
@@ -56,70 +56,70 @@
     LI    x25, 0x90002000  # packed fp8 store
 
     # Stage input tensor pair into VMEM.
-    DMA.LOAD x6, x20, x12, 0
-    DMA.WAIT 0
+    dma.load x6, x20, x12, ch0
+    dma.wait ch0
 
     # Stage scale byte table into a disjoint VMEM region for SELD.
-    DMA.LOAD x11, x21, x14, 1
-    DMA.WAIT 1
+    dma.load x11, x21, x14, ch1
+    dma.wait ch1
 
     # Load scale register e3 from VMEM byte address 0x2400.
     LI    x15, 0x2400
-    SELD  3, x15, 0
+    seld e3, 0(x15)
     DELAY 1
 
     # Load BF16 input pair into m40/m41. The VLOAD path is single-issue in the
     # current RTL, so the second load must wait for the first to drain.
-    VLOAD 40, x6, 0
+    vload m40, 0(x6)
     DELAY 33
-    VLOAD 41, x6, 8
+    vload m41, 8(x6)
     DELAY 33
 
     # Unary math on the same input pair into disjoint destinations.
-    VRECIP.BF16 42, 40
+    vrecip.bf16 m42, m40
     DELAY 64
-    VSQRT 44, 40
+    vsqrt.bf16 m44, m40
     DELAY 64
 
     # Consume both unary outputs in a true dependent binary op.
-    VMUL.BF16 46, 42, 44
+    vmul.bf16 m46, m42, m44
     DELAY 64
 
     # Quantize the product under the SELD-loaded scale.
-    VFP8PACK 48, 46, 3
+    vpack.bf16.fp8 m48, m46, e3
     DELAY 64
 
     # Spill all produced tensors back to VMEM.
-    VSTORE 42, x7, 0
+    vstore m42, 0(x7)
     DELAY 33
-    VSTORE 43, x7, 8
-    DELAY 33
-
-    VSTORE 44, x8, 0
-    DELAY 33
-    VSTORE 45, x8, 8
+    vstore m43, 8(x7)
     DELAY 33
 
-    VSTORE 46, x9, 0
+    vstore m44, 0(x8)
     DELAY 33
-    VSTORE 47, x9, 8
+    vstore m45, 8(x8)
     DELAY 33
 
-    VSTORE 48, x10, 0
+    vstore m46, 0(x9)
+    DELAY 33
+    vstore m47, 8(x9)
+    DELAY 33
+
+    vstore m48, 0(x10)
     DELAY 33
 
     # Drain results to DRAM with serialized DMA traffic.
-    DMA.STORE x22, x7, x12, 2
-    DMA.WAIT 2
+    dma.store x22, x7, x12, ch2
+    dma.wait ch2
 
-    DMA.STORE x23, x8, x12, 3
-    DMA.WAIT 3
+    dma.store x23, x8, x12, ch3
+    dma.wait ch3
 
-    DMA.STORE x24, x9, x12, 4
-    DMA.WAIT 4
+    dma.store x24, x9, x12, ch4
+    dma.wait ch4
 
-    DMA.STORE x25, x10, x13, 5
-    DMA.WAIT 5
+    dma.store x25, x10, x13, ch5
+    dma.wait ch5
 
 pass:
     ADDI  x1, x0, 1

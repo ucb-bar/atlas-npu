@@ -20,7 +20,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 2048              # input tile bytes
     LI    x3, 2048              # output tile bytes
 
@@ -29,50 +29,50 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003000
     JAL   x1, store_pair
     NOP
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003800
     JAL   x1, store_pair
     NOP
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004000
     JAL   x1, store_pair
     NOP
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004800
     JAL   x1, store_pair
     NOP
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005000
     JAL   x1, store_pair
     NOP
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005800
     JAL   x1, store_pair
     NOP
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006000
     JAL   x1, store_pair
     NOP
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006800
     JAL   x1, store_pair
@@ -83,50 +83,50 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007000
     JAL   x1, store_pair
     NOP
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007800
     JAL   x1, store_pair
     NOP
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008000
     JAL   x1, store_pair
     NOP
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008800
     JAL   x1, store_pair
     NOP
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009000
     JAL   x1, store_pair
     NOP
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009800
     JAL   x1, store_pair
     NOP
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A000
     JAL   x1, store_pair
     NOP
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A800
     JAL   x1, store_pair
@@ -137,50 +137,50 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90001000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B000
     JAL   x1, store_pair
     NOP
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B800
     JAL   x1, store_pair
     NOP
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C000
     JAL   x1, store_pair
     NOP
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C800
     JAL   x1, store_pair
     NOP
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D000
     JAL   x1, store_pair
     NOP
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D800
     JAL   x1, store_pair
     NOP
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E000
     JAL   x1, store_pair
     NOP
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E800
     JAL   x1, store_pair
@@ -191,50 +191,50 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90001800
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F000
     JAL   x1, store_pair
     NOP
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F800
     JAL   x1, store_pair
     NOP
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010000
     JAL   x1, store_pair
     NOP
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010800
     JAL   x1, store_pair
     NOP
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011000
     JAL   x1, store_pair
     NOP
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011800
     JAL   x1, store_pair
     NOP
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90012000
     JAL   x1, store_pair
     NOP
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90012800
     JAL   x1, store_pair
@@ -245,50 +245,50 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x10, 0x90002000
-    DMA.LOAD x6, x10, x2, 0
-    DMA.WAIT 0
+    dma.load x6, x10, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VSQRT 4, 0
+    vsqrt.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90013000
     JAL   x1, store_pair
     NOP
-    VLOG2 4, 0
+    vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90013800
     JAL   x1, store_pair
     NOP
-    VRECIP.BF16 4, 0
+    vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90014000
     JAL   x1, store_pair
     NOP
-    VEXP 4, 0
+    vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90014800
     JAL   x1, store_pair
     NOP
-    VEXP2 4, 0
+    vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90015000
     JAL   x1, store_pair
     NOP
-    VTANH 4, 0
+    vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90015800
     JAL   x1, store_pair
     NOP
-    VSQUARE.BF16 4, 0
+    vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90016000
     JAL   x1, store_pair
     NOP
-    VCUBE.BF16 4, 0
+    vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90016800
     JAL   x1, store_pair
@@ -305,12 +305,12 @@ fail:
 
 store_pair:
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x9, 1024
-    DMA.STORE x10, x9, x3, 1
-    DMA.WAIT 1
+    dma.store x10, x9, x3, ch1
+    dma.wait ch1
     JALR  x0, x1, 0
     NOP

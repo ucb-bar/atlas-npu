@@ -17,37 +17,18 @@ invokes this via `add_custom_command` and the host driver
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _BAREMETAL_DIR = _HERE.parent
-_ASSEMBLER = _BAREMETAL_DIR / "assembler.py"
+sys.path.insert(0, str(_BAREMETAL_DIR))
+from atlas_asm import encode
 
 
 def assemble_to_hex(asm_path: Path) -> list[int]:
-    """Run assembler.py --out-hex and return the list of 32-bit words."""
-    if not _ASSEMBLER.is_file():
-        raise FileNotFoundError(f"assembler.py not found at {_ASSEMBLER}")
-    with tempfile.NamedTemporaryFile(suffix=".hex", delete=False) as tmp:
-        hex_path = Path(tmp.name)
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(_ASSEMBLER), str(asm_path),
-             "--out-hex", str(hex_path)],
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"assembler failed for {asm_path}: {proc.stderr.strip()}"
-            )
-        words = [int(line.strip(), 16) for line in hex_path.read_text().splitlines() if line.strip()]
-    finally:
-        hex_path.unlink(missing_ok=True)
-    return words
+    """Assemble a kernel and return the list of 32-bit words."""
+    return encode(asm_path.read_text())
 
 
 def emit_header(name: str, words: list[int], asm_path: Path) -> str:

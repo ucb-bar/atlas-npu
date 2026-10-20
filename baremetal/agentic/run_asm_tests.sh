@@ -61,6 +61,14 @@ GENERATORS_DIR="$BAREMETAL_DIR/generators"
 BUILD_DIR="$TESTS_DIR/build"
 VCS_DIR="$CHIPYARD_ROOT/sims/vcs"
 CONFIG="EE290SimConfig"
+NPU_MODEL_DIR="$(realpath -m "${NPU_MODEL_DIR:-$BAREMETAL_DIR/../npu-model}")"
+ASSEMBLER_CMD=(env "PYTHONPATH=$NPU_MODEL_DIR${PYTHONPATH:+:$PYTHONPATH}" uv run --locked --project "$NPU_MODEL_DIR" --python 3.14 python)
+
+command -v uv >/dev/null 2>&1 || { echo "Error: uv is required to assemble Atlas programs" >&2; exit 1; }
+[[ -f "$NPU_MODEL_DIR/npu_model/util/converter.py" ]] || {
+  echo "Error: initialize the npu-model submodule (git submodule update --init npu-model)" >&2
+  exit 1
+}
 
 if [[ ! -d "$VCS_DIR" ]]; then
   echo "Error: could not find Chipyard VCS directory at:"
@@ -131,7 +139,7 @@ for test_name in "${TEST_NAMES[@]}"; do
       echo "  Assembling with golden JSON"
       (
         cd "$BAREMETAL_DIR" &&
-        python3 assembler.py "assembly/${test_name}.S" \
+        "${ASSEMBLER_CMD[@]}" atlas_asm.py "assembly/${test_name}.S" \
           --out-c "tests/atlas_${test_name}.c" \
           --golden-json "generators/${test_name}.json"
       ) || rc=1
@@ -140,7 +148,7 @@ for test_name in "${TEST_NAMES[@]}"; do
     echo "  Assembling (no golden generator)"
     (
       cd "$BAREMETAL_DIR" &&
-      python3 assembler.py "assembly/${test_name}.S" \
+      "${ASSEMBLER_CMD[@]}" atlas_asm.py "assembly/${test_name}.S" \
         --out-c "tests/atlas_${test_name}.c"
     ) || rc=1
   fi

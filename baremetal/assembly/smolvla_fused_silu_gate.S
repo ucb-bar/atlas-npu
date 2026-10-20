@@ -32,58 +32,58 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
 
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
-    VLI.ALL 2, 0xBF80
+    vli.all m2, 0xBF80
     DELAY 63
-    VLI.ALL 4, 0x3F80
+    vli.all m4, 0x3F80
     DELAY 63
 
-    VMUL.BF16  6, 0, 2
+    vmul.bf16 m6, m0, m2
     DELAY 64
 
-    VEXP 8, 6
+    vexp.bf16 m8, m6
     DELAY 64
 
-    VADD.BF16 10, 8, 4
+    vadd.bf16 m10, m8, m4
     DELAY 64
 
-    VRECIP.BF16 12, 10
+    vrecip.bf16 m12, m10
     DELAY 64
 
-    VMUL.BF16 14, 0, 12
+    vmul.bf16 m14, m0, m12
     DELAY 64
 
     LI    x8, 512
-    VSTORE 14, x8, 0
+    vstore m14, 0(x8)
     DELAY 33
-    VSTORE 15, x8, 8
+    vstore m15, 8(x8)
     DELAY 33
 
     LI    x8, 512
     LI    x3, 0x90000800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 768
     LI    x3, 0x90000C00
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

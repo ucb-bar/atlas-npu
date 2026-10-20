@@ -51,10 +51,10 @@
 #   m3  bias (zero)       m4,5   MXU0 pop result
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127
-    SELI  1, 127
+    seli e0, 127
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 1: 8-CHANNEL DMA.LOAD BURST [8LD]
@@ -66,45 +66,45 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0     # ch0: X → VMEM[0]
+    dma.load x6, x10, x12, ch0     # ch0: X → VMEM[0]
 
     LI    x6, 256
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 1     # ch1: W → VMEM[256]
+    dma.load x6, x10, x12, ch1     # ch1: W → VMEM[256]
 
     LI    x6, 512
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 2     # ch2: bias → VMEM[512]
+    dma.load x6, x10, x12, ch2     # ch2: bias → VMEM[512]
 
     LI    x6, 768
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 3     # ch3: A_vpu b0 → VMEM[768]
+    dma.load x6, x10, x12, ch3     # ch3: A_vpu b0 → VMEM[768]
 
     LI    x6, 1024
     LI    x10, 0x90001000
-    DMA.LOAD  x6, x10, x12, 4     # ch4: A_vpu b1 → VMEM[1024]
+    dma.load x6, x10, x12, ch4     # ch4: A_vpu b1 → VMEM[1024]
 
     LI    x6, 1280
     LI    x10, 0x90001400
-    DMA.LOAD  x6, x10, x12, 5     # ch5: B_vpu b0 → VMEM[1280]
+    dma.load x6, x10, x12, ch5     # ch5: B_vpu b0 → VMEM[1280]
 
     LI    x6, 1536
     LI    x10, 0x90001800
-    DMA.LOAD  x6, x10, x12, 6     # ch6: B_vpu b1 → VMEM[1536]
+    dma.load x6, x10, x12, ch6     # ch6: B_vpu b1 → VMEM[1536]
 
     LI    x6, 1792
     LI    x10, 0x90001C00
-    DMA.LOAD  x6, x10, x12, 7     # ch7: echo_tile → VMEM[1792]
+    dma.load x6, x10, x12, ch7     # ch7: echo_tile → VMEM[1792]
 
     # All 8 channelBusy flags are set.  Wait for each.
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
-    DMA.WAIT  4
-    DMA.WAIT  5
-    DMA.WAIT  6
-    DMA.WAIT  7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 2: VLOAD data + MXU0 setup
@@ -112,48 +112,48 @@
 
     # X → m0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # W → m1 → XLU → m2
     LI    x6, 256
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 2, 1
+    vtrpose.xlu m2, m1
     DELAY 64
 
     # bias → m3
     LI    x6, 512
-    VLOAD 3, x6, 0
+    vload m3, 0(x6)
     DELAY 33
 
     # Push MXU0 weights + bias
-    VMATPUSH.W.MXU0       0, 2
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m2
+    vmatpush.acc.fp8.mxu0 acc0, m3
 
     # A_vpu pair → m8,m9 (from VMEM[768], flag 0/8)
     LI    x6, 768
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VLOAD 9, x6, 8
+    vload m9, 8(x6)
     DELAY 33
 
     # B_vpu pair → m10,m11 (from VMEM[1280], flag 0/8)
     LI    x6, 1280
-    VLOAD 10, x6, 0
+    vload m10, 0(x6)
     DELAY 33
-    VLOAD 11, x6, 8
+    vload m11, 8(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 3: MXU0 + VPU compute
 # ═══════════════════════════════════════════════════════════════
 
-    VMATMUL.ACC.MXU0  0, 0, 0
-    VADD.BF16         12, 8, 10
+    vmatmul.acc.mxu0 acc0, m0, w0
+    vadd.bf16 m12, m8, m10
     DELAY 64
 
-    VMATPOP.BF16.MXU0  4, 0
+    vmatpop.bf16.acc.mxu0 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -162,17 +162,17 @@
 
     # C0 lo → VMEM[0], C0 hi → VMEM[256]
     ADDI  x6, x0, 0
-    VSTORE 4, x6, 0
+    vstore m4, 0(x6)
     DELAY 33
     LI    x6, 256
-    VSTORE 5, x6, 0
+    vstore m5, 0(x6)
     DELAY 33
 
     # add b0 → VMEM[512], add b1 → VMEM[768]
     LI    x6, 512
-    VSTORE 12, x6, 0
+    vstore m12, 0(x6)
     DELAY 33
-    VSTORE 13, x6, 8
+    vstore m13, 8(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -185,50 +185,50 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0     # ch0: VMEM[0] → DRAM[C0 lo]
+    dma.store x10, x6, x12, ch0     # ch0: VMEM[0] → DRAM[C0 lo]
 
     LI    x6, 256
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x12, 1     # ch1: VMEM[256] → DRAM[C0 hi]
+    dma.store x10, x6, x12, ch1     # ch1: VMEM[256] → DRAM[C0 hi]
 
     LI    x6, 512
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x12, 2     # ch2: VMEM[512] → DRAM[add b0]
+    dma.store x10, x6, x12, ch2     # ch2: VMEM[512] → DRAM[add b0]
 
     LI    x6, 768
     LI    x10, 0x90002C00
-    DMA.STORE x10, x6, x12, 3     # ch3: VMEM[768] → DRAM[add b1]
+    dma.store x10, x6, x12, ch3     # ch3: VMEM[768] → DRAM[add b1]
 
     LI    x6, 1024
     LI    x10, 0x90003000
-    DMA.STORE x10, x6, x12, 4     # ch4: VMEM[1024] → DRAM[echo0]
+    dma.store x10, x6, x12, ch4     # ch4: VMEM[1024] → DRAM[echo0]
 
     LI    x6, 1280
     LI    x10, 0x90003400
-    DMA.STORE x10, x6, x12, 5     # ch5: VMEM[1280] → DRAM[echo1]
+    dma.store x10, x6, x12, ch5     # ch5: VMEM[1280] → DRAM[echo1]
 
     LI    x6, 1536
     LI    x10, 0x90003800
-    DMA.STORE x10, x6, x12, 6     # ch6: VMEM[1536] → DRAM[echo2]
+    dma.store x10, x6, x12, ch6     # ch6: VMEM[1536] → DRAM[echo2]
 
     LI    x6, 1792
     LI    x10, 0x90003C00
-    DMA.STORE x10, x6, x12, 7     # ch7: VMEM[1792] → DRAM[echo3]
+    dma.store x10, x6, x12, ch7     # ch7: VMEM[1792] → DRAM[echo3]
 
     # All 8 channelBusy flags set.  Wait.
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
-    DMA.WAIT  4
-    DMA.WAIT  5
-    DMA.WAIT  6
-    DMA.WAIT  7
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
+    dma.wait ch4
+    dma.wait ch5
+    dma.wait ch6
+    dma.wait ch7
 
 # ═══════════════════════════════════════════════════════════════
 # DONE
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL
     

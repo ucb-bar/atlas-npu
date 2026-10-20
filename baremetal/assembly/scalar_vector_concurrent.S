@@ -27,10 +27,10 @@
 #   stage3   word 327680  byte 1310720  bank 5
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127
-    SELI  1, 127
+    seli e0, 127
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 0: DMA load inputs + pre-zero staging
@@ -38,31 +38,31 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0      # tile_A
+    dma.load x6, x10, x12, ch0      # tile_A
     LI    x6, 32768
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 1      # tile_B
+    dma.load x6, x10, x12, ch1      # tile_B
     LI    x6, 65536
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 2      # tile_W
+    dma.load x6, x10, x12, ch2      # tile_W
     LI    x6, 131072
     LI    x10, 0x90000C00
-    DMA.LOAD  x6, x10, x12, 3      # bias
-    DMA.WAIT  0
-    DMA.WAIT  1
-    DMA.WAIT  2
-    DMA.WAIT  3
+    dma.load x6, x10, x12, ch3      # bias
+    dma.wait ch0
+    dma.wait ch1
+    dma.wait ch2
+    dma.wait ch3
 
     LI    x10, 0x90001000
     LI    x6, 196608
-    DMA.LOAD  x6, x10, x12, 0      # stage1 <- zeros
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0      # stage1 <- zeros
+    dma.wait ch0
     LI    x6, 262144
-    DMA.LOAD  x6, x10, x12, 0      # stage2 <- zeros
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0      # stage2 <- zeros
+    dma.wait ch0
     LI    x6, 327680
-    DMA.LOAD  x6, x10, x12, 0      # stage3 <- zeros
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0      # stage3 <- zeros
+    dma.wait ch0
 
 # ═══════════════════════════════════════════════════════════════
 # Scalar base addresses and constants
@@ -82,13 +82,13 @@
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
-    SW    x27, x16, 0              # stage1 word 0 = CAFE
-    SW    x28, x16, 4              # stage1 word 1 = DEAD
-    SW    x28, x17, 0              # stage2 word 0 = DEAD
-    SW    x27, x17, 4              # stage2 word 1 = CAFE
-    SW    x27, x18, 0              # stage3 word 0 = CAFE
-    SW    x28, x18, 4              # stage3 word 1 = DEAD
+    vload m0, 0(x6)
+    sw x27, 0(x16)              # stage1 word 0 = CAFE
+    sw x28, 4(x16)              # stage1 word 1 = DEAD
+    sw x28, 0(x17)              # stage2 word 0 = DEAD
+    sw x27, 4(x17)              # stage2 word 1 = CAFE
+    sw x27, 0(x18)              # stage3 word 0 = CAFE
+    sw x28, 4(x18)              # stage3 word 1 = DEAD
     DELAY 26
 
 # ═══════════════════════════════════════════════════════════════
@@ -98,16 +98,16 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 163840
-    VSTORE 0, x6, 0
-    LW    x21, x14, 0              # tile_B word 0
+    vstore m0, 0(x6)
+    lw x21, 0(x14)              # tile_B word 0
     DELAY 2
-    LW    x22, x14, 4              # tile_B word 1
+    lw x22, 4(x14)              # tile_B word 1
     DELAY 2
-    LW    x23, x15, 0              # tile_W word 0
+    lw x23, 0(x15)              # tile_W word 0
     DELAY 2
-    LW    x24, x16, 0              # stage1 word 0 = CAFE
+    lw x24, 0(x16)              # stage1 word 0 = CAFE
     DELAY 2
-    LW    x25, x17, 0              # stage2 word 0 = DEAD
+    lw x25, 0(x17)              # stage2 word 0 = DEAD
     DELAY 2
     DELAY 22
 
@@ -116,25 +116,25 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 65536
-    VLOAD 1, x6, 0
-    SW    x21, x16, 8              # stage1 word 2 = tile_B word 0
-    SW    x22, x16, 12             # stage1 word 3 = tile_B word 1
-    SW    x23, x17, 8              # stage2 word 2 = tile_W word 0
-    SW    x24, x17, 12             # stage2 word 3 = CAFE
-    SW    x25, x18, 8              # stage3 word 2 = DEAD
-    SW    x21, x18, 12             # stage3 word 3 = tile_B word 0
+    vload m1, 0(x6)
+    sw x21, 8(x16)              # stage1 word 2 = tile_B word 0
+    sw x22, 12(x16)             # stage1 word 3 = tile_B word 1
+    sw x23, 8(x17)              # stage2 word 2 = tile_W word 0
+    sw x24, 12(x17)             # stage2 word 3 = CAFE
+    sw x25, 8(x18)              # stage3 word 2 = DEAD
+    sw x21, 12(x18)             # stage3 word 3 = tile_B word 0
     DELAY 27
 
-    VTRPOSE.XLU 2, 1
-    LW    x26, x16, 8              # read stage1 word 2 = tile_B word 0
+    vtrpose.xlu m2, m1
+    lw x26, 8(x16)              # read stage1 word 2 = tile_B word 0
     DELAY 2
-    SW    x26, x17, 16             # stage2 word 4 = tile_B word 0
-    LW    x20, x17, 12             # read stage2 word 3 = CAFE
+    sw x26, 16(x17)             # stage2 word 4 = tile_B word 0
+    lw x20, 12(x17)             # read stage2 word 3 = CAFE
     DELAY 2
-    SW    x20, x18, 16             # stage3 word 4 = CAFE
-    LW    x19, x18, 8              # read stage3 word 2 = DEAD
+    sw x20, 16(x18)             # stage3 word 4 = CAFE
+    lw x19, 8(x18)              # read stage3 word 2 = DEAD
     DELAY 2
-    SW    x19, x16, 16             # stage1 word 4 = DEAD
+    sw x19, 16(x16)             # stage1 word 4 = DEAD
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
@@ -142,29 +142,29 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 131072
-    VLOAD 3, x6, 0
-    SW    x23, x16, 20             # stage1 word 5 = tile_W word 0
-    SW    x22, x17, 20             # stage2 word 5 = tile_B word 1
-    SW    x24, x18, 20             # stage3 word 5 = CAFE
+    vload m3, 0(x6)
+    sw x23, 20(x16)             # stage1 word 5 = tile_W word 0
+    sw x22, 20(x17)             # stage2 word 5 = tile_B word 1
+    sw x24, 20(x18)             # stage3 word 5 = CAFE
     DELAY 29
 
-    VMATPUSH.W.MXU0       0, 2
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m2
+    vmatpush.acc.fp8.mxu0 acc0, m3
     DELAY 31
 
-    VMATMUL.ACC.MXU0      0, 0, 0
-    LW    x21, x16, 16             # read stage1 word 4 = DEAD
+    vmatmul.acc.mxu0 acc0, m0, w0
+    lw x21, 16(x16)             # read stage1 word 4 = DEAD
     DELAY 2
-    SW    x21, x17, 24             # stage2 word 6 = DEAD
-    LW    x22, x18, 12             # read stage3 word 3 = tile_B word 0
+    sw x21, 24(x17)             # stage2 word 6 = DEAD
+    lw x22, 12(x18)             # read stage3 word 3 = tile_B word 0
     DELAY 2
-    SW    x22, x16, 24             # stage1 word 6 = tile_B word 0
-    LW    x23, x17, 8              # read stage2 word 2 = tile_W word 0
+    sw x22, 24(x16)             # stage1 word 6 = tile_B word 0
+    lw x23, 8(x17)              # read stage2 word 2 = tile_W word 0
     DELAY 2
-    SW    x23, x18, 24             # stage3 word 6 = tile_W word 0
+    sw x23, 24(x18)             # stage3 word 6 = tile_W word 0
     DELAY 95
 
-    VMATPOP.BF16.MXU0  4, 0
+    vmatpop.bf16.acc.mxu0 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -172,18 +172,18 @@
 # ═══════════════════════════════════════════════════════════════
 
     LI    x6, 65536
-    VSTORE 4, x6, 0                # C0 lo -> tile_W region
-    LW    x24, x16, 20             # read stage1 word 5 = tile_W word 0
+    vstore m4, 0(x6)                # C0 lo -> tile_W region
+    lw x24, 20(x16)             # read stage1 word 5 = tile_W word 0
     DELAY 2
-    LW    x25, x17, 24             # read stage2 word 6 = DEAD
+    lw x25, 24(x17)             # read stage2 word 6 = DEAD
     DELAY 2
     DELAY 28
 
     LI    x6, 131072
-    VSTORE 5, x6, 0                # C0 hi -> bias region
-    LW    x26, x18, 24             # read stage3 word 6 = tile_W word 0
+    vstore m5, 0(x6)                # C0 hi -> bias region
+    lw x26, 24(x18)             # read stage3 word 6 = tile_W word 0
     DELAY 2
-    LW    x19, x16, 24             # read stage1 word 6 = tile_B word 0
+    lw x19, 24(x16)             # read stage1 word 6 = tile_B word 0
     DELAY 2
     DELAY 28
 
@@ -193,34 +193,34 @@
 
     LI    x6, 163840
     LI    x10, 0x90001400
-    DMA.STORE x10, x6, x12, 0      # vstore echo of tile_A
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # vstore echo of tile_A
+    dma.wait ch0
 
     LI    x6, 196608
     LI    x10, 0x90001800
-    DMA.STORE x10, x6, x12, 0      # stage1
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # stage1
+    dma.wait ch0
 
     LI    x6, 262144
     LI    x10, 0x90001C00
-    DMA.STORE x10, x6, x12, 0      # stage2
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # stage2
+    dma.wait ch0
 
     LI    x6, 327680
     LI    x10, 0x90002000
-    DMA.STORE x10, x6, x12, 0      # stage3
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # stage3
+    dma.wait ch0
 
     LI    x6, 65536
     LI    x10, 0x90002400
-    DMA.STORE x10, x6, x12, 0      # C0 lo
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # C0 lo
+    dma.wait ch0
 
     LI    x6, 131072
     LI    x10, 0x90002800
-    DMA.STORE x10, x6, x12, 0      # C0 hi
-    DMA.WAIT  0
+    dma.store x10, x6, x12, ch0      # C0 hi
+    dma.wait ch0
 
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

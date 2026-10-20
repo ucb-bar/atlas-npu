@@ -36,10 +36,10 @@
 #   0x0800  W1     (1024B FP8, 32x32)
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024
-    SELI  0, 127
-    SELI  1, 127
+    seli e0, 127
+    seli e1, 127
 
 # ═══════════════════════════════════════════════════════════════
 # SETUP: Load activations X → m0, duplicate → m1
@@ -47,12 +47,12 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000000
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
@@ -61,14 +61,14 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000400
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 3, 2
+    vtrpose.xlu m3, m2
     DELAY 64
-    VMATPUSH.W.MXU0 0, 3
+    vmatpush.weight.mxu0 w0, m3
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
@@ -77,21 +77,21 @@
 
     ADDI  x6, x0, 0
     LI    x10, 0x90000800
-    DMA.LOAD  x6, x10, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x10, x12, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
-    VMATPUSH.W.MXU1 0, 5
+    vmatpush.weight.mxu1 w0, m5
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — reset perf counters, snapshot mcycles
 # ═══════════════════════════════════════════════════════════════
-    CSRW  x0,  0xC20                # zero mxu0/mxu1 busy counters
-    CSRR  x20, 0xC00                # x20 = cycle count at start
+    csrrw x0, 0xC20, x0                # zero mxu0/mxu1 busy counters
+    csrrs x20, 0xC00, x0                # x20 = cycle count at start
 
 # ── One VMATMUL per MXU, overwrite mode. Issues on consecutive scalar
 #    cycles (single-issue core). Each MXU's computeBusy stays high for
@@ -99,8 +99,8 @@
 #    (tileRows-1) + aCompDrain (pipeline tail). No overlap, no
 #    accumulation — the psum read from the acc buffer is ignored. ──
 
-    VMATMUL.MXU0  0, 0, 0     # accSel=0, vs1=m0, wSlot=0
-    VMATMUL.MXU1  0, 1, 0     # accSel=0, vs1=m1, wSlot=0
+    vmatmul.mxu0 acc0, m0, w0     # accSel=0, vs1=m0, wSlot=0
+    vmatmul.mxu1 acc0, m1, w0     # accSel=0, vs1=m1, wSlot=0
 
     # Drain padding: SA 32x32 computeBusy ≈ 94 cycles, IPT
     # pipelineCuts={1} ≈ 33 cycles. 128 covers whichever topology is
@@ -110,14 +110,14 @@
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
 # ═══════════════════════════════════════════════════════════════
-    CSRR  x21, 0xC00                # x21 = cycle count at end
+    csrrs x21, 0xC00, x0                # x21 = cycle count at end
     SUB   x22, x21, x20             # x22 = end - start
-    CSRW  x22, 0xC11                # stash delta in CSR_DBG1 (host reads @ 0x14)
+    csrrw x0, 0xC11, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
 
 # ═══════════════════════════════════════════════════════════════
 # DONE — host reads busy0/busy1 from CSR_BASE + 0x1C/0x20 and the
 #        mcycles delta from CSR_DBG1 @ 0x14
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    CSRW  x30, 0xC10
+    csrrw x0, 0xC10, x30
     ECALL

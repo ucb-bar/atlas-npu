@@ -50,7 +50,7 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x12, 1024             # 1 KiB tile size
 
 # ----------------------------------------------------------------------
@@ -58,141 +58,141 @@
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x12, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x12, ch0
+    dma.wait ch0
 
 # ----------------------------------------------------------------------
 # PHASE 1: VLOAD every MREG bank 0..63 from the same source tile.
 #          This drives writeBusy[b] active for each bank in turn.
 # ----------------------------------------------------------------------
     ADDI  x6, x0, 0             # VMEM word base = 0 for every VLOAD
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
-    VLOAD 3, x6, 0
+    vload m3, 0(x6)
     DELAY 33
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VLOAD 5, x6, 0
+    vload m5, 0(x6)
     DELAY 33
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VLOAD 7, x6, 0
+    vload m7, 0(x6)
     DELAY 33
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VLOAD 9, x6, 0
+    vload m9, 0(x6)
     DELAY 33
-    VLOAD 10, x6, 0
+    vload m10, 0(x6)
     DELAY 33
-    VLOAD 11, x6, 0
+    vload m11, 0(x6)
     DELAY 33
-    VLOAD 12, x6, 0
+    vload m12, 0(x6)
     DELAY 33
-    VLOAD 13, x6, 0
+    vload m13, 0(x6)
     DELAY 33
-    VLOAD 14, x6, 0
+    vload m14, 0(x6)
     DELAY 33
-    VLOAD 15, x6, 0
+    vload m15, 0(x6)
     DELAY 33
-    VLOAD 16, x6, 0
+    vload m16, 0(x6)
     DELAY 33
-    VLOAD 17, x6, 0
+    vload m17, 0(x6)
     DELAY 33
-    VLOAD 18, x6, 0
+    vload m18, 0(x6)
     DELAY 33
-    VLOAD 19, x6, 0
+    vload m19, 0(x6)
     DELAY 33
-    VLOAD 20, x6, 0
+    vload m20, 0(x6)
     DELAY 33
-    VLOAD 21, x6, 0
+    vload m21, 0(x6)
     DELAY 33
-    VLOAD 22, x6, 0
+    vload m22, 0(x6)
     DELAY 33
-    VLOAD 23, x6, 0
+    vload m23, 0(x6)
     DELAY 33
-    VLOAD 24, x6, 0
+    vload m24, 0(x6)
     DELAY 33
-    VLOAD 25, x6, 0
+    vload m25, 0(x6)
     DELAY 33
-    VLOAD 26, x6, 0
+    vload m26, 0(x6)
     DELAY 33
-    VLOAD 27, x6, 0
+    vload m27, 0(x6)
     DELAY 33
-    VLOAD 28, x6, 0
+    vload m28, 0(x6)
     DELAY 33
-    VLOAD 29, x6, 0
+    vload m29, 0(x6)
     DELAY 33
-    VLOAD 30, x6, 0
+    vload m30, 0(x6)
     DELAY 33
-    VLOAD 31, x6, 0
+    vload m31, 0(x6)
     DELAY 33
-    VLOAD 32, x6, 0
+    vload m32, 0(x6)
     DELAY 33
-    VLOAD 33, x6, 0
+    vload m33, 0(x6)
     DELAY 33
-    VLOAD 34, x6, 0
+    vload m34, 0(x6)
     DELAY 33
-    VLOAD 35, x6, 0
+    vload m35, 0(x6)
     DELAY 33
-    VLOAD 36, x6, 0
+    vload m36, 0(x6)
     DELAY 33
-    VLOAD 37, x6, 0
+    vload m37, 0(x6)
     DELAY 33
-    VLOAD 38, x6, 0
+    vload m38, 0(x6)
     DELAY 33
-    VLOAD 39, x6, 0
+    vload m39, 0(x6)
     DELAY 33
-    VLOAD 40, x6, 0
+    vload m40, 0(x6)
     DELAY 33
-    VLOAD 41, x6, 0
+    vload m41, 0(x6)
     DELAY 33
-    VLOAD 42, x6, 0
+    vload m42, 0(x6)
     DELAY 33
-    VLOAD 43, x6, 0
+    vload m43, 0(x6)
     DELAY 33
-    VLOAD 44, x6, 0
+    vload m44, 0(x6)
     DELAY 33
-    VLOAD 45, x6, 0
+    vload m45, 0(x6)
     DELAY 33
-    VLOAD 46, x6, 0
+    vload m46, 0(x6)
     DELAY 33
-    VLOAD 47, x6, 0
+    vload m47, 0(x6)
     DELAY 33
-    VLOAD 48, x6, 0
+    vload m48, 0(x6)
     DELAY 33
-    VLOAD 49, x6, 0
+    vload m49, 0(x6)
     DELAY 33
-    VLOAD 50, x6, 0
+    vload m50, 0(x6)
     DELAY 33
-    VLOAD 51, x6, 0
+    vload m51, 0(x6)
     DELAY 33
-    VLOAD 52, x6, 0
+    vload m52, 0(x6)
     DELAY 33
-    VLOAD 53, x6, 0
+    vload m53, 0(x6)
     DELAY 33
-    VLOAD 54, x6, 0
+    vload m54, 0(x6)
     DELAY 33
-    VLOAD 55, x6, 0
+    vload m55, 0(x6)
     DELAY 33
-    VLOAD 56, x6, 0
+    vload m56, 0(x6)
     DELAY 33
-    VLOAD 57, x6, 0
+    vload m57, 0(x6)
     DELAY 33
-    VLOAD 58, x6, 0
+    vload m58, 0(x6)
     DELAY 33
-    VLOAD 59, x6, 0
+    vload m59, 0(x6)
     DELAY 33
-    VLOAD 60, x6, 0
+    vload m60, 0(x6)
     DELAY 33
-    VLOAD 61, x6, 0
+    vload m61, 0(x6)
     DELAY 33
-    VLOAD 62, x6, 0
+    vload m62, 0(x6)
     DELAY 33
-    VLOAD 63, x6, 0
+    vload m63, 0(x6)
     DELAY 33
 
 # ----------------------------------------------------------------------
@@ -216,43 +216,43 @@
 # ----------------------------------------------------------------------
 
     # VPU VMOV (32,33) -> (34,35)
-    VMOV  34, 32
+    vmov m34, m32
     DELAY 64
 
     # VPU VMOV (48,49) -> (50,51)
-    VMOV  50, 48
+    vmov m50, m48
     DELAY 64
 
     # VPU VMOV (52,53) -> (32,33) — rewrites 32,33 from the VPU
-    VMOV  32, 52
+    vmov m32, m52
     DELAY 64
 
     # XLU transpose: single-bank source -> single-bank dest
-    VTRPOSE.XLU 34, 35
+    vtrpose.xlu m34, m35
     DELAY 64
 
-    VTRPOSE.XLU 49, 51
+    vtrpose.xlu m49, m51
     DELAY 64
 
     # MXU0 touch on weak banks: push weight from m34, zero-seed acc from m3,
     # compute using m32 as activation, pop back into m36.
-    VMATPUSH.W.MXU0       0, 34
+    vmatpush.weight.mxu0 w0, m34
     DELAY 31
-    VMATPUSH.ACC.FP8.MXU0 0, 3
+    vmatpush.acc.fp8.mxu0 acc0, m3
     DELAY 31
-    VMATMUL.MXU0          0, 32, 0
+    vmatmul.mxu0 acc0, m32, w0
     DELAY 95
-    VMATPOP.FP8.MXU0      36, 0, 0
+    vmatpop.fp8.acc.mxu0 m36, acc0, e0
     DELAY 31
 
     # MXU1 touch: push weight from m49, acc seed from m3, matmul with m51, pop to m53.
-    VMATPUSH.W.MXU1       0, 49
+    vmatpush.weight.mxu1 w0, m49
     DELAY 31
-    VMATPUSH.ACC.FP8.MXU1 0, 3
+    vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31
-    VMATMUL.MXU1          0, 51, 0
+    vmatmul.mxu1 acc0, m51, w0
     DELAY 34
-    VMATPOP.FP8.MXU1      53, 0, 0
+    vmatpop.fp8.acc.mxu1 m53, acc0, e0
     DELAY 31
 
 # ----------------------------------------------------------------------
@@ -260,133 +260,133 @@
 #          VSTORE sweep below sees a known pristine copy in every bank.
 #          This is what the generator oracle assumes.
 # ----------------------------------------------------------------------
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 0
+    vload m1, 0(x6)
     DELAY 33
-    VLOAD 2, x6, 0
+    vload m2, 0(x6)
     DELAY 33
-    VLOAD 3, x6, 0
+    vload m3, 0(x6)
     DELAY 33
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
-    VLOAD 5, x6, 0
+    vload m5, 0(x6)
     DELAY 33
-    VLOAD 6, x6, 0
+    vload m6, 0(x6)
     DELAY 33
-    VLOAD 7, x6, 0
+    vload m7, 0(x6)
     DELAY 33
-    VLOAD 8, x6, 0
+    vload m8, 0(x6)
     DELAY 33
-    VLOAD 9, x6, 0
+    vload m9, 0(x6)
     DELAY 33
-    VLOAD 10, x6, 0
+    vload m10, 0(x6)
     DELAY 33
-    VLOAD 11, x6, 0
+    vload m11, 0(x6)
     DELAY 33
-    VLOAD 12, x6, 0
+    vload m12, 0(x6)
     DELAY 33
-    VLOAD 13, x6, 0
+    vload m13, 0(x6)
     DELAY 33
-    VLOAD 14, x6, 0
+    vload m14, 0(x6)
     DELAY 33
-    VLOAD 15, x6, 0
+    vload m15, 0(x6)
     DELAY 33
-    VLOAD 16, x6, 0
+    vload m16, 0(x6)
     DELAY 33
-    VLOAD 17, x6, 0
+    vload m17, 0(x6)
     DELAY 33
-    VLOAD 18, x6, 0
+    vload m18, 0(x6)
     DELAY 33
-    VLOAD 19, x6, 0
+    vload m19, 0(x6)
     DELAY 33
-    VLOAD 20, x6, 0
+    vload m20, 0(x6)
     DELAY 33
-    VLOAD 21, x6, 0
+    vload m21, 0(x6)
     DELAY 33
-    VLOAD 22, x6, 0
+    vload m22, 0(x6)
     DELAY 33
-    VLOAD 23, x6, 0
+    vload m23, 0(x6)
     DELAY 33
-    VLOAD 24, x6, 0
+    vload m24, 0(x6)
     DELAY 33
-    VLOAD 25, x6, 0
+    vload m25, 0(x6)
     DELAY 33
-    VLOAD 26, x6, 0
+    vload m26, 0(x6)
     DELAY 33
-    VLOAD 27, x6, 0
+    vload m27, 0(x6)
     DELAY 33
-    VLOAD 28, x6, 0
+    vload m28, 0(x6)
     DELAY 33
-    VLOAD 29, x6, 0
+    vload m29, 0(x6)
     DELAY 33
-    VLOAD 30, x6, 0
+    vload m30, 0(x6)
     DELAY 33
-    VLOAD 31, x6, 0
+    vload m31, 0(x6)
     DELAY 33
-    VLOAD 32, x6, 0
+    vload m32, 0(x6)
     DELAY 33
-    VLOAD 33, x6, 0
+    vload m33, 0(x6)
     DELAY 33
-    VLOAD 34, x6, 0
+    vload m34, 0(x6)
     DELAY 33
-    VLOAD 35, x6, 0
+    vload m35, 0(x6)
     DELAY 33
-    VLOAD 36, x6, 0
+    vload m36, 0(x6)
     DELAY 33
-    VLOAD 37, x6, 0
+    vload m37, 0(x6)
     DELAY 33
-    VLOAD 38, x6, 0
+    vload m38, 0(x6)
     DELAY 33
-    VLOAD 39, x6, 0
+    vload m39, 0(x6)
     DELAY 33
-    VLOAD 40, x6, 0
+    vload m40, 0(x6)
     DELAY 33
-    VLOAD 41, x6, 0
+    vload m41, 0(x6)
     DELAY 33
-    VLOAD 42, x6, 0
+    vload m42, 0(x6)
     DELAY 33
-    VLOAD 43, x6, 0
+    vload m43, 0(x6)
     DELAY 33
-    VLOAD 44, x6, 0
+    vload m44, 0(x6)
     DELAY 33
-    VLOAD 45, x6, 0
+    vload m45, 0(x6)
     DELAY 33
-    VLOAD 46, x6, 0
+    vload m46, 0(x6)
     DELAY 33
-    VLOAD 47, x6, 0
+    vload m47, 0(x6)
     DELAY 33
-    VLOAD 48, x6, 0
+    vload m48, 0(x6)
     DELAY 33
-    VLOAD 49, x6, 0
+    vload m49, 0(x6)
     DELAY 33
-    VLOAD 50, x6, 0
+    vload m50, 0(x6)
     DELAY 33
-    VLOAD 51, x6, 0
+    vload m51, 0(x6)
     DELAY 33
-    VLOAD 52, x6, 0
+    vload m52, 0(x6)
     DELAY 33
-    VLOAD 53, x6, 0
+    vload m53, 0(x6)
     DELAY 33
-    VLOAD 54, x6, 0
+    vload m54, 0(x6)
     DELAY 33
-    VLOAD 55, x6, 0
+    vload m55, 0(x6)
     DELAY 33
-    VLOAD 56, x6, 0
+    vload m56, 0(x6)
     DELAY 33
-    VLOAD 57, x6, 0
+    vload m57, 0(x6)
     DELAY 33
-    VLOAD 58, x6, 0
+    vload m58, 0(x6)
     DELAY 33
-    VLOAD 59, x6, 0
+    vload m59, 0(x6)
     DELAY 33
-    VLOAD 60, x6, 0
+    vload m60, 0(x6)
     DELAY 33
-    VLOAD 61, x6, 0
+    vload m61, 0(x6)
     DELAY 33
-    VLOAD 62, x6, 0
+    vload m62, 0(x6)
     DELAY 33
-    VLOAD 63, x6, 0
+    vload m63, 0(x6)
     DELAY 33
 
 # ----------------------------------------------------------------------
@@ -398,133 +398,133 @@
 #                                       = 32 + b * 8
 # ----------------------------------------------------------------------
     LI    x7, 1024
-    VSTORE 0,  x7, 0
+    vstore m0, 0(x7)
     DELAY 33
-    VSTORE 1,  x7, 8
+    vstore m1, 8(x7)
     DELAY 33
-    VSTORE 2,  x7, 16
+    vstore m2, 16(x7)
     DELAY 33
-    VSTORE 3,  x7, 24
+    vstore m3, 24(x7)
     DELAY 33
-    VSTORE 4,  x7, 32
+    vstore m4, 32(x7)
     DELAY 33
-    VSTORE 5,  x7, 40
+    vstore m5, 40(x7)
     DELAY 33
-    VSTORE 6,  x7, 48
+    vstore m6, 48(x7)
     DELAY 33
-    VSTORE 7,  x7, 56
+    vstore m7, 56(x7)
     DELAY 33
-    VSTORE 8,  x7, 64
+    vstore m8, 64(x7)
     DELAY 33
-    VSTORE 9,  x7, 72
+    vstore m9, 72(x7)
     DELAY 33
-    VSTORE 10, x7, 80
+    vstore m10, 80(x7)
     DELAY 33
-    VSTORE 11, x7, 88
+    vstore m11, 88(x7)
     DELAY 33
-    VSTORE 12, x7, 96
+    vstore m12, 96(x7)
     DELAY 33
-    VSTORE 13, x7, 104
+    vstore m13, 104(x7)
     DELAY 33
-    VSTORE 14, x7, 112
+    vstore m14, 112(x7)
     DELAY 33
-    VSTORE 15, x7, 120
+    vstore m15, 120(x7)
     DELAY 33
-    VSTORE 16, x7, 128
+    vstore m16, 128(x7)
     DELAY 33
-    VSTORE 17, x7, 136
+    vstore m17, 136(x7)
     DELAY 33
-    VSTORE 18, x7, 144
+    vstore m18, 144(x7)
     DELAY 33
-    VSTORE 19, x7, 152
+    vstore m19, 152(x7)
     DELAY 33
-    VSTORE 20, x7, 160
+    vstore m20, 160(x7)
     DELAY 33
-    VSTORE 21, x7, 168
+    vstore m21, 168(x7)
     DELAY 33
-    VSTORE 22, x7, 176
+    vstore m22, 176(x7)
     DELAY 33
-    VSTORE 23, x7, 184
+    vstore m23, 184(x7)
     DELAY 33
-    VSTORE 24, x7, 192
+    vstore m24, 192(x7)
     DELAY 33
-    VSTORE 25, x7, 200
+    vstore m25, 200(x7)
     DELAY 33
-    VSTORE 26, x7, 208
+    vstore m26, 208(x7)
     DELAY 33
-    VSTORE 27, x7, 216
+    vstore m27, 216(x7)
     DELAY 33
-    VSTORE 28, x7, 224
+    vstore m28, 224(x7)
     DELAY 33
-    VSTORE 29, x7, 232
+    vstore m29, 232(x7)
     DELAY 33
-    VSTORE 30, x7, 240
+    vstore m30, 240(x7)
     DELAY 33
-    VSTORE 31, x7, 248
+    vstore m31, 248(x7)
     DELAY 33
-    VSTORE 32, x7, 256
+    vstore m32, 256(x7)
     DELAY 33
-    VSTORE 33, x7, 264
+    vstore m33, 264(x7)
     DELAY 33
-    VSTORE 34, x7, 272
+    vstore m34, 272(x7)
     DELAY 33
-    VSTORE 35, x7, 280
+    vstore m35, 280(x7)
     DELAY 33
-    VSTORE 36, x7, 288
+    vstore m36, 288(x7)
     DELAY 33
-    VSTORE 37, x7, 296
+    vstore m37, 296(x7)
     DELAY 33
-    VSTORE 38, x7, 304
+    vstore m38, 304(x7)
     DELAY 33
-    VSTORE 39, x7, 312
+    vstore m39, 312(x7)
     DELAY 33
-    VSTORE 40, x7, 320
+    vstore m40, 320(x7)
     DELAY 33
-    VSTORE 41, x7, 328
+    vstore m41, 328(x7)
     DELAY 33
-    VSTORE 42, x7, 336
+    vstore m42, 336(x7)
     DELAY 33
-    VSTORE 43, x7, 344
+    vstore m43, 344(x7)
     DELAY 33
-    VSTORE 44, x7, 352
+    vstore m44, 352(x7)
     DELAY 33
-    VSTORE 45, x7, 360
+    vstore m45, 360(x7)
     DELAY 33
-    VSTORE 46, x7, 368
+    vstore m46, 368(x7)
     DELAY 33
-    VSTORE 47, x7, 376
+    vstore m47, 376(x7)
     DELAY 33
-    VSTORE 48, x7, 384
+    vstore m48, 384(x7)
     DELAY 33
-    VSTORE 49, x7, 392
+    vstore m49, 392(x7)
     DELAY 33
-    VSTORE 50, x7, 400
+    vstore m50, 400(x7)
     DELAY 33
-    VSTORE 51, x7, 408
+    vstore m51, 408(x7)
     DELAY 33
-    VSTORE 52, x7, 416
+    vstore m52, 416(x7)
     DELAY 33
-    VSTORE 53, x7, 424
+    vstore m53, 424(x7)
     DELAY 33
-    VSTORE 54, x7, 432
+    vstore m54, 432(x7)
     DELAY 33
-    VSTORE 55, x7, 440
+    vstore m55, 440(x7)
     DELAY 33
-    VSTORE 56, x7, 448
+    vstore m56, 448(x7)
     DELAY 33
-    VSTORE 57, x7, 456
+    vstore m57, 456(x7)
     DELAY 33
-    VSTORE 58, x7, 464
+    vstore m58, 464(x7)
     DELAY 33
-    VSTORE 59, x7, 472
+    vstore m59, 472(x7)
     DELAY 33
-    VSTORE 60, x7, 480
+    vstore m60, 480(x7)
     DELAY 33
-    VSTORE 61, x7, 488
+    vstore m61, 488(x7)
     DELAY 33
-    VSTORE 62, x7, 496
+    vstore m62, 496(x7)
     DELAY 33
-    VSTORE 63, x7, 504
+    vstore m63, 504(x7)
     DELAY 33
 
 # ----------------------------------------------------------------------
@@ -537,83 +537,83 @@
     # chunk i: VMEM word base = 1024 + i * 1024, DRAM byte = 0x1000 + i*0x1000
     LI    x8, 1024
     LI    x10, 0x90001000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 2048
     LI    x10, 0x90002000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 3072
     LI    x10, 0x90003000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 4096
     LI    x10, 0x90004000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 5120
     LI    x10, 0x90005000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 6144
     LI    x10, 0x90006000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 7168
     LI    x10, 0x90007000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 8192
     LI    x10, 0x90008000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 9216
     LI    x10, 0x90009000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 10240
     LI    x10, 0x9000A000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 11264
     LI    x10, 0x9000B000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 12288
     LI    x10, 0x9000C000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 13312
     LI    x10, 0x9000D000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 14336
     LI    x10, 0x9000E000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 15360
     LI    x10, 0x9000F000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
     LI    x8, 16384
     LI    x10, 0x90010000
-    DMA.STORE x10, x8, x11, 1
-    DMA.WAIT 1
+    dma.store x10, x8, x11, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

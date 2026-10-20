@@ -21,7 +21,7 @@
 # @TIMEOUT 200000
 
 _start:
-    CSRR  x1, 0xC11              # x1 = dbg1 (phase selector)
+    csrrs x1, 0xC11, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
     NOP
     JAL   x0, phase_1
@@ -35,7 +35,7 @@ phase_0:
 
 p0_loop:
     OR    x6, x2, x4             # data = seed_base | i
-    SW    x6, x3, 0              # VMEM[addr] = data
+    sw x6, 0(x3)              # VMEM[addr] = data
     DELAY 1
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
@@ -43,7 +43,7 @@ p0_loop:
     NOP
 
     ADDI  x1, x0, 1
-    CSRW  x1, 0xC10              # dbg0 = 1 (phase 0 done)
+    csrrw x0, 0xC10, x1              # dbg0 = 1 (phase 0 done)
     ECALL
 
 phase_1:
@@ -53,7 +53,7 @@ phase_1:
     ADDI  x5, x0, 16
 
 p1_loop:
-    LW    x6, x3, 0              # got
+    lw x6, 0(x3)              # got
     DELAY 2
     OR    x7, x2, x4             # expected = base | i
     BNE   x6, x7, p1_fail
@@ -64,10 +64,10 @@ p1_loop:
     NOP
 
     ADDI  x1, x0, 2
-    CSRW  x1, 0xC10              # dbg0 = 2 (PASS)
+    csrrw x0, 0xC10, x1              # dbg0 = 2 (PASS)
     ECALL
 
 p1_fail:
     ADDI  x8, x4, 100            # dbg0 = 100 + failing i
-    CSRW  x8, 0xC10
+    csrrw x0, 0xC10, x8
     ECALL

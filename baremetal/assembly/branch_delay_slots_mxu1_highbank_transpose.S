@@ -30,7 +30,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
 
     LI    x10, 0x90000000  # DRAM byte offset of A
     LI    x11, 0x90000400  # DRAM byte offset of B
@@ -49,21 +49,21 @@
     ADDI  x29, x0, 1       # compare register for not-taken BEQ
 
     # Preload both FP8 tiles from DRAM into VMEM.
-    DMA.LOAD  x20, x10, x12, 0
-    DMA.WAIT  0
-    DMA.LOAD  x21, x11, x12, 1
-    DMA.WAIT  1
+    dma.load x20, x10, x12, ch0
+    dma.wait ch0
+    dma.load x21, x11, x12, ch1
+    dma.wait ch1
 
     # Taken branch: the single delay-slot VLOAD must execute before redirect.
     BEQ   x0, x0, act_loaded
-    VLOAD 53, x20, 0
+    vload m53, 0(x20)
     ADDI  x27, x27, 1      # must be skipped
 act_loaded:
     DELAY 32
 
     # Not-taken branch: delay-slot VLOAD must still execute, and fallthrough must occur.
     BEQ   x0, x29, weight_taken
-    VLOAD 54, x21, 0
+    vload m54, 0(x21)
     ADDI  x26, x26, 1      # must execute exactly once
     JAL   x0, weight_done
     NOP
@@ -74,40 +74,40 @@ weight_done:
 
     # JAL delay-slot XLU transpose into another cold upper bank.
     JAL   x1, xlu_done
-    VTRPOSE.XLU 55, 54
+    vtrpose.xlu m55, m54
     ADDI  x24, x24, 1      # must be skipped
 xlu_done:
     DELAY 64
 
     # JAL delay-slot MXU1 weight push from the transposed bank.
     JAL   x1, push_done
-    VMATPUSH.W.MXU1 0, 55
+    vmatpush.weight.mxu1 w0, m55
     ADDI  x24, x24, 1      # must be skipped
 push_done:
     DELAY 31
 
     # JAL delay-slot MXU1 compute launch.
     JAL   x1, compute_done
-    VMATMUL.MXU1 0, 53, 0
+    vmatmul.mxu1 acc0, m53, w0
     ADDI  x24, x24, 1      # must be skipped
 compute_done:
     DELAY 34
 
     # JAL delay-slot MXU1 BF16 pop into m56/m57.
     JAL   x1, pop_done
-    VMATPOP.BF16.MXU1 56, 0
+    vmatpop.bf16.acc.mxu1 m56, acc0
     ADDI  x24, x24, 1      # must be skipped
 pop_done:
     DELAY 31
 
     # Spill both BF16 halves to contiguous VMEM, then DMA-store them back.
-    VSTORE 56, x22, 0
+    vstore m56, 0(x22)
     DELAY 33
-    VSTORE 57, x22, 8
+    vstore m57, 8(x22)
     DELAY 33
 
-    DMA.STORE x13, x22, x14, 2
-    DMA.WAIT  2
+    dma.store x13, x22, x14, ch2
+    dma.wait ch2
 
     # Scalar control-path checks for taken / not-taken / JAL redirect behavior.
     ADDI  x28, x0, 2

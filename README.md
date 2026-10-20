@@ -1,4 +1,12 @@
-# Sp26 Atlas Accelerator
+# Atlas NPU
+
+<img src="docs/diag/overview.png">
+
+Using Atlas
+-------------
+
+This repository cannot be used stand-alone.
+Atlas-NPU is intended to be used to generate an accelerator tile that is attached to a RISC-V system through the [Chipyard](https://github.com/ucb-bar/chipyard) SoC design framework.
 
 ## Getting Started
 
@@ -25,9 +33,9 @@ Generating Verilog file:
 make verilog
 ```
 
-
 Running test:
 
 ```bash
-make test
+cd baremetal
+make test-all
 ```

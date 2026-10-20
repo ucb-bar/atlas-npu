@@ -11,7 +11,7 @@
 
 _start:
     ADDI  x3, x0, 0
-    LW    x4, x3, 0                 # got = VMEM[0]
+    lw x4, 0(x3)                 # got = VMEM[0]
     DELAY 2
 
     LI    x5, 0xAAAAAAAA             # expected marker
@@ -19,10 +19,10 @@ _start:
     NOP
 
     ADDI  x1, x0, 2
-    CSRW  x1, 0xC10                 # dbg0 = 2 PASS
+    csrrw x0, 0xC10, x1                 # dbg0 = 2 PASS
     ECALL
 
 b_fail:
     LI    x1, 0xBAD
-    CSRW  x1, 0xC10                 # dbg0 = 0xBAD
+    csrrw x0, 0xC10, x1                 # dbg0 = 0xBAD
     ECALL

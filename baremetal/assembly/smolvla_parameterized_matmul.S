@@ -46,7 +46,7 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
     LI    x25, 0x1000
     LI    x17, 0x2000
@@ -69,24 +69,24 @@ output_tile_loop:
 
     # ── DMA A tile → VMEM[0] ──
     ADDI  x6, x0, 0
-    DMA.LOAD  x6, x20, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x20, x2, ch0
+    dma.wait ch0
 
     # ── DMA B tile → VMEM[256] ──
     LI    x6, 256
-    DMA.LOAD  x6, x22, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x22, x2, ch0
+    dma.wait ch0
 
     # ── VLOAD A → m0, B → m4 ──
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
     LI    x6, 256
-    VLOAD 4, x6, 0
+    vload m4, 0(x6)
     DELAY 33
 
     # ── Transpose B → m5 (so MXU computes A @ B, not A @ B^T) ──
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
 
     # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
@@ -94,32 +94,32 @@ output_tile_loop:
     NOP
 
     # ── MXU0 path: push weight + matmul + pop ──
-    VMATPUSH.W.MXU0 0, 5
+    vmatpush.weight.mxu0 w0, m5
     DELAY 31
-    VMATMUL.MXU0 0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
-    VMATPOP.BF16.MXU0 2, 0
+    vmatpop.bf16.acc.mxu0 m2, acc0
     DELAY 31
     BEQ   x0, x0, matmul_done
     NOP
 
 matmul_mxu1:
     # ── MXU1 path ──
-    VMATPUSH.W.MXU1 0, 5
+    vmatpush.weight.mxu1 w0, m5
     DELAY 31
-    VMATMUL.MXU1 0, 0, 0
+    vmatmul.mxu1 acc0, m0, w0
     DELAY 34
-    VMATPOP.BF16.MXU1 2, 0
+    vmatpop.bf16.acc.mxu1 m2, acc0
     DELAY 31
 
 matmul_done:
 
     # ── Store m2 (cols 0-15) → VMEM[512], m3 (cols 16-31) → VMEM[768] ──
     LI    x8, 512
-    VSTORE 2, x8, 0
+    vstore m2, 0(x8)
     DELAY 33
     LI    x8, 768
-    VSTORE 3, x8, 0
+    vstore m3, 0(x8)
     DELAY 33
 
     # ── DMA out: C[m,n] two halves ──
@@ -132,13 +132,13 @@ matmul_done:
     ADD   x16, x16, x15        # + FPGA DRAM base
 
     LI    x8, 512
-    DMA.STORE x16, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x16, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x16, x16, 1024
     LI    x8, 768
-    DMA.STORE x16, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x16, x8, x2, ch1
+    dma.wait ch1
 
     ADDI  x10, x10, 1
     BNE   x10, x11, output_tile_loop

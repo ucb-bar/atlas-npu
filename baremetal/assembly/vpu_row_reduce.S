@@ -20,83 +20,83 @@
 
     ADDI  x28, x0, 1
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024
 
     # ── Load Input A → m0,m1 ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ================================================================
     # Test 1: vredsum.row.bf16  m4, m0
     # ================================================================
-    VREDSUM.ROW.BF16 4, 0
+    vredsum.row.bf16 m4, m0
     DELAY 37
 
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x8, 1024
     LI    x3, 0x90000800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1280
     LI    x3, 0x90000C00
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     # ================================================================
     # Test 2: vredmin.row.bf16  m4, m0
     # ================================================================
-    VREDMIN.ROW.BF16 4, 0
+    vredmin.row.bf16 m4, m0
     DELAY 32
 
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x8, 1024
     LI    x3, 0x90001000
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1280
     LI    x3, 0x90001400
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
     # ================================================================
     # Test 3: vredmax.row.bf16  m4, m0
     # ================================================================
-    VREDMAX.ROW.BF16 4, 0
+    vredmax.row.bf16 m4, m0
     DELAY 32
 
     LI    x8, 1024
-    VSTORE 4, x8, 0
+    vstore m4, 0(x8)
     DELAY 33
-    VSTORE 5, x8, 8
+    vstore m5, 8(x8)
     DELAY 33
     LI    x8, 1024
     LI    x3, 0x90001800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1280
     LI    x3, 0x90001C00
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

@@ -35,89 +35,89 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024              # bank size in bytes
 
     # ── Load A bf16 → VMEM[0..511] → (m0, m1) ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
     LI    x6, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
-    VLOAD 1, x6, 8
+    vload m1, 8(x6)
     DELAY 33
 
     # ── Load B fp8 → VMEM[512..767] → m4 ──
     LI    x7, 512
     LI    x1, 0x90000800
-    DMA.LOAD  x7, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x7, x1, x2, ch0
+    dma.wait ch0
 
     LI    x7, 512
-    VLOAD 4, x7, 0
+    vload m4, 0(x7)
     DELAY 33
 
     # ── Load bias bf16 → VMEM[768..1279] → (m6, m7) ──
     LI    x9, 768
     LI    x1, 0x90001000
-    DMA.LOAD  x9, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x9, x1, x2, ch0
+    dma.wait ch0
     LI    x9, 1024
     LI    x1, 0x90001400
-    DMA.LOAD  x9, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x9, x1, x2, ch0
+    dma.wait ch0
 
     LI    x9, 768
-    VLOAD 6, x9, 0
+    vload m6, 0(x9)
     DELAY 33
-    VLOAD 7, x9, 8
+    vload m7, 8(x9)
     DELAY 33
 
     # ── Transpose B so MXU computes A @ B, not A @ B^T ──
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
 
     # ── Quantize A bf16 (m0,m1) → m8 fp8 via acc[1] roundtrip ──
-    VMATPUSH.ACC.BF16.MXU1 1, 0
+    vmatpush.acc.bf16.mxu1 acc1, m0
     DELAY 31
-    SELI 0, 0x7F                # E8M0 unit scale (2^0 = 1.0)
-    VMATPOP.FP8.MXU1 8, 0, 1
+    seli e0, 0x7F                # E8M0 unit scale (2^0 = 1.0)
+    vmatpop.fp8.acc.mxu1 m8, acc1, e0
     DELAY 31
 
     # ── Matmul: (m10,m11) = m8 @ m5  (= A @ B^T^T = A @ B) ──
-    VMATPUSH.W.MXU1  0, 5
+    vmatpush.weight.mxu1 w0, m5
     DELAY 31
-    VMATMUL.MXU1     0, 8, 0
+    vmatmul.mxu1 acc0, m8, w0
     DELAY 34
-    VMATPOP.BF16.MXU1 10, 0
+    vmatpop.bf16.acc.mxu1 m10, acc0
     DELAY 31
 
     # ── Bias add: (m12,m13) = (m10,m11) + (m6,m7) ──
-    VADD.BF16 12, 10, 6
+    vadd.bf16 m12, m10, m6
     DELAY 64
 
     # ── Store (m12,m13) → VMEM[1280..1791] → DRAM[0x1800..0x1FFF] ──
     LI    x8, 1280
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
-    VSTORE 13, x8, 8
+    vstore m13, 8(x8)
     DELAY 33
 
     LI    x8, 1280
     LI    x3, 0x90001800
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1536
     LI    x3, 0x90001C00
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1

@@ -32,76 +32,76 @@
     ADDI  x28, x0, 1
 
     LI    x5, 0x00000000
-    DMA.CONFIG x5, 0
+    dma.config x5, ch0
     LI    x2, 1024              # bank size in bytes
 
     # ── Load A fp8 → VMEM[0..255] → m0 ──
     ADDI  x6, x0, 0
     LI    x1, 0x90000000
-    DMA.LOAD  x6, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x6, x1, x2, ch0
+    dma.wait ch0
 
     ADDI  x6, x0, 0
-    VLOAD 0, x6, 0
+    vload m0, 0(x6)
     DELAY 33
 
     # ── Load B fp8 → VMEM[256..511] → m4 ──
     LI    x7, 256
     LI    x1, 0x90000400
-    DMA.LOAD  x7, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x7, x1, x2, ch0
+    dma.wait ch0
 
     LI    x7, 256
-    VLOAD 4, x7, 0
+    vload m4, 0(x7)
     DELAY 33
 
     # ── Load bias bf16 → VMEM[512..1023] → (m6, m7) ──
     LI    x9, 512
     LI    x1, 0x90000800
-    DMA.LOAD  x9, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x9, x1, x2, ch0
+    dma.wait ch0
     LI    x9, 768
     LI    x1, 0x90000C00
-    DMA.LOAD  x9, x1, x2, 0
-    DMA.WAIT  0
+    dma.load x9, x1, x2, ch0
+    dma.wait ch0
 
     LI    x9, 512
-    VLOAD 6, x9, 0
+    vload m6, 0(x9)
     DELAY 33
-    VLOAD 7, x9, 8
+    vload m7, 8(x9)
     DELAY 33
 
     # ── Transpose B so MXU computes A @ B, not A @ B^T ──
-    VTRPOSE.XLU 5, 4
+    vtrpose.xlu m5, m4
     DELAY 64
 
     # ── Matmul: (m10,m11) = m0 @ m5  (= A @ B^T^T = A @ B) ──
-    VMATPUSH.W.MXU0  0, 5
+    vmatpush.weight.mxu0 w0, m5
     DELAY 31
-    VMATMUL.MXU0     0, 0, 0
+    vmatmul.mxu0 acc0, m0, w0
     DELAY 95
-    VMATPOP.BF16.MXU0 10, 0
+    vmatpop.bf16.acc.mxu0 m10, acc0
     DELAY 31
 
     # ── Bias add: (m12,m13) = (m10,m11) + (m6,m7) ──
-    VADD.BF16 12, 10, 6
+    vadd.bf16 m12, m10, m6
     DELAY 64
 
     # ── Store (m12,m13) → VMEM[1024..1535] → DRAM[0x1000..0x17FF] ──
     LI    x8, 1024
-    VSTORE 12, x8, 0
+    vstore m12, 0(x8)
     DELAY 33
-    VSTORE 13, x8, 8
+    vstore m13, 8(x8)
     DELAY 33
 
     LI    x8, 1024
     LI    x3, 0x90001000
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
     LI    x8, 1280
     LI    x3, 0x90001400
-    DMA.STORE x3, x8, x2, 1
-    DMA.WAIT  1
+    dma.store x3, x8, x2, ch1
+    dma.wait ch1
 
 pass:
     ADDI  x1, x0, 1
