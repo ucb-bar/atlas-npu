@@ -228,6 +228,14 @@ class AtlasCore(
 
   scalar.io.vpu_status := makeVpuStatus(vpu.io.busy, vpu.io.issueBusy)
 
+  // Interlock: readiness of each unit for the command decoded in S1.
+  scalar.io.mxu0Ready            := mxu0.io.cmdReady
+  scalar.io.mxu1Ready            := mxu1.io.cmdReady
+  scalar.io.xlu_busy             := xlu.io.busy
+  scalar.io.dma_can_enqueue      := dma.io.canEnqueue
+  scalar.io.lsu_vload_vmem_bank  := lsu.io.vloadVmemBank
+  scalar.io.lsu_vstore_vmem_bank := lsu.io.vstoreVmemBank
+
   // ==========================================================================
   // MREG bank tracker
   // ==========================================================================

@@ -93,6 +93,11 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
 
     val activeMregRead  = Valid(UInt(mregP.mregIdBits.W))
     val activeMregWrite = Valid(UInt(mregP.mregIdBits.W))
+
+    // VMEM bank each vector path is using, for the scalar-core interlock.
+    // Block banking keeps a whole VLOAD/VSTORE in one bank.
+    val vloadVmemBank  = Valid(UInt(vmemP.bankIdBits.W))
+    val vstoreVmemBank = Valid(UInt(vmemP.bankIdBits.W))
   })
 
   // ==========================================================================
@@ -196,6 +201,11 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   io.vloadBusy := vloadBusy
   io.vstoreBusy := vstoreBusy
   io.vecBusy    := vloadBusy || vstoreBusy
+
+  io.vloadVmemBank.valid  := vloadBusy
+  io.vloadVmemBank.bits   := vmemP.getBankIdx(vloadVmemBase)
+  io.vstoreVmemBank.valid := vstoreBusy
+  io.vstoreVmemBank.bits  := vmemP.getBankIdx(vstoreVmemBase)
 
   assert(!(issueVloadCmd && vloadBusy),
     "ASSERT FAIL: VLOAD issued while VLOAD path is busy")

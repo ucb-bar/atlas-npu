@@ -103,6 +103,14 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val mregReadBusy   = Input(UInt(64.W))
   val mregWriteBusy  = Input(UInt(64.W))
 
+  // Interlock: each unit's ability to take the command decoded in S1.
+  val mxu0Ready       = Input(Bool())   // MXU0 would accept mxu0Cmd.bits this cycle
+  val mxu1Ready       = Input(Bool())   // MXU1 would accept mxu1Cmd.bits this cycle
+  val xlu_busy        = Input(Bool())
+  val dma_can_enqueue = Input(Bool())
+  val lsu_vload_vmem_bank  = Flipped(Valid(UInt(spP.bankIdBits.W)))
+  val lsu_vstore_vmem_bank = Flipped(Valid(UInt(spP.bankIdBits.W)))
+
   val csrPort       = Flipped(new CSRInternalPort)
   val scaleRegs     = Output(Vec(NUM_SCALE_REGS, UInt(8.W)))
   val dmaBaseReg    = Output(UInt(32.W))

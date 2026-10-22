@@ -10,15 +10,19 @@ Pipeline overview
   Stage 0: Fetch from IMEM
   Stage 1: Decode / Execute / Writeback
 
-Software-scheduled hazard model:
-  The frontend never stalls for resource hazards.  The compiler / programmer
-  is responsible for scheduling instructions so that no bank conflicts,
-  engine-busy violations, or other structural/data hazards occur.
-  Hardware assertions fire on any such violation to aid debugging.
+Interlocked hazard model:
+  The instruction in S1 stalls until it can issue without a structural or
+  data hazard (see "Interlock" below): its unit cannot take the command, an
+  MREG reservation or physical port is taken, an LSU path holds its VMEM
+  bank, a DMA would overtake an LSU transfer, or a scalar load result or
+  write port is pending. Programs need no DELAY spacing; the unit assertions
+  remain as checks of the interlock.
 
-  The only conditions that stall the pipeline are:
-    DELAY    — stalls for `imm` cycles.
-    DMA.WAIT — stalls until the targeted DMA channel is no longer busy.
+  The pipeline also stalls for:
+    DELAY    — stalls for `imm` cycles (still legal, no longer required).
+    DMA.WAIT — stalls until the targeted DMA channel is no longer busy. This
+               stays the architectural fence between a DMA transfer and the
+               instructions that consume or overwrite its VMEM data.
 
 Scalar stores are pipelined masked writes (no RMW).
 Scalar loads have fixed 3-cycle latency.
@@ -242,13 +246,6 @@ class ScalarCore(spP: VmemParams) extends Module {
   when((hostStop || illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
 
   // ==============================================================
-  // Stall / fire
-  // ==============================================================
-
-  val stall   = delay_stall || dma_wait_stall
-  val s1_fire = s1_valid && !stall && !halt_now
-
-  // ==============================================================
   // ALU + Branch
   // ==============================================================
 
@@ -277,6 +274,124 @@ class ScalarCore(spP: VmemParams) extends Module {
   val redirect = is_branch_taken || is_jal || is_jalr
   val redirect_target = Mux(is_jalr, jalr_target, Mux(is_jal, jal_target, branch_target))
   val link_value = s1_pc + 1.U
+
+  // ==============================================================
+  // Interlock
+  //
+  // The instruction in S1 waits until it can issue without a
+  // structural or data hazard, so programs need no DELAY spacing.
+  // Each term is a software-scheduling rule that a unit asserts on
+  // (npu_spec §4: access windows, same-unit issue spacing, MXU
+  // buffer rules). DMA.WAIT stays the architectural fence between
+  // a DMA transfer and the instructions that use its data.
+  // ==============================================================
+
+  // ── The target unit can take the command ──
+  val isVload   = dec.is_lsu && dec.lsu_cmd === LSU_VLOAD
+  val isVstore  = dec.is_lsu && dec.lsu_cmd === LSU_VSTORE
+  val isDmaXfer = dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST
+
+  val mxuNotReady = dec.mxu_cmd =/= MXU_NONE &&
+    Mux(dec.mxu_sel === MXUSEL_0, !io.mxu0Ready, !io.mxu1Ready)
+  val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)
+  val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
+  val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
+                    (dec.is_mem_load && (memLoadPending || io.lsu_scalar_busy))
+  // A busy channel is illegal to reuse; slots are allocated round-robin and
+  // retire out of order, so the next slot must also be free.
+  val dmaNotReady = isDmaXfer && (io.dma_busy(dec.funct3) || !io.dma_can_enqueue)
+
+  // ── MREG reservations and physical ports ──
+  // Reservations: no read of a register with a pending write (RAW), no
+  // write over a pending read (WAR; VLOAD is exempt, it writes each row
+  // after an earlier reader has read it) or write (WAW). Ports: m_i and
+  // m_{i+32} share one read port and one write port.
+  private val nPhys = 32
+  val physReadBusy  = io.mregReadBusy(nPhys - 1, 0)  | io.mregReadBusy(2 * nPhys - 1, nPhys)
+  val physWriteBusy = io.mregWriteBusy(nPhys - 1, 0) | io.mregWriteBusy(2 * nPhys - 1, nPhys)
+  private def phys(b: UInt): UInt = b(log2Ceil(nPhys) - 1, 0)
+
+  val mxuReadsVs1 = dec.mxu_cmd === MXU_PUSH_WEIGHT || dec.mxu_cmd === MXU_PUSH_ACC_FP8 ||
+                    dec.mxu_cmd === MXU_PUSH_ACC_BF16 ||
+                    dec.mxu_cmd === MXU_MATMUL || dec.mxu_cmd === MXU_MATMUL_ACC
+  val vpuSrc1 = vpuPrimaryReadBank(dec)
+  val mregReads: Seq[(Bool, UInt)] = Seq(
+    (mxuReadsVs1,                                              dec.vs1),
+    (dec.mxu_cmd === MXU_PUSH_ACC_BF16,                        dec.vs1 + 1.U),
+    (isVstore,                                                 dec.vd),
+    (dec.xlu_cmd =/= XLU_NONE,                                 dec.vs1),
+    (dec.vpu_cmd =/= VPU_NONE && !vpuIsVli(dec.vpu_cmd),       vpuSrc1),
+    (vpuReadsPrimaryPair(dec.vpu_cmd),                         vpuSrc1 + 1.U),
+    (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2),
+    (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2 + 1.U))
+  val mregWrites: Seq[(Bool, UInt)] = Seq(
+    (dec.mxu_cmd === MXU_POP_FP8 || dec.mxu_cmd === MXU_POP_BF16, dec.vd),
+    (dec.mxu_cmd === MXU_POP_BF16,                                dec.vd + 1.U),
+    (isVload,                                                     dec.vd),
+    (dec.xlu_cmd =/= XLU_NONE,                                    dec.vd),
+    (dec.vpu_cmd =/= VPU_NONE,                                    dec.vd),
+    (vpuWritesPair(dec.vpu_cmd),                                  dec.vd + 1.U))
+  val mregHazard =
+    mregReads.map { case (v, b) => v && (io.mregWriteBusy(b) || physReadBusy(phys(b))) }.reduce(_ || _) ||
+    mregWrites.map { case (v, b) => v && (physWriteBusy(phys(b)) || (!isVload && io.mregReadBusy(b))) }.reduce(_ || _)
+
+  // ── VMEM banks ──
+  // The LSU scalar and vector paths must never use one VMEM bank in the
+  // same cycle (Vmem asserts). Scalar accesses reach VMEM the cycle after
+  // issue; vloadBusy / vstoreBusy cover the VLOAD reads (T+1..T+32) and
+  // VSTORE writes (T+3..T+34).
+  private val vecWordOffBits = log2Ceil(spP.wordsPerLine)
+  private def bankIn(p: Valid[UInt], b: UInt): Bool = p.valid && p.bits === b
+  val vlBank = io.lsu_vload_vmem_bank
+  val vsBank = io.lsu_vstore_vmem_bank
+  val scalarVmemBank = spP.getBankIdx(alu_result(spP.byteAddrBits - 1, spP.lineOffBits))
+  val vecVmemBank    = spP.getBankIdx(alu_result(spP.lineAddrBits + vecWordOffBits - 1, vecWordOffBits))
+  val vmemHazard =
+    ((dec.is_mem_load || dec.is_mem_store) &&
+      (bankIn(vlBank, scalarVmemBank) || bankIn(vsBank, scalarVmemBank))) ||
+    (isVload && bankIn(vsBank, vecVmemBank)) ||
+    (isVstore && bankIn(vlBank, vecVmemBank))
+
+  // DMA goes through bank grants, so it cannot collide with the LSU, but it
+  // must not overtake an LSU transfer on the banks it touches: a DMA store
+  // (VMEM read) waits for a VSTORE, a DMA load (VMEM write) for a VLOAD or
+  // a VSTORE.
+  val dmaLine0 = Mux(dec.dma_cmd === DMA_LD, rd_data, rs1_data)(spP.wordAddrBits - 1, spP.wordOffBits)
+  val dmaLineN = dmaLine0 +& (rs2_data >> spP.lineOffBits) - 1.U
+  val dmaBank0 = spP.getBankIdx(dmaLine0)
+  val dmaBankN = spP.getBankIdx(dmaLineN)
+  private def dmaTouches(p: Valid[UInt]): Bool = p.valid && dmaBank0 <= p.bits && p.bits <= dmaBankN
+  val dmaVmemHazard = (dec.dma_cmd === DMA_ST && dmaTouches(vsBank)) ||
+                      (dec.dma_cmd === DMA_LD && (dmaTouches(vlBank) || dmaTouches(vsBank)))
+
+  // ── Scalar loads ──
+  // A load writes rd at T+3 without bypass, and the response shares the one
+  // register-file write port. Tensor instructions carry no scalar operands.
+  val xLoadPending = memLoadPending && memLoadCmd =/= MEM_SELD
+  val xLoadWb      = memLoadRespValid && memLoadRespCmd =/= MEM_SELD
+  private def xPending(r: UInt): Bool = r =/= 0.U &&
+    ((xLoadPending && memLoadRd === r) || (xLoadWb && memLoadRespRd === r))
+  val tensorOp = dec.mxu_cmd =/= MXU_NONE || dec.vpu_cmd =/= VPU_NONE || dec.xlu_cmd =/= XLU_NONE
+  val xRegHazard = (!tensorOp && (xPending(dec.rs1) || xPending(dec.rs2) || xPending(dec.rd))) ||
+                   (memLoadRespValid && dec.rd_wen && dec.rd =/= 0.U)
+
+  // seld writes a scale register at T+3; vpack/vunpack and vmatpop.fp8 read
+  // one, and seli shares its write port.
+  val seldPending = (memLoadPending && memLoadCmd === MEM_SELD) ||
+                    (memLoadRespValid && memLoadRespCmd === MEM_SELD)
+  val readsScale  = (dec.vpu_cmd =/= VPU_NONE && vpuIsPackUnpack(dec.vpu_cmd)) ||
+                    dec.mxu_cmd === MXU_POP_FP8
+  val scaleHazard = (seldPending && readsScale) || (dec.is_seli && (seldPending || memLoadRespValid))
+
+  val interlock = s1_valid && (mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady ||
+    dmaNotReady || mregHazard || vmemHazard || dmaVmemHazard || xRegHazard || scaleHazard)
+
+  // ==============================================================
+  // Stall / fire
+  // ==============================================================
+
+  val stall   = delay_stall || dma_wait_stall || interlock
+  val s1_fire = s1_valid && !stall && !halt_now
 
   // ==============================================================
   // Software-scheduling assertions

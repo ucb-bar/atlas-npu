@@ -45,6 +45,9 @@ class InnerProductTreesTop(
     val mregWriteReq0 = Valid(new MregWriteReq(mregP))
     val mregWriteReq1 = Valid(new MregWriteReq(mregP))
 
+    // ── Interlock: io.cmd.bits would be accepted this cycle ──
+    val cmdReady    = Output(Bool())
+
     // ── Granular busy signals for scalar-core hazard logic ──
     val compBusy    = Output(Bool())
     val pushBusy    = Output(Bool())
@@ -87,6 +90,7 @@ class InnerProductTreesTop(
   // Busy signals
   // ==========================================================================
 
+  io.cmdReady    := seq.io.cmdReady
   io.compBusy    := seq.io.compBusy
   io.pushBusy    := seq.io.pushBusy
   io.popBusy     := seq.io.popBusy

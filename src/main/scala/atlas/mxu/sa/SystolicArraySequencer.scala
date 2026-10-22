@@ -87,6 +87,11 @@ class SystolicArraySequencer(
     val accStoreReadEn     = Output(Bool())
     val accStoreData       = Input(Vec(p.cols, UInt(p.outT.ieeeWidth.W)))
 
+    // ── Interlock: the command on io.cmd.bits would be accepted this cycle ──
+    // Combinational in io.cmd.bits, independent of io.cmd.valid, so the
+    // scalar core can hold the instruction until the unit takes it.
+    val cmdReady    = Output(Bool())
+
     // ── Granular busy signals for scalar-core hazard logic ──
     val compBusy    = Output(Bool())
     val pushBusy    = Output(Bool())
@@ -214,6 +219,8 @@ class SystolicArraySequencer(
   val p0IsPushW   = p0CmdValid && (p0Cmd.op === MxuOp.PushWeight)
   val p0IsPushAcc = p0CmdValid && (p0Cmd.op === MxuOp.PushAccFP8)
   val p0IsBF16    = p0CmdValid && (p0Cmd.op === MxuOp.PushAccBF16)
+  val p1IsPushW   = p1CmdValid && (p1Cmd.op === MxuOp.PushWeight)
+  val p1IsPushAcc = p1CmdValid && (p1Cmd.op === MxuOp.PushAccFP8)
   val p1IsBF16    = p1CmdValid && (p1Cmd.op === MxuOp.PushAccBF16)
 
   // ==========================================================================
@@ -290,15 +297,54 @@ class SystolicArraySequencer(
   val computeHazard  = saTrackerFull || accReuseHazard
   val pushWHazard    = !wbufReady(cmdWslot)
 
+  // ── Path and port rules (interlock) ──
+  // The MXU has one weight write path and one accumulator-push path, and
+  // each accumulator is a 1R1W SRAM shared by compute (psum read, result
+  // write) and push/pop (AccumulationBuffers asserts on overlap). A command
+  // waits while an op in flight will still use the path or port it needs.
+  val isMatmulAcc    = cmdOp === MxuOp.MatmulAcc
+  val pushWWriting   = (p0IsPushW && !p0Boundary) || (p1IsPushW && !p1Boundary)
+  val pushAccWriting = ((p0IsPushAcc || p0IsBF16) && !p0Boundary) || (p1IsPushAcc && !p1Boundary)
+  // A push writes row r at T+1+r: on its first write cycle, a read of row 0
+  // would return the old value.
+  val pushAccRow0 = VecInit.tabulate(2) { b =>
+    ((p0IsPushAcc || p0IsBF16) && p0Cmd.accSel === (b == 1).B && p0Row === 0.U) ||
+    (p1IsPushAcc && p1Cmd.accSel === (b == 1).B && p1Row === 0.U)
+  }
+  val matmulInFlight = VecInit.tabulate(2) { b =>
+    (0 until inflightDepth).map(i => inflightValid(i) && inflight(i).accSel === (b == 1).B).reduce(_ || _)
+  }
+  val psumReading = VecInit.tabulate(2) { b =>
+    p0IsCompute && p0Cmd.op === MxuOp.MatmulAcc && p0Cmd.accSel === (b == 1).B && !p0Boundary
+  }
+  val popReading = VecInit.tabulate(2) { b =>
+    w0CmdValid && w0Cmd.accSel === (b == 1).B && !w0Boundary
+  }
+  val computePortHazard = isMatmulAcc && (pushAccRow0(cmdAccBuf) || popReading(cmdAccBuf))
+  val pushWPathHazard   = pushWWriting
+  val pushAccPathHazard = pushAccWriting || matmulInFlight(cmdAccBuf)
+  val popPortHazard     = pushAccRow0(cmdAccBuf) || psumReading(cmdAccBuf)
+
+  // Per-target-FSM accept conditions, without io.cmd.valid.
+  val canCompute  = isCompute    && p0Boundary && !computeHazard && !computePortHazard
+  val pushOk      = Mux(isPushW, !pushWHazard && !pushWPathHazard, !accReuseHazard && !pushAccPathHazard)
+  val canPushP1   = isPush       && p1Boundary && pushOk
+  val canPushP0   = isPush       && !p1Boundary && p0Boundary && pushOk
+  val canBF16Push = isPushBF16   && p0Boundary && p1Boundary && !accReuseHazard && !pushAccPathHazard
+  val canPopFP8   = isPopFP8     && w0Boundary && !accReuseHazard && !popPortHazard
+  val canPopBF16  = isPopBF16    && w0Boundary && w1Boundary && !accReuseHazard && !popPortHazard
+  io.cmdReady := canCompute || canPushP1 || canPushP0 || canBF16Push || canPopFP8 || canPopBF16
+
   // Per-target-FSM accept signals.
-  val acceptCompute  = io.cmd.valid && isCompute    && p0Boundary && !computeHazard
-  val acceptPushP1   = io.cmd.valid && isPush       && p1Boundary &&
-                       Mux(isPushW, !pushWHazard, !accReuseHazard)
-  val acceptPushP0   = io.cmd.valid && isPush       && !p1Boundary && p0Boundary &&
-                       Mux(isPushW, !pushWHazard, !accReuseHazard)
-  val acceptBF16Push = io.cmd.valid && isPushBF16   && p0Boundary && p1Boundary && !accReuseHazard
-  val acceptPopFP8   = io.cmd.valid && isPopFP8     && w0Boundary && !accReuseHazard
-  val acceptPopBF16  = io.cmd.valid && isPopBF16    && w0Boundary && w1Boundary && !accReuseHazard
+  val acceptCompute  = io.cmd.valid && canCompute
+  val acceptPushP1   = io.cmd.valid && canPushP1
+  val acceptPushP0   = io.cmd.valid && canPushP0
+  val acceptBF16Push = io.cmd.valid && canBF16Push
+  val acceptPopFP8   = io.cmd.valid && canPopFP8
+  val acceptPopBF16  = io.cmd.valid && canPopBF16
+
+  assert(!(io.cmd.valid && !io.cmdReady),
+    "SA: command issued while the unit cannot accept it (interlock bypassed)")
 
   // ==========================================================================
   // Hazard / structural assertions (debug only — do not gate execution).
@@ -662,13 +708,17 @@ class SystolicArraySequencer(
   io.computeBusy := io.compBusy
 
   // ── Active mreg bank reports ──
-  io.activeReads(0).valid := p0CmdValid
+  // A port is reported while it will still access its bank after this cycle.
+  // On a boundary cycle the last row has already been requested (read) or is
+  // written this cycle (pop), so a command issued now cannot collide with it;
+  // reporting it would cost back-to-back commands on one register a cycle.
+  io.activeReads(0).valid := p0CmdValid && !p0Boundary
   io.activeReads(0).bits  := p0Cmd.mregId
-  io.activeReads(1).valid := p1CmdValid
+  io.activeReads(1).valid := p1CmdValid && !p1Boundary
   io.activeReads(1).bits  := Mux(p1IsBF16, p1Cmd.mregId + 1.U, p1Cmd.mregId)
 
-  io.activeWrites(0).valid := w0CmdValid
+  io.activeWrites(0).valid := w0CmdValid && !w0Boundary
   io.activeWrites(0).bits  := w0Cmd.mregId
-  io.activeWrites(1).valid := w1CmdValid
+  io.activeWrites(1).valid := w1CmdValid && !w1Boundary
   io.activeWrites(1).bits  := w1Cmd.mregId + 1.U
 }

@@ -128,6 +128,10 @@ class DmaEngine(
   val io = IO(new Bundle {
     val command     = Flipped(Valid(new DmaCommand(vmemP, dmaP)))
     val channelBusy = Output(Vec(numChannels, Bool()))
+    // The command slot the next command would take is free. Slots are
+    // allocated round-robin and may retire out of order, so a free channel
+    // alone does not guarantee a free slot.
+    val canEnqueue  = Output(Bool())
 
     val vmemRead      = Valid(new VmemLineReadPort(vmemP))
     val vmemReadGrant = Input(Bool())
@@ -159,6 +163,7 @@ class DmaEngine(
   val slotDispatched  = RegInit(VecInit(Seq.fill(numChannels)(false.B)))
 
   val enqueueIdx = RegInit(0.U(dmaP.channelIdBits.W))
+  io.canEnqueue := !slotActive(enqueueIdx)
   val requestIdx = RegInit(0.U(dmaP.channelIdBits.W))
 
   val requestBeatCount    = RegInit(0.U(beatCountBits.W))
