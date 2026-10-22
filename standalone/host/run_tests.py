@@ -98,6 +98,8 @@ def main():
                                    detail=f"{type(e).__name__}: {e}")
                     report(i, r, time.time() - t0)
             finally:
+                if link.read_retries:
+                    print(f"link: {link.read_retries} read chunk(s) retried after a lost byte")
                 link.close()
 
     passed = sum(r.status == "PASS" for r in rows)

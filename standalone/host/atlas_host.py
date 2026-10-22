@@ -152,6 +152,7 @@ class TsiLink:
 
     def __init__(self, port=None, baud=TSI_BAUD, cosim=None):
         from pyuartsi import UARTTSI
+        self.read_retries = 0
         if cosim is not None:
             self.port = f"cosim:{cosim}"
             self._t = UARTTSI("cosim", baud, cflush_addr=0, transport=CosimTransport(cosim))
@@ -170,10 +171,19 @@ class TsiLink:
             self._t.write_bytes(addr + 4 * i, struct.pack("<%dI" % len(chunk), *chunk))
 
     def read_words(self, addr, n):
+        """Reads are idempotent, so a chunk whose reply lost a byte on the UART is read again."""
+        from pyuartsi.exceptions import TransportTimeoutError
         out = []
         for i in range(0, n, 1024):
             k = min(1024, n - i)
-            out += struct.unpack("<%dI" % k, self._t.read_bytes(addr + 4 * i, 4 * k))
+            for attempt in range(3):
+                try:
+                    out += struct.unpack("<%dI" % k, self._t.read_bytes(addr + 4 * i, 4 * k))
+                    break
+                except TransportTimeoutError:
+                    if attempt == 2:
+                        raise
+                    self.read_retries += 1
         return out
 
     def poll(self, addr, budget):

@@ -60,6 +60,29 @@ vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atl
 python3 standalone/host/run_tests.py --board --out build/board-nodelay build/bundle/nodelay/*.json
 ```
 
+## Results (2026-10-21)
+
+Bitstream `atlas_standalone_vcu118_50mhz.bit` (Vivado 2024.1, `pipeline-interlock` 18a3f1e): timing met
+at 50 MHz (WNS +0.005 ns, WHS +0.010 ns), 604K LUTs (51%), 98K FFs, 501 RAMB36, 128 URAM,
+112 DSP. The critical path is the one that also limits the Chipyard build: an MREG bank read
+address into an MXU1 lane's anchor accumulation.
+
+| Run | original kernels | every `DELAY` removed |
+|---|---|---|
+| Verilator, all RTL assertions | 121 / 121 | 121 / 121 |
+| VCU118 over UART TSI | 121 / 121 | 121 / 121 |
+
+On the board, kernel cycle counts (RUN_CYCLES) equal the simulation's for 120 of 121 kernels in
+both variants. Without `DELAY` the suite takes 9.8% fewer cycles; `perf_mm_*` keep 93% MXU
+utilization. A full suite takes a few minutes; the link loses about one byte per suite, which
+`TsiLink` absorbs by reading the chunk again.
+
+The exception is `jal_jalr`. It never initializes `x11`, and the scalar registers keep their
+values from the previous kernel on the board, so its first subtest fails. Its fail path writes
+`x28` to DBG0, which is 1 in the first subtest: the same value as a pass, so the runner reports
+PASS. With `x11` cleared the kernel passes all four subtests on the board, in the same 36 cycles
+as in simulation. 10 tests are judged by DBG0 alone (no DRAM check) and share this ambiguity.
+
 ## Driving it from Python
 
 `run_tests.py` is one client of `host/atlas_host.py`. A kernel can also be run by hand; the
