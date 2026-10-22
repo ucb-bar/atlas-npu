@@ -49,7 +49,7 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim -j 32 --out bu
 Bitstream (Vivado 2024.1 or later with a VU9P license on `PATH`; about 2 hours):
 
 ```bash
-standalone/fpga/build_bitstream.sh build/vcu118 50     # build/vcu118/atlas_standalone_vcu118_50mhz.bit
+standalone/fpga/build_bitstream.sh build/vcu118 50     # build/vcu118/atlas_standalone_vcu118_50mhz.bit (Verilog in build/vcu118/rtl)
 ```
 
 Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (interface 1,
@@ -58,6 +58,25 @@ Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (i
 ```bash
 vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_50mhz.bit
 python3 standalone/host/run_tests.py --board --out build/board-nodelay build/bundle/nodelay/*.json
+```
+
+## Driving it from Python
+
+`run_tests.py` is one client of `host/atlas_host.py`. A kernel can also be run by hand; the
+link is the same for the board (`TsiLink()`) and the model (`SimLink(binary)`):
+
+```python
+from atlas_host import Atlas, TsiLink, IMEM_BASE, CSR_EXEC_CONTROL, CSR_DBG0
+
+atlas = Atlas(TsiLink())                         # checks the sys_regs ID
+link = atlas.link
+link.write_words(0x9000_0000, inputs)            # DRAM (32-bit words)
+link.write_words(CSR_EXEC_CONTROL, [0])          # stop, then load the kernel
+link.write_words(CSR_DBG0, [0])
+link.write_words(IMEM_BASE, program)             # words from npu_model's assembler
+link.write_words(CSR_EXEC_CONTROL, [1])          # start
+link.poll(CSR_DBG0, 10.0)                        # the kernel writes DBG0 when it is done
+outputs = link.read_words(0x9000_0800, 256)
 ```
 
 ## Board
@@ -82,5 +101,6 @@ python3 standalone/host/run_tests.py --board --out build/board-nodelay build/bun
 | `0x020` | ATLAS | [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
 | `0x024` | FEATURES | [0] hardware interlock |
 | `0x028` | LEDS | [2:0] |
+| `0x02C` | RUN_CYCLES | cycles the scalar core has run (not halted); a write clears it |
 
 Reads of IMEM stall while the scalar core runs (IMEM serves the fetch); stop the core first.

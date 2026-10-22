@@ -2,10 +2,11 @@
 
     python standalone/host/run_tests.py --sim build/vl_soc/atlas_sim -j 32 --out OUT BUNDLE.json ...
     python standalone/host/run_tests.py --board [--port TTY] --out OUT BUNDLE.json ...
+    python standalone/host/run_tests.py --tsi-sim build/vl_tsi/atlas_tsi_sim --out OUT BUNDLE.json ...
 
 --sim runs each test in a fresh Verilator process (in parallel with -j). An RTL assertion, which
 with the interlock means a hazard got through, fails the test. --board runs the tests one after
-another over UART TSI. Results: OUT/results.csv and a summary on stdout.
+another over UART TSI; --tsi-sim does the same against the UART-level model. Results: OUT/results.csv and a summary on stdout.
 """
 import argparse
 import csv
@@ -52,6 +53,7 @@ def main():
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--sim", metavar="BINARY")
     g.add_argument("--board", action="store_true")
+    g.add_argument("--tsi-sim", metavar="BINARY", help="PyUARTSI against the UART-level model, one link")
     ap.add_argument("--port")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
     ap.add_argument("--budget", type=float, default=None,
@@ -81,8 +83,8 @@ def main():
                 for i, (r, wall) in enumerate(pool.map(run_sim, [(a.sim, p, budget) for p in paths])):
                     report(i, r, wall)
         else:
-            budget = a.budget or 20.0
-            link = TsiLink(a.port)
+            budget = a.budget or (600.0 if a.tsi_sim else 20.0)
+            link = TsiLink(cosim=a.tsi_sim) if a.tsi_sim else TsiLink(a.port)
             try:
                 atlas = Atlas(link)
                 print(f"board on {link.port}: DRAM {atlas.dram_bytes >> 20} MiB, features 0x{atlas.features:x}")

@@ -1,0 +1,2 @@
+# Host side of the standalone build (atlas_host.py). Same pin as ucb-bar/nvfp4.
+pyuartsi @ git+https://github.com/ucb-bar/pyuartsi.git@f9f4843a2c4345ecca3a25af5cb9c60e26b4ec7d

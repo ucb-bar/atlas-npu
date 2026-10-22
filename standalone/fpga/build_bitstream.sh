@@ -10,9 +10,9 @@ clk="${2:-50}"
 jobs="${3:-16}"
 
 cd "$root"
-rm -rf build/rtl-fpga
-./mill --no-server standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-fpga
+rm -rf "$out/rtl"
 mkdir -p "$out"
+./mill --no-server standalone.runMain atlas.standalone.EmitAtlasCore "$out/rtl"
 cd "$out"
 vivado -mode batch -nojournal -log vivado.log -source "$root/standalone/fpga/build.tcl" \
-    -tclargs "$root/build/rtl-fpga" "$out" "$clk" "$jobs"
+    -tclargs "$out/rtl" "$out" "$clk" "$jobs"

@@ -12,6 +12,7 @@
 //                          [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy
 //   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required)
 //   0x028  LEDS        RW  [2:0] user LEDs
+//   0x02C  RUN_CYCLES  RW  cycles the Atlas scalar core has spent running (not halted); any write clears it
 module atlas_sys_regs
     import tl_pkg::*;
 #(
@@ -34,7 +35,7 @@ module atlas_sys_regs
     input  logic [15:0] atlas_status,
     output logic [2:0]  user_leds
 );
-    logic [31:0] scratch, denied_count, cycles, rdata;
+    logic [31:0] scratch, denied_count, cycles, run_cycles, rdata;
     logic        hit;
 
     wire [9:0] word = a.address[11:2];
@@ -54,6 +55,7 @@ module atlas_sys_regs
             10'h8:   rdata = {16'd0, atlas_status};
             10'h9:   rdata = 32'd1;
             10'hA:   rdata = {29'd0, user_leds};
+            10'hB:   rdata = run_cycles;
             default: begin
                 rdata = '0;
                 hit   = 1'b0;
@@ -69,9 +71,11 @@ module atlas_sys_regs
             scratch      <= '0;
             denied_count <= '0;
             cycles       <= '0;
+            run_cycles   <= '0;
             user_leds    <= '0;
         end else begin
             cycles <= cycles + 1'b1;
+            if (!atlas_status[0]) run_cycles <= run_cycles + 1'b1;
             if (denied) denied_count <= denied_count + 1'b1;
             if (d_valid && d_ready) d_valid <= 1'b0;
             if (a_valid && a_ready) begin
@@ -79,6 +83,7 @@ module atlas_sys_regs
                 d       <= '{opcode: wr ? D_ACK : D_ACK_DATA, denied: !hit, data: wr ? '0 : rdata};
                 if (wr && word == 10'h1) scratch <= apply_mask(scratch, a.data, a.mask);
                 if (wr && word == 10'hA && a.mask[0]) user_leds <= a.data[2:0];
+                if (wr && word == 10'hB) run_cycles <= '0;
             end
         end
     end

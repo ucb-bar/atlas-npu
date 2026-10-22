@@ -56,5 +56,7 @@ assertion enabled, from the original kernels and from kernels with all 4,525 `DE
 | `main` | 121 / 121 | 12 / 121 (107 stop on hazard assertions, 2 return wrong data) |
 | `pipeline-interlock` | 121 / 121 | 121 / 121 |
 
-Without `DELAY`, no test is slower, 66 are faster, and the suite takes 9.6% fewer cycles; MXU
-utilization of the `perf_mm_*` kernels is unchanged (87-93%).
+Without `DELAY`, kernels run from start to halt in 9.8% fewer cycles over the suite (110 faster,
+11 equal, none slower; median 5%, up to 38% for `mxu0_single_output_tile_bf16`). MXU
+utilization of the `perf_mm_*` kernels is unchanged (87-93%): the interlock issues them at the
+same 32-cycle stride as the hand schedules.

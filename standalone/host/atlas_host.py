@@ -9,6 +9,7 @@ Two links share one interface (write_words / read_words / poll):
 
     SimLink(binary)        the Verilator model, build/vl_soc/atlas_sim (standalone/sim)
     TsiLink(port, baud)    the VCU118 over UART TSI with PyUARTSI, on the CP2105 port
+    TsiLink(cosim=binary)  PyUARTSI against the UART-level model, build/vl_tsi/atlas_tsi_sim
 """
 import glob
 import struct
@@ -36,6 +37,7 @@ SYS_BAUD = 0x18
 SYS_DRAM_BYTES = 0x1C
 SYS_ATLAS = 0x20
 SYS_FEATURES = 0x24
+SYS_RUN_CYCLES = 0x2C
 ATLS_ID = 0x4154_4C53
 
 # The VCU118's CP2105, interface 1: the UART on AW25/BB21.
@@ -120,11 +122,40 @@ class SimLink:
                 self._p.kill()
 
 
-class TsiLink:
-    """The board over UART TSI (PyUARTSI)."""
+class CosimTransport:
+    """A PyUARTSI transport backed by the UART-level model (standalone/sim/tsi_cosim.cpp)."""
 
-    def __init__(self, port=None, baud=TSI_BAUD):
+    def __init__(self, binary):
+        self._p = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+    def write_all(self, data):
+        self._p.stdin.write(f"W {data.hex()}\n")
+
+    def read_exact(self, size):
+        from pyuartsi.exceptions import TransportTimeoutError
+        self._p.stdin.write(f"R {size}\n")
+        self._p.stdin.flush()
+        reply = self._p.stdout.readline().split()
+        if not reply or reply[0] != "D":
+            raise TransportTimeoutError(f"co-simulation produced no reply for {size} bytes: {reply}")
+        return bytes.fromhex(reply[1])
+
+    def close(self):
+        if self._p.poll() is None:
+            self._p.stdin.write("Q\n")
+            self._p.stdin.flush()
+            self._p.wait()
+
+
+class TsiLink:
+    """UART TSI with PyUARTSI: the board's CP2105 port, or the UART-level model (cosim=binary)."""
+
+    def __init__(self, port=None, baud=TSI_BAUD, cosim=None):
         from pyuartsi import UARTTSI
+        if cosim is not None:
+            self.port = f"cosim:{cosim}"
+            self._t = UARTTSI("cosim", baud, cflush_addr=0, transport=CosimTransport(cosim))
+            return
         if port is None:
             ports = glob.glob(VCU118_TSI_PORT)
             if len(ports) != 1:
@@ -175,7 +206,7 @@ class Result:
     variant: str = ""
     dbg0: int = 0
     dbg1: int = 0
-    cycles: int = 0             # CSR CYCLE: cycles from START until the host saw DBG0 (poll granularity ~40)
+    cycles: int = 0             # sys_regs RUN_CYCLES: cycles from START until the core halted
     instret: int = 0
     core_status: int = 0
     mismatches: int = 0
@@ -215,10 +246,12 @@ class Atlas:
             return Result(name, "ERROR", detail="IMEM readback mismatch")
 
         link.write_words(CSR_CYCLE, [0, 0])  # CYCLE and INSTCNT then count this run only
+        link.write_words(SYS_RUN_CYCLES, [0])  # cycles until the core halts (ECALL)
         link.write_words(CSR_EXEC_CONTROL, [1])
         dbg0, waited = link.poll(CSR_DBG0, budget)
         link.write_words(CSR_EXEC_CONTROL, [0])
-        cycles, instret, core_status, _, _, dbg1 = link.read_words(CSR_CYCLE, 6)
+        _, instret, core_status, _, _, dbg1 = link.read_words(CSR_CYCLE, 6)
+        cycles = link.read_words(SYS_RUN_CYCLES, 1)[0]
         r = Result(name, "PASS", dbg0=dbg0, dbg1=dbg1, cycles=cycles, instret=instret, core_status=core_status,
                    variant=test.get("variant", ""))
         if dbg0 == 0:
