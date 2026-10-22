@@ -13,6 +13,7 @@ cd "$root"
 rm -rf "$out/rtl"
 mkdir -p "$out"
 ./mill --no-server standalone.runMain atlas.standalone.EmitAtlasCore "$out/rtl"
+python3 "$root/standalone/fpga/fpga_mems.py" "$out/rtl"   # VMEM banks -> block-RAM template
 cd "$out"
 vivado -mode batch -nojournal -log vivado.log -source "$root/standalone/fpga/build.tcl" \
     -tclargs "$out/rtl" "$out" "$clk" "$jobs"

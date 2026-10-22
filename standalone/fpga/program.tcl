@@ -11,7 +11,7 @@ set serial [expr {[llength $argv] > 1 ? [lindex $argv 1] :
                   [info exists ::env(VCU118_JTAG)] ? $::env(VCU118_JTAG) : "210308A5E9B8"}]
 
 open_hw_manager
-connect_hw_server -url localhost:3121
+connect_hw_server -allow_non_jtag
 set targets [get_hw_targets -quiet "*/Digilent/$serial"]
 if {[llength $targets] != 1} {
     puts "ERROR: [llength $targets] JTAG targets match */Digilent/$serial. Targets: [get_hw_targets]"
@@ -26,9 +26,10 @@ if {[llength $dev] != 1} {
 }
 puts "TARGET $targets device $dev"
 current_hw_device $dev
+refresh_hw_device -update_hw_probes false $dev
 set_property PROGRAM.FILE $bitfile $dev
-set_property PROBES.FILE {} $dev
 program_hw_devices $dev
-refresh_hw_device $dev
+refresh_hw_device -update_hw_probes false $dev
 puts "RESULT done=[get_property REGISTER.CONFIG_STATUS.BIT14_DONE_PIN $dev] bit=$bitfile"
 close_hw_target
+disconnect_hw_server

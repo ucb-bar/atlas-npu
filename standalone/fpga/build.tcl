@@ -1,7 +1,8 @@
 # Build the VCU118 bitstream of the standalone Atlas SoC (non-project flow).
 #   vivado -mode batch -source standalone/fpga/build.tcl -tclargs <rtl_dir> <out_dir> [clk_mhz] [jobs]
-# rtl_dir is the Chisel output without assertions:
+# rtl_dir is the Chisel output without assertions, after fpga_mems.py (build_bitstream.sh does both):
 #   ./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-fpga
+#   python3 standalone/fpga/fpga_mems.py build/rtl-fpga
 set rtl     [file normalize [lindex $argv 0]]
 set out     [file normalize [lindex $argv 1]]
 set clk_mhz [expr {[llength $argv] > 2 ? [lindex $argv 2] : 50}]
