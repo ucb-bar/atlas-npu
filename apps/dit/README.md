@@ -60,6 +60,19 @@ DRAM (including the per-step velocity trace) and 754 KiB of VMEM.
 | Atlas, functional model | 1.54% / 0.055 / 0.99988 | 5.9% |
 | Atlas, VCU118 (`ipt-nvfp4` bitstream) | identical to the functional model, bit for bit | identical |
 
+A second draw (model seed 1, input seed 11) gives the same picture: the board is bit-exact with
+its golden, and the chunk is 1.45% from FP32, against 1.29% for fake quant.
+
+The first steps of the same schedule also run in the Verilator model with every RTL assertion
+enabled, via `run_tests.py` on `bundle_checked.json`:
+
+| Steps | Verilator `ipt-nvfp4` | Verilator `default` (both MXUs) | VCU118 `ipt-nvfp4` |
+|---|---|---|---|
+| 1 | PASS: 3,072 words equal the golden, 522,137 cycles | PASS, 522,137 cycles | PASS, 522,137 cycles |
+| 2 | PASS: 4,096 words, 966,632 cycles | PASS, 966,632 cycles | PASS, 966,632 cycles |
+
+Each simulation takes about 35 minutes, most of it loading DRAM through the simulated bus.
+
 The board ran the 100 steps in 44.5 M cycles (0.89 s at 50 MHz); loading the 3.75 MiB image over
 UART TSI takes most of the 49 s wall time. Its final chunk and all 100 velocities equal the
 functional model's bit for bit. The functional model (`ditflow/funcsim.py`) is npu_model's
