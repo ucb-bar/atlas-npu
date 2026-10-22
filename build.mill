@@ -53,3 +53,23 @@ object atlas extends ScalaModule with ScalafmtModule {
     }
   }
 }
+
+// Standalone (host-driven, no Chipyard) build: AtlasCore plus its TileLink-facing
+// memories, elaborated against a stand-in for the few rocket-chip TileLink types
+// they use (standalone/chisel/tilelink). See standalone/README.md.
+object standalone extends ScalaModule {
+  def scalaVersion        = atlas.scalaVersion()
+  def scalacOptions       = atlas.scalacOptions()
+  def ivyDeps             = atlas.ivyDeps()
+  def scalacPluginIvyDeps = atlas.scalacPluginIvyDeps()
+  def moduleDeps          = Seq(atlas)
+
+  override def sources = Task.Sources {
+    val root = millSourcePath / os.up
+    Seq(
+      PathRef(root / "src" / "main" / "scala" / "diplomatic" / "memory"),
+      PathRef(root / "src" / "main" / "scala" / "diplomatic" / "top" / "AtlasCore.scala"),
+      PathRef(root / "standalone" / "chisel"),
+    )
+  }
+}

@@ -74,3 +74,6 @@ project/**/metals.sbt
 /baremetal/results/
 /baremetal/**/__pycache__/
 /baremetal/generators/*.json
+
+# Standalone build
+/standalone/**/__pycache__/
