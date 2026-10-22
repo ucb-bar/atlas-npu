@@ -30,6 +30,6 @@ refresh_hw_device -update_hw_probes false $dev
 set_property PROGRAM.FILE $bitfile $dev
 program_hw_devices $dev
 refresh_hw_device -update_hw_probes false $dev
-puts "RESULT done=[get_property REGISTER.IR.BIT5_DONE $dev] bit=$bitfile"
+puts "RESULT done=[get_property REGISTER.IR.BIT05_DONE $dev] bit=$bitfile"
 close_hw_target
 disconnect_hw_server

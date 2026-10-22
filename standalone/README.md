@@ -64,8 +64,8 @@ Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (i
 921,600 baud). The host needs `pyuartsi`.
 
 ```bash
-vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_50mhz.bit
-python3 standalone/host/run_tests.py --board --out build/board-nodelay build/bundle/nodelay/*.json
+vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_50mhz.bit
+python3 standalone/host/run_tests.py --board --config ipt-nvfp4 --out build/board-nodelay build/bundle/nodelay/*.json
 ```
 
 ## Results (2026-10-21)
@@ -90,6 +90,32 @@ values from the previous kernel on the board, so its first subtest fails. Its fa
 `x28` to DBG0, which is 1 in the first subtest: the same value as a pass, so the runner reports
 PASS. With `x11` cleared the kernel passes all four subtests on the board, in the same 36 cycles
 as in simulation. 10 tests are judged by DBG0 alone (no DRAM check) and share this ambiguity.
+
+### Configurations (`nvfp4-mxu`, 2026-10-22)
+
+The suite now has 126 tests (the 121 above and 5 NVFP4 tests). Vivado 2024.1, 50 MHz, timing met
+on all three; the critical path is still the MREG read into an MXU1 lane.
+
+| Config | FEATURES | WNS / WHS (ns) | LUTs | FFs | RAMB36 | URAM | DSP |
+|---|---|---|---|---|---|---|---|
+| `default` (above) | `0x7` | +0.005 / +0.010 | 604K (51%) | 98K | 501 | 128 | 112 |
+| `ipt` | `0x5` | +0.097 / +0.010 | 342K (29%) | 56K | 501 | 128 | 112 |
+| `ipt-nvfp4` | `0xd` | +0.307 / +0.013 | 523K (44%) | 159K | 513 | 128 | 240 |
+
+`Nvfp4Mxu` alone is 162K LUTs, 103K FFs (mostly the two 32 x 32 FP32 accumulators) and 128 DSPs;
+`MregScaleFile` is 1K LUTs and 12 RAMB36.
+
+| Config | expected | Verilator, original / no `DELAY` | VCU118, original / no `DELAY` |
+|---|---|---|---|
+| `default` | 121 pass, 5 illegal | 126 / 126, 126 / 126 | 121 / 121, 121 / 121 (above) |
+| `ipt` | 93 pass, 33 illegal | 126 / 126, 126 / 126 | 126 / 126, 126 / 126 |
+| `ipt-nvfp4` | 98 pass, 28 illegal | 126 / 126, 126 / 126 | 126 / 126, 126 / 126 |
+
+On the board the status and RUN_CYCLES of every test equal the simulation's except `jal_jalr`
+(see above), including the cycle at which each illegal instruction stops a kernel. The five
+NVFP4 tests compare 320 to 1024 result words each with the NVFP4 reference model and match all
+of them; `nvfp4_kchain` runs its four `vmatmul.acc.nv` in 171 cycles on the board as in
+simulation.
 
 ## Driving it from Python
 
