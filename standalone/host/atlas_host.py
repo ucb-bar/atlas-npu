@@ -108,9 +108,10 @@ class SimLink:
         return out
 
     def poll(self, addr, budget):
-        """Read addr until it is nonzero; budget in cycles. Returns (value, cycles waited)."""
+        """Read addr until it is nonzero or the core halts; budget in cycles.
+        Returns (value, cycles waited)."""
         self._send("P %x %x" % (addr, int(budget)))
-        value, cycles = self._reply("P")
+        value, cycles, _ = self._reply("P")
         return int(value, 16), int(cycles, 16)
 
     def close(self):
@@ -187,11 +188,15 @@ class TsiLink:
         return out
 
     def poll(self, addr, budget):
-        """Read addr until it is nonzero; budget in seconds. Returns (value, seconds waited)."""
+        """Read addr until it is nonzero or the core halts; budget in seconds.
+        Returns (value, seconds waited)."""
         t0 = time.time()
         while True:
             value = self.read_words(addr, 1)[0]
             if value or time.time() - t0 > budget:
+                return value, time.time() - t0
+            status = self.read_words(CSR_STATUS, 1)[0]
+            if status & 1 and status & 6:
                 return value, time.time() - t0
 
     def close(self):
@@ -212,7 +217,7 @@ def runs(pairs):
 @dataclass
 class Result:
     name: str
-    status: str                 # PASS, FAIL, TIMEOUT, ERROR
+    status: str                 # PASS, FAIL, ILLEGAL, HALTED, TIMEOUT, ERROR
     variant: str = ""
     dbg0: int = 0
     dbg1: int = 0
@@ -260,12 +265,19 @@ class Atlas:
         link.write_words(CSR_EXEC_CONTROL, [1])
         dbg0, waited = link.poll(CSR_DBG0, budget)
         link.write_words(CSR_EXEC_CONTROL, [0])
-        _, instret, core_status, _, _, dbg1 = link.read_words(CSR_CYCLE, 6)
+        # Read DBG0 again: the poll may have seen it just before the kernel set it and halted.
+        _, instret, core_status, illegal_pc, dbg0, dbg1 = link.read_words(CSR_CYCLE, 6)
         cycles = link.read_words(SYS_RUN_CYCLES, 1)[0]
         r = Result(name, "PASS", dbg0=dbg0, dbg1=dbg1, cycles=cycles, instret=instret, core_status=core_status,
                    variant=test.get("variant", ""))
         if dbg0 == 0:
-            r.status, r.detail = "TIMEOUT", f"DBG0 still 0 after {waited}"
+            reason = (core_status >> 1) & 3
+            if reason == 1:
+                r.status, r.detail = "ILLEGAL", f"illegal instruction at word {illegal_pc}"
+            elif reason:
+                r.status, r.detail = "HALTED", f"halted (reason {reason}) without setting DBG0"
+            else:
+                r.status, r.detail = "TIMEOUT", f"DBG0 still 0 after {waited}"
             return r
 
         perf = test.get("perf", {})

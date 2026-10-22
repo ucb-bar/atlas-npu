@@ -3,7 +3,8 @@
 //
 //   W <addr> <w0> <w1> ...   write consecutive words           -> "K" (or "E <addr>" if denied)
 //   R <addr> <n>             read n consecutive words          -> "D <w0> <w1> ..."
-//   P <addr> <max_cycles>    read addr until nonzero or budget -> "P <value> <cycles>"
+//   P <addr> <max_cycles>    read addr until nonzero, the core halts (CSR STATUS reason set),
+//                            or the budget runs out            -> "P <value> <cycles> <status>"
 //   C <n>                    run n idle cycles                 -> "C <cycle>"
 //   Q                        exit                              -> "Q <cycle>"
 //
@@ -119,15 +120,17 @@ int main(int argc, char** argv) {
             }
             printf("\n");
         } else if (cmd == "P") {
-            uint32_t addr, r = 0;
+            uint32_t addr, r = 0, status = 0;
             uint64_t budget, start = cycle;
             in >> std::hex >> addr >> budget;
             while (cycle - start < budget) {
                 access(false, addr, 0, r);
                 if (r) break;
+                access(false, 0x40008, 0, status);  // CSR STATUS: [0] halted, [2:1] reason
+                if ((status & 1) && (status & 6)) break;
                 for (int i = 0; i < 32; ++i) tick();
             }
-            printf("P %x %llx\n", r, (unsigned long long)(cycle - start));
+            printf("P %x %llx %x\n", r, (unsigned long long)(cycle - start), status);
         } else if (cmd == "C") {
             uint64_t n;
             in >> std::hex >> n;

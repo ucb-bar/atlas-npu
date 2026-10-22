@@ -26,13 +26,20 @@ host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs      
   `make_bundle.py` (assembles the baremetal tests into JSON bundles), `run_tests.py`.
 - `fpga/`: VCU118 constraints, the Vivado build and the JTAG programming script.
 
+## Configurations
+
+`--config=NAME` selects the Atlas configuration (docs/nvfp4-mxu.md): `default` (systolic array +
+inner-product trees), `ipt` (inner-product trees only) or `ipt-nvfp4` (inner-product trees + the
+NVFP4 MXU). `run_tests.py --config NAME` expects every test that needs a missing unit to stop with
+an illegal instruction and every other test to pass.
+
 ## Build and run
 
 Simulation (Verilator 5, Java for mill):
 
 ```bash
-./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-sim --assertions
-standalone/sim/build.sh                       # build/vl_soc/atlas_sim, about 10 min
+./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-sim --assertions --config=ipt-nvfp4
+standalone/sim/build.sh build/rtl-sim build/vl_soc   # build/vl_soc/atlas_sim, about 10 min
 
 cd baremetal                                  # bundles: npu_model's assembler + generators (torch)
 uv run --locked --project ../npu-model --python 3.14 python ../standalone/host/make_bundle.py \
@@ -40,7 +47,8 @@ uv run --locked --project ../npu-model --python 3.14 python ../standalone/host/m
 uv run --locked --project ../npu-model --python 3.14 python ../standalone/host/make_bundle.py \
     --out ../build/bundle/nodelay --no-delay --gen-python <python with torch>
 cd ..
-python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim -j 32 --out build/sim-nodelay build/bundle/nodelay/*.json
+python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim --config ipt-nvfp4 -j 32 \
+    --out build/sim-nodelay build/bundle/nodelay/*.json
 ```
 
 `--no-delay` removes every `DELAY` from the kernels (one in a branch delay slot would become a
@@ -49,7 +57,7 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim -j 32 --out bu
 Bitstream (Vivado 2024.1 or later with a VU9P license on `PATH`; about 2 hours):
 
 ```bash
-standalone/fpga/build_bitstream.sh build/vcu118 50     # build/vcu118/atlas_standalone_vcu118_50mhz.bit (Verilog in build/vcu118/rtl)
+standalone/fpga/build_bitstream.sh build/vcu118 50 16 ipt-nvfp4   # build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_50mhz.bit
 ```
 
 Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (interface 1,
@@ -122,7 +130,7 @@ outputs = link.read_words(0x9000_0800, 256)
 | `0x018` | BAUD | |
 | `0x01C` | DRAM_BYTES | |
 | `0x020` | ATLAS | [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
-| `0x024` | FEATURES | [0] hardware interlock |
+| `0x024` | FEATURES | [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 | `0x028` | LEDS | [2:0] |
 | `0x02C` | RUN_CYCLES | cycles the scalar core has run (not halted); a write clears it |
 

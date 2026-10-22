@@ -85,11 +85,13 @@ object ScalarISA {
   val MEM_SELD = 9.U(4.W)
   val MEM_X    = 0.U(4.W)
 
-  // ── LSU command (2-bit) ────────────────────────────────────────────
-  val LSU_NONE   = 0.U(2.W)
-  val LSU_VLOAD  = 1.U(2.W)
-  val LSU_VSTORE = 2.U(2.W)
-  val LSU_X      = 0.U(2.W)
+  // ── LSU command (3-bit) ────────────────────────────────────────────
+  val LSU_NONE         = 0.U(3.W)
+  val LSU_VLOAD        = 1.U(3.W)
+  val LSU_VSTORE       = 2.U(3.W)
+  val LSU_VLOAD_SCALE  = 3.U(3.W)  // 128 B VMEM -> m[vd] scale sidecar (NVFP4 MXU configs)
+  val LSU_VSTORE_SCALE = 4.U(3.W)  // m[vd] scale sidecar -> 128 B VMEM
+  val LSU_X            = 0.U(3.W)
 
   // ── MXU command (4-bit) ────────────────────────────────────────────
   val MXU_NONE          = 0.U(4.W)
@@ -100,6 +102,14 @@ object ScalarISA {
   val MXU_POP_BF16      = 5.U(4.W)
   val MXU_MATMUL        = 6.U(4.W)
   val MXU_MATMUL_ACC    = 7.U(4.W)
+  // NVFP4 MXU (configs with AtlasParams.nvfp4); mxu_sel is unused.
+  val MXU_NV_PUSH_WEIGHT    = 8.U(4.W)
+  val MXU_NV_PUSH_ACC_BF16  = 9.U(4.W)
+  val MXU_NV_PUSH_ACC_FP32  = 10.U(4.W)
+  val MXU_NV_POP_BF16       = 11.U(4.W)
+  val MXU_NV_POP_FP32       = 12.U(4.W)
+  val MXU_NV_MATMUL         = 13.U(4.W)
+  val MXU_NV_MATMUL_ACC     = 14.U(4.W)
   val MXU_X             = 0.U(4.W)
 
   // ── MXU select (1-bit) ─────────────────────────────────────────────

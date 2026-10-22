@@ -22,6 +22,11 @@ object atlas extends ScalaModule with ScalafmtModule {
     )
   }
 
+  // BlackBox Verilog (src/main/resources/vsrc), copied into the emitted RTL by firtool
+  override def resources = Task.Sources {
+    Seq(PathRef(millSourcePath / os.up / "src" / "main" / "resources"))
+  }
+
   // Chisel + plugin
   def ivyDeps = Agg(
     ivy"org.chipsalliance::chisel:7.0.0-RC4"

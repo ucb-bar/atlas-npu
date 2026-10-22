@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atlas_host import Atlas, LinkError, Result, SimLink, TsiLink  # noqa: E402
+import expect  # noqa: E402
 
 FIELDS = ["name", "variant", "status", "cycles", "instret", "dbg0", "dbg1", "util", "checked", "mismatches",
           "wall_s", "detail"]
@@ -59,6 +60,8 @@ def main():
     ap.add_argument("--budget", type=float, default=None,
                     help="completion wait: cycles for --sim (default 4e6), seconds for --board (default 20)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--config", choices=sorted(expect.UNITS),
+                    help="judge against this configuration: a test needing a unit it lacks must be ILLEGAL")
     a = ap.parse_args()
 
     out = Path(a.out)
@@ -104,6 +107,15 @@ def main():
 
     passed = sum(r.status == "PASS" for r in rows)
     print(f"\nSUMMARY: {passed}/{len(rows)} passed")
+    if a.config:
+        want = {r.name: expect.expected(r.name, a.config) for r in rows}
+        illegal = sum(w == "ILLEGAL" for w in want.values())
+        bad = [r for r in rows if r.status != want[r.name]]
+        print(f"CONFIG {a.config}: {len(rows) - len(bad)}/{len(rows)} as expected "
+              f"({len(rows) - illegal} must pass, {illegal} must be illegal)")
+        for r in bad:
+            print(f"  {r.status:7s} {r.name} ({r.variant}), expected {want[r.name]}: {r.detail[:140]}")
+        sys.exit(0 if not bad else 1)
     for r in rows:
         if r.status != "PASS":
             print(f"  {r.status:7s} {r.name} ({r.variant}): {r.detail[:160]}")

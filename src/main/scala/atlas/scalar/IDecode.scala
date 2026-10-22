@@ -4,7 +4,7 @@ IDecode.scala — Instruction decode table (17 columns).
    4  op2_sel(2) 5  imm_sel(3)   6  rd_wen(1)    7  jal(1)
    8  jalr(1)    9  csr_cmd(3)  10  dma_cmd(3)  11  mxu_cmd(4)
   12  mxu_sel(1) 13  vpu_cmd(5) 14  xlu_cmd(1)  15  mem_cmd(4)
-  16  lsu_cmd(2)
+  16  lsu_cmd(3)
 */
 
 package atlas.scalar
@@ -83,6 +83,8 @@ object IDecode {
     // ── Tensor load/store ───────────────────────────────────────────
     VLOAD  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_VLS, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_VLOAD),
     VSTORE -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_VLS, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_VSTORE),
+    VLOAD_SCALE  -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_VLS, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_VLOAD_SCALE),
+    VSTORE_SCALE -> List(Y, ALU_ADD, BR_X, OP1_RS1, OP2_IMM, IMM_VLS, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_VSTORE_SCALE),
 
     // ── DMA ─────────────────────────────────────────────────────────
     DMA_LOAD_ANY   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_LD,     MXU_X, MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
@@ -105,6 +107,13 @@ object IDecode {
     VMATPOP_BF16_MXU1   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_POP_BF16,      MXUSEL_1, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATMUL_MXU1        -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_MATMUL,        MXUSEL_1, VPU_X, XLU_X, MEM_X, LSU_X),
     VMATMUL_ACC_MXU1    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_MATMUL_ACC,    MXUSEL_1, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATPUSH_W_NV       -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_PUSH_WEIGHT,    MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATPUSH_ABF16_NV   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_PUSH_ACC_BF16,  MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATPUSH_AFP32_NV   -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_PUSH_ACC_FP32,  MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATPOP_BF16_NV     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_POP_BF16,       MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATPOP_FP32_NV     -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_POP_FP32,       MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATMUL_NV          -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_MATMUL,         MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
+    VMATMUL_ACC_NV      -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_NV_MATMUL_ACC,     MXUSEL_X, VPU_X, XLU_X, MEM_X, LSU_X),
 
     // ── VPU: element-wise binary ops ────────────────────────────────
     VADD_BF16    -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, MXU_X, MXUSEL_X, VPU_ADD,       XLU_X, MEM_X, LSU_X),

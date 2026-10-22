@@ -25,7 +25,7 @@ class DecodedInstr extends Bundle {
   val vpu_cmd  = UInt(5.W)
   val xlu_cmd  = UInt(1.W)
   val mem_cmd  = UInt(4.W)   // scalar load/store type
-  val lsu_cmd  = UInt(2.W)   // vload / vstore
+  val lsu_cmd  = UInt(3.W)   // vload / vstore / vload.scale / vstore.scale
 
   // Standard RV32I field extraction
   val rd       = UInt(5.W)

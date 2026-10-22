@@ -10,7 +10,8 @@
 //   0x01C  DRAM_BYTES  RO  size of the on-chip DRAM (aliased over 0x8000_0000 up)
 //   0x020  ATLAS       RO  [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy,
 //                          [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy
-//   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required)
+//   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required), [1] systolic-array MXU,
+//                          [2] inner-product-tree MXU, [3] NVFP4 MXU (AtlasCore io_features)
 //   0x028  LEDS        RW  [2:0] user LEDs
 //   0x02C  RUN_CYCLES  RW  cycles the Atlas scalar core has spent running (not halted); any write clears it
 module atlas_sys_regs
@@ -33,6 +34,7 @@ module atlas_sys_regs
     input  logic        bad_cmd,
     input  logic        denied,
     input  logic [15:0] atlas_status,
+    input  logic [3:0]  features,
     output logic [2:0]  user_leds
 );
     logic [31:0] scratch, denied_count, cycles, run_cycles, rdata;
@@ -53,7 +55,7 @@ module atlas_sys_regs
             10'h6:   rdata = BAUD;
             10'h7:   rdata = DRAM_BYTES;
             10'h8:   rdata = {16'd0, atlas_status};
-            10'h9:   rdata = 32'd1;
+            10'h9:   rdata = {28'd0, features};
             10'hA:   rdata = {29'd0, user_leds};
             10'hB:   rdata = run_cycles;
             default: begin

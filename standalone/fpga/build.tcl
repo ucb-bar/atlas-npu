@@ -1,5 +1,5 @@
 # Build the VCU118 bitstream of the standalone Atlas SoC (non-project flow).
-#   vivado -mode batch -source standalone/fpga/build.tcl -tclargs <rtl_dir> <out_dir> [clk_mhz] [jobs]
+#   vivado -mode batch -source standalone/fpga/build.tcl -tclargs <rtl_dir> <out_dir> [clk_mhz] [jobs] [config]
 # rtl_dir is the Chisel output without assertions, after fpga_mems.py (build_bitstream.sh does both):
 #   ./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-fpga
 #   python3 standalone/fpga/fpga_mems.py build/rtl-fpga
@@ -7,6 +7,7 @@ set rtl     [file normalize [lindex $argv 0]]
 set out     [file normalize [lindex $argv 1]]
 set clk_mhz [expr {[llength $argv] > 2 ? [lindex $argv 2] : 50}]
 set jobs    [expr {[llength $argv] > 3 ? [lindex $argv 3] : 16}]
+set config  [expr {[llength $argv] > 4 ? [lindex $argv 4] : "default"}]
 
 set root [file normalize [file join [file dirname [info script]] ../..]]
 set sa   "$root/standalone"
@@ -24,7 +25,11 @@ read_verilog -sv [list \
     $sa/rtl/tsi/uart_tsi.sv $sa/rtl/tsi/tl_xbar.sv $sa/rtl/tsi/tl_widen.sv $sa/rtl/tsi/tl_narrow.sv \
     $sa/rtl/atlas_tl_port.sv $sa/rtl/atlas_dram.sv $sa/rtl/atlas_sys_regs.sv \
     $sa/rtl/atlas_soc.sv $sa/rtl/atlas_tsi_soc.sv $sa/rtl/vcu118_atlas_top.sv]
-read_verilog -sv [glob $rtl/*.sv]
+# SystemVerilog packages (dotprod_pkg of the NVFP4 MXU) before their users.
+set pkgs [glob -nocomplain $rtl/*_pkg.sv]
+set rest [lsort [glob $rtl/*.sv]]
+foreach f $pkgs { set rest [lsearch -all -inline -not -exact $rest $f] }
+read_verilog -sv [concat $pkgs $rest]
 read_xdc $sa/fpga/vcu118_atlas.xdc
 auto_detect_xpm
 
@@ -48,7 +53,7 @@ report_clock_utilization -file $out/clocks.rpt
 report_drc -file $out/drc.rpt
 report_io -file $out/io.rpt
 
-set name atlas_standalone_vcu118_${clk_mhz}mhz
+set name atlas_standalone_vcu118_${config}_${clk_mhz}mhz
 write_bitstream -force $out/$name.bit
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]

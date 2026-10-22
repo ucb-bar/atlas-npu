@@ -1,7 +1,11 @@
 // ============================================================================
 // EmitAtlasCore.scala — SystemVerilog for AtlasCore with fixed TL-UL ports.
 //
-//   ./mill standalone.runMain atlas.standalone.EmitAtlasCore <dir> [--assertions]
+//   ./mill standalone.runMain atlas.standalone.EmitAtlasCore <dir> [--assertions] [--config=NAME]
+//
+// NAME is one of atlas.common.AtlasConfigs.byName: default (systolic array +
+// inner-product trees), ipt (inner-product trees only), ipt-nvfp4 (inner-product
+// trees + the NVFP4 MXU).
 //
 // The standalone SoC (standalone/rtl) talks to these ports directly:
 //   imemTL, csrTL  32-bit data, 32-bit address        (managers)
@@ -15,13 +19,16 @@ package atlas.standalone
 
 import circt.stage.ChiselStage
 import freechips.rocketchip.tilelink.TLBundleParameters
-import atlas.common.AtlasParams
+import atlas.common.{AtlasConfigs, AtlasParams}
 import atlas.tile.AtlasCore
 
 object EmitAtlasCore extends App {
   val dir        = args.headOption.getOrElse("build/rtl")
   val assertions = args.contains("--assertions")
-  val tp         = AtlasParams()
+  val config     = args.collectFirst { case a if a.startsWith("--config=") => a.stripPrefix("--config=") }
+                       .getOrElse("default")
+  val tp: AtlasParams = AtlasConfigs.byName.getOrElse(config,
+    sys.error(s"unknown config $config; choose one of ${AtlasConfigs.byName.keys.mkString(", ")}"))
 
   private def port(addressBits: Int, dataBits: Int, sourceBits: Int) =
     TLBundleParameters(addressBits = addressBits, dataBits = dataBits,

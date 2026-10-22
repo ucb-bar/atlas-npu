@@ -57,7 +57,10 @@ object AtlasMemMap {
   val DRAM_BASE      = 0x8000_0000L
 }
 
-class ScalarCore(spP: VmemParams) extends Module {
+/** @param hasMxu0   the systolic-array MXU is present (mxu0 instructions are legal)
+  * @param hasNvfp4  the NVFP4 MXU and scale sidecar are present (.nv and *.scale legal)
+  */
+class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = false) extends Module {
   val io = IO(new ScalarCoreIO(spP))
 
   val pc_ctrl    = Module(new PcControl(0))
@@ -192,6 +195,13 @@ class ScalarCore(spP: VmemParams) extends Module {
       is(MXU_POP_BF16) { cmd.mregBank := d.vd; cmd.accSel := d.vs2(0) }
       is(MXU_MATMUL)     { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
       is(MXU_MATMUL_ACC) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
+      is(MXU_NV_PUSH_WEIGHT)   { cmd.mregBank := d.vs1; cmd.weightSlot := d.vd(0) }
+      is(MXU_NV_PUSH_ACC_BF16) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
+      is(MXU_NV_PUSH_ACC_FP32) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
+      is(MXU_NV_POP_BF16)      { cmd.mregBank := d.vd;  cmd.accSel := d.vs2(0) }
+      is(MXU_NV_POP_FP32)      { cmd.mregBank := d.vd;  cmd.accSel := d.vs2(0) }
+      is(MXU_NV_MATMUL)        { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
+      is(MXU_NV_MATMUL_ACC)    { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
     }
     cmd
   }
@@ -234,7 +244,13 @@ class ScalarCore(spP: VmemParams) extends Module {
   // Halt logic
   // ==============================================================
 
-  val is_illegal = s1_valid && dec.illegal
+  // Instructions of a unit this configuration does not have are illegal.
+  val isNvCmd    = dec.mxu_cmd >= MXU_NV_PUSH_WEIGHT
+  val isScaleLsu = dec.is_lsu && (dec.lsu_cmd === LSU_VLOAD_SCALE || dec.lsu_cmd === LSU_VSTORE_SCALE)
+  val unitAbsent =
+    (!hasMxu0.B && dec.mxu_cmd =/= MXU_NONE && !isNvCmd && dec.mxu_sel === MXUSEL_0) ||
+    (!hasNvfp4.B && (isNvCmd || isScaleLsu))
+  val is_illegal = s1_valid && (dec.illegal || unitAbsent)
   val branch_in_delay_slot =
     pc_ctrl.io.in_delay_slot && (dec.br_type =/= BR_NONE || dec.is_jal || dec.is_jalr)
   val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
@@ -287,12 +303,14 @@ class ScalarCore(spP: VmemParams) extends Module {
   // ==============================================================
 
   // ── The target unit can take the command ──
-  val isVload   = dec.is_lsu && dec.lsu_cmd === LSU_VLOAD
-  val isVstore  = dec.is_lsu && dec.lsu_cmd === LSU_VSTORE
+  // vload.scale / vstore.scale run on the VLOAD / VSTORE paths.
+  val isVloadData = dec.is_lsu && dec.lsu_cmd === LSU_VLOAD
+  val isVload   = isVloadData || (dec.is_lsu && dec.lsu_cmd === LSU_VLOAD_SCALE)
+  val isVstore  = dec.is_lsu && (dec.lsu_cmd === LSU_VSTORE || dec.lsu_cmd === LSU_VSTORE_SCALE)
   val isDmaXfer = dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST
 
   val mxuNotReady = dec.mxu_cmd =/= MXU_NONE &&
-    Mux(dec.mxu_sel === MXUSEL_0, !io.mxu0Ready, !io.mxu1Ready)
+    Mux(isNvCmd, !io.nvReady, Mux(dec.mxu_sel === MXUSEL_0, !io.mxu0Ready, !io.mxu1Ready))
   val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)
   val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
   val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
@@ -315,9 +333,22 @@ class ScalarCore(spP: VmemParams) extends Module {
                     dec.mxu_cmd === MXU_PUSH_ACC_BF16 ||
                     dec.mxu_cmd === MXU_MATMUL || dec.mxu_cmd === MXU_MATMUL_ACC
   val vpuSrc1 = vpuPrimaryReadBank(dec)
+  // NVFP4: push/matmul read m[vs1] and its scales; acc pushes read 2 or 4
+  // registers, pops write 2 or 4.
+  val nvReadsVs1 = dec.mxu_cmd === MXU_NV_PUSH_WEIGHT || dec.mxu_cmd === MXU_NV_MATMUL ||
+                   dec.mxu_cmd === MXU_NV_MATMUL_ACC ||
+                   dec.mxu_cmd === MXU_NV_PUSH_ACC_BF16 || dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
+  val nvReadsPair = dec.mxu_cmd === MXU_NV_PUSH_ACC_BF16 || dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
+  val nvReadsQuad = dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
+  val nvWritesPair = dec.mxu_cmd === MXU_NV_POP_BF16 || dec.mxu_cmd === MXU_NV_POP_FP32
+  val nvWritesQuad = dec.mxu_cmd === MXU_NV_POP_FP32
   val mregReads: Seq[(Bool, UInt)] = Seq(
     (mxuReadsVs1,                                              dec.vs1),
     (dec.mxu_cmd === MXU_PUSH_ACC_BF16,                        dec.vs1 + 1.U),
+    (nvReadsVs1,                                               dec.vs1),
+    (nvReadsPair,                                              dec.vs1 + 1.U),
+    (nvReadsQuad,                                              dec.vs1 + 2.U),
+    (nvReadsQuad,                                              dec.vs1 + 3.U),
     (isVstore,                                                 dec.vd),
     (dec.xlu_cmd =/= XLU_NONE,                                 dec.vs1),
     (dec.vpu_cmd =/= VPU_NONE && !vpuIsVli(dec.vpu_cmd),       vpuSrc1),
@@ -327,13 +358,17 @@ class ScalarCore(spP: VmemParams) extends Module {
   val mregWrites: Seq[(Bool, UInt)] = Seq(
     (dec.mxu_cmd === MXU_POP_FP8 || dec.mxu_cmd === MXU_POP_BF16, dec.vd),
     (dec.mxu_cmd === MXU_POP_BF16,                                dec.vd + 1.U),
+    (nvWritesPair,                                                dec.vd),
+    (nvWritesPair,                                                dec.vd + 1.U),
+    (nvWritesQuad,                                                dec.vd + 2.U),
+    (nvWritesQuad,                                                dec.vd + 3.U),
     (isVload,                                                     dec.vd),
     (dec.xlu_cmd =/= XLU_NONE,                                    dec.vd),
     (dec.vpu_cmd =/= VPU_NONE,                                    dec.vd),
     (vpuWritesPair(dec.vpu_cmd),                                  dec.vd + 1.U))
   val mregHazard =
     mregReads.map { case (v, b) => v && (io.mregWriteBusy(b) || physReadBusy(phys(b))) }.reduce(_ || _) ||
-    mregWrites.map { case (v, b) => v && (physWriteBusy(phys(b)) || (!isVload && io.mregReadBusy(b))) }.reduce(_ || _)
+    mregWrites.map { case (v, b) => v && (physWriteBusy(phys(b)) || (!isVloadData && io.mregReadBusy(b))) }.reduce(_ || _)
 
   // ── VMEM banks ──
   // The LSU scalar and vector paths must never use one VMEM bank in the
@@ -413,8 +448,8 @@ class ScalarCore(spP: VmemParams) extends Module {
   assert(!(s1_fire && vpuWritesPair(dec.vpu_cmd) && dec.vd(0)),
     "ASSERT FAIL: VPU pair-write destination bank must be even")
 
-  val issueVload  = s1_fire && dec.is_lsu && dec.lsu_cmd === LSU_VLOAD
-  val issueVstore = s1_fire && dec.is_lsu && dec.lsu_cmd === LSU_VSTORE
+  val issueVload  = s1_fire && isVload
+  val issueVstore = s1_fire && isVstore
 
   assert(!(issueVload && io.lsu_vload_busy),
     "ASSERT FAIL: VLOAD issued while VLOAD path is busy")
@@ -603,8 +638,9 @@ class ScalarCore(spP: VmemParams) extends Module {
 
   val is_dma_launch  = s1_fire && (dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST)
   val is_dma_config  = s1_fire && (dec.dma_cmd === DMA_CONFIG)
-  val is_mxu0_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && (dec.mxu_sel === MXUSEL_0)
-  val is_mxu1_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && (dec.mxu_sel === MXUSEL_1)
+  val is_mxu0_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && !isNvCmd && (dec.mxu_sel === MXUSEL_0)
+  val is_mxu1_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && !isNvCmd && (dec.mxu_sel === MXUSEL_1)
+  val is_nv_launch   = s1_fire && isNvCmd
   val is_vpu_launch  = s1_fire && (dec.vpu_cmd =/= VPU_NONE)
   val is_xlu_launch  = s1_fire && (dec.xlu_cmd =/= XLU_NONE)
   val is_lsu_launch  = s1_fire && dec.is_lsu
@@ -627,6 +663,8 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.mxu0Cmd.bits  := buildMxuCmd(dec)
   io.mxu1Cmd.valid := is_mxu1_launch
   io.mxu1Cmd.bits  := buildMxuCmd(dec)
+  io.nvCmd.valid   := is_nv_launch
+  io.nvCmd.bits    := buildMxuCmd(dec)
 
   io.vpuCmd.valid           := is_vpu_launch
   io.vpuCmd.bits.op         := dec.vpu_cmd

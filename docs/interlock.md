@@ -27,6 +27,10 @@ instruction in S1 (`ScalarCore.scala`, section "Interlock").
 | Scalar load result (no bypass) and register-file write port | pending load `rd`, response cycle |
 | `seld` result and the scale-register write port | pending `seld`, for `vpack`/`vunpack`, `vmatpop.fp8`, `seli` |
 
+The NVFP4 MXU (docs/nvfp4-mxu.md) exports the same `cmdReady`, its 2- and 4-register transfers
+report every register they will still touch, and `vload.scale` / `vstore.scale` count as VLOAD /
+VSTORE (without VLOAD's WAR exemption).
+
 The MXU sequencers' accept logic now also waits for these, which were only assertions
 (`AccumulationBuffers`, shared weight/accumulator push paths):
 

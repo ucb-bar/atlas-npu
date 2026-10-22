@@ -35,7 +35,10 @@ else
     srcs+=("$sa/sim/atlas_soc_sim.sv" "$sa/sim/atlas_sim.cpp")
     extra=()
 fi
-mapfile -t chisel < <(ls "$rtl"/*.sv)
+# SystemVerilog packages (dotprod_pkg of the NVFP4 MXU) must come before their users.
+shopt -s nullglob
+chisel=("$rtl"/*_pkg.sv)
+for f in "$rtl"/*.sv; do [[ $f == *_pkg.sv ]] || chisel+=("$f"); done
 
 mkdir -p "$out"
 verilator --cc --exe --build -O3 --assert -Wno-fatal -Wno-lint -Wno-style \

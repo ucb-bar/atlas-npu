@@ -104,6 +104,7 @@ module atlas_soc
     logic [255:0]  dma_a_data, dma_d_data;
 
     logic          dbg_mxu0_data, dbg_mxu0_comp, dbg_mxu1_data, dbg_mxu1_comp, dbg_xlu, dbg_lsu;
+    logic [3:0]    features;
     logic [7:0]    dbg_dma;
 
     atlas_tl_word u_imem_port (
@@ -220,6 +221,7 @@ module atlas_soc
         .io_vmemTL_d_bits_corrupt (),
 
         .io_halted                (halted),
+        .io_features              (features),
         .io_dbg_mxu0DataBusy      (dbg_mxu0_data),
         .io_dbg_mxu0CompBusy      (dbg_mxu0_comp),
         .io_dbg_mxu1DataBusy      (dbg_mxu1_data),
@@ -253,7 +255,7 @@ module atlas_soc
         .clk, .rst,
         .a_valid(n_a_valid[SYS]), .a_ready(n_a_ready[SYS]), .a(n_a[SYS]),
         .d_valid(n_d_valid[SYS]), .d_ready(n_d_ready[SYS]), .d(n_d[SYS]),
-        .dropped, .bad_cmd, .denied,
+        .dropped, .bad_cmd, .denied, .features,
         .atlas_status({dbg_dma, 1'b0, dbg_lsu, dbg_xlu, dbg_mxu1_comp, dbg_mxu1_data,
                        dbg_mxu0_comp, dbg_mxu0_data, halted}),
         .user_leds);

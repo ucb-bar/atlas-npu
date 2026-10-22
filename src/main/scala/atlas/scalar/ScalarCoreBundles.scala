@@ -75,7 +75,7 @@ class XluCmd extends Bundle {
 }
 
 class LsuCmd(vmemP: VmemParams) extends Bundle {
-  val op           = UInt(2.W)
+  val op           = UInt(3.W)
   val mregBank     = UInt(6.W)
   val vmemLineAddr = UInt(vmemP.lineAddrBits.W)
 }
@@ -85,6 +85,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val dmaCmd        = Valid(new DmaCmd)
   val mxu0Cmd       = Valid(new MxuCmd)
   val mxu1Cmd       = Valid(new MxuCmd)
+  val nvCmd         = Valid(new MxuCmd)   // NVFP4 MXU (MXU_NV_* in op)
   val vpuCmd        = Valid(new VpuCmd)
   val xluCmd        = Valid(new XluCmd)
   val lsuCmd        = Valid(new LsuCmd(spP))
@@ -106,6 +107,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   // Interlock: each unit's ability to take the command decoded in S1.
   val mxu0Ready       = Input(Bool())   // MXU0 would accept mxu0Cmd.bits this cycle
   val mxu1Ready       = Input(Bool())   // MXU1 would accept mxu1Cmd.bits this cycle
+  val nvReady         = Input(Bool())   // the NVFP4 MXU would accept nvCmd.bits this cycle
   val xlu_busy        = Input(Bool())
   val dma_can_enqueue = Input(Bool())
   val lsu_vload_vmem_bank  = Flipped(Valid(UInt(spP.bankIdBits.W)))
