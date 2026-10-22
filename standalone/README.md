@@ -21,6 +21,7 @@ host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs      
 - `rtl/`: the SoC. `tsi/` is NVFP4's UART TSI target and fabric (copied from nvfp4 `0c611e1`).
   `atlas_dram.sv` is the DRAM stand-in: 4 MiB of UltraRAM, aliased over `0x8000_0000` up (DMA's
   64-bit addresses fold onto it the same way); the baremetal tests use 465 KiB at `0x9000_0000`.
+  The DDR4 build replaces it with `atlas_ddr4_dram.sv` (below).
 - `sim/`: a Verilator model of `atlas_soc` with a word-level host port (no UART), and its driver.
 - `host/`: `atlas_host.py` (the host: `SimLink` for the model, `TsiLink` for the board),
   `make_bundle.py` (assembles the baremetal tests into JSON bundles), `run_tests.py`.
@@ -117,6 +118,35 @@ NVFP4 tests compare 320 to 1024 result words each with the NVFP4 reference model
 of them; `nvfp4_kchain` runs its four `vmatmul.acc.nv` in 171 cycles on the board as in
 simulation.
 
+## DDR4 DRAM
+
+`build_bitstream.sh <out> 50 16 <config> ddr4` builds `vcu118_atlas_ddr4_top`, whose DRAM is
+2 GiB of the board's DDR4 (C1 bank) instead of 4 MiB of UltraRAM. `sys_regs` DRAM_BYTES reads
+0x8000_0000, and FLAGS bit 3 is set once the memory is calibrated.
+
+- The controller is the Xilinx DDR4 MIG (`fpga/vcu118_ddr4_mig.tcl`, IP `vcu118mig`). Its
+  settings, pins and clocking come from Chipyard's VCU118 shell (fpga-shells), which calibrates
+  on this board: DDR4-1600 components, a 200 MHz user clock, and the 250 MHz `sys_clock` as
+  the reference clock. The one change is a 256-bit AXI port, one 32-byte DMA line per beat.
+- `atlas_ddr4_dram.sv` keeps atlas_dram's two ports (host, DMA) in the core clock and crosses
+  requests and responses through gray-coded FIFOs (`async_fifo.sv`). In the user clock, a read
+  issues only when no write is outstanding and the reverse, so the memory stays sequential
+  although AXI orders reads and writes independently. Responses return in request order.
+  CPU_RESET resets the bridge and the MIG's AXI side, but not the MIG (no recalibration).
+- `sim/tb_ddr4.sh` runs the bridge against a randomized AXI memory model in Verilator. 20,000
+  random host and DMA transactions match a reference memory.
+
+On the board (default config, `bitstreams/AtlasStandaloneDDR4`, 2026-10-22): timing met at 50 MHz
+(WNS +0.150 ns, MIG user clock +0.494 ns, WHS +0.010 ns), 620K LUTs (52%), 526 RAMB36, no URAM.
+The DDR4 calibrates; host reads and writes across the 2 GiB match. The 126 tests give 126 / 126
+as expected (121 pass, 5 illegal), with cycle counts within -1% to +8% of the on-chip build's.
+apps/dit's sampler (3.75 MiB) and whole policy (8.1 MiB) run bit-exact with their goldens.
+
+The Verilator model keeps the behavioral DRAM. `DRAM_LINE_W=21 sim/build.sh` makes it 64 MiB,
+and its `B <addr> <file>` command (used by `SimLink` for every DRAM preload) loads data
+through a backdoor in no simulated time. A 3.4 MiB image used to cost 35 minutes of simulated
+bus writes.
+
 ## Driving it from Python
 
 `run_tests.py` is one client of `host/atlas_host.py`. A kernel can also be run by hand; the
@@ -149,12 +179,12 @@ outputs = link.read_words(0x9000_0800, 256)
 |---|---|---|
 | `0x000` | ID | `0x4154_4C53` ("ATLS") |
 | `0x004` | SCRATCH | read/write |
-| `0x008` | FLAGS | [0] TSI receive overflow, [1] bad TSI command, [2] denied access seen |
+| `0x008` | FLAGS | [0] TSI receive overflow, [1] bad TSI command, [2] denied access seen, [3] DRAM ready (DDR4 calibrated; 1 on-chip) |
 | `0x00C` | DENIED | denied (unmapped) accesses |
 | `0x010` | CYCLES | free-running cycle counter |
 | `0x014` | CLK_HZ | |
 | `0x018` | BAUD | |
-| `0x01C` | DRAM_BYTES | |
+| `0x01C` | DRAM_BYTES | 4 MiB on-chip, 2 GiB DDR4 (`0x8000_0000`) |
 | `0x020` | ATLAS | [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
 | `0x024` | FEATURES | [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 | `0x028` | LEDS | [2:0] |

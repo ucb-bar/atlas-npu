@@ -9,7 +9,8 @@ set rtl     [file normalize [lindex $argv 0]]
 set out     [file normalize [lindex $argv 1]]
 set clk_mhz [expr {[llength $argv] > 2 ? [lindex $argv 2] : 50}]
 set jobs    [expr {[llength $argv] > 3 ? [lindex $argv 3] : 16}]
-set config  [expr {[llength $argv] > 4 ? [lindex $argv 4] : "default"}]
+# (not `config`: the DDR4 IP's scripts set a global of that name)
+set atlas_config [expr {[llength $argv] > 4 ? [lindex $argv 4] : "default"}]
 set dram    [expr {[llength $argv] > 5 ? [lindex $argv 5] : "onchip"}]
 
 set root [file normalize [file join [file dirname [info script]] ../..]]
@@ -74,7 +75,7 @@ report_clock_utilization -file $out/clocks.rpt
 report_drc -file $out/drc.rpt
 report_io -file $out/io.rpt
 
-set name atlas_standalone_vcu118_${config}[expr {$dram eq "ddr4" ? "_ddr4" : ""}]_${clk_mhz}mhz
+set name atlas_standalone_vcu118_${atlas_config}[expr {$dram eq "ddr4" ? "_ddr4" : ""}]_${clk_mhz}mhz
 write_bitstream -force $out/$name.bit
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]
