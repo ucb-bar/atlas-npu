@@ -1,6 +1,6 @@
 """The DiT-on-Atlas flow: build, golden, run, report.
 
-    python -m ditflow.flow build  OUT [--preset small] [--steps N] [--seed S] [--input-seed I]
+    python -m ditflow.flow build  OUT [--preset small] [--steps N] [--seed S] [--input-seed I] [--policy]
     python -m ditflow.flow golden OUT                 # functional model, bit-exact with the RTL
     python -m ditflow.flow run    OUT --board [--port TTY] | --sim ATLAS_SIM
     python -m ditflow.flow report OUT
@@ -11,6 +11,10 @@ on LeRobot's DiffusionTransformer, and the same sampler with Atlas's FP8 quantiz
 in FP32 ("fake quant"). run loads the bundle into a standalone Atlas (board over UART TSI, or the
 Verilator model), reads back the action chunk and every step's velocity, and checks them
 bit for bit against the golden.
+
+--policy builds the whole policy instead: the observation encoder (vision.py, two camera crops
+and the state in) and the DiT sampler in one program (policy.py). Its references run
+specialist_lerobot's PooledVision and LeRobot's sampler; reports add the conditioning vector.
 """
 import argparse
 import io
@@ -76,6 +80,49 @@ def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int,
           f"VMEM {c.manifest['vmem_bytes'] / 1024:.0f} KiB, {steps} steps")
 
 
+def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace: bool) -> None:
+    from . import policy as P
+    from . import vision as V
+    out.mkdir(parents=True, exist_ok=True)
+    d, v = M.SMALL, V.SMALL
+    steps = steps or d.steps
+    net, enc = M.build(d, seed), V.build(v, seed)
+    dp, vp = M.params(net, d), V.params(enc, v)
+    plans = P.PolicyPlans(vp, dp, v, d)
+    views, state, x0 = P.random_observation(v, d, input_seed)
+    prog = P.PolicyProgram(v, plans.vision, d, plans.dit, views, state, x0, steps=steps, trace=trace)
+    c = prog.compile()
+    words = assemble(c.source)
+    assert len(words) <= 32768, f"{len(words)} instructions do not fit the 128 KiB IMEM"
+    (out / "program.S").write_text(c.source)
+    bundle = {"name": f"policy_{steps}", "variant": "", "program": words, "preload": preload(c.blobs),
+              "check": [], "perf": {}, "timeout": None}
+    (out / "bundle.json").write_text(json.dumps(bundle))
+    c.manifest.update({"policy": True, "seed": seed, "input_seed": input_seed, "instructions": len(words),
+                       "vision_scales": plans.vision.to_dict()})
+    (out / "manifest.json").write_text(json.dumps(c.manifest, indent=1))
+    torch.save({"compiled": c, "x0": x0, "state": state, "views": views}, out / "compiled.pt")
+    with torch.no_grad():
+        cond_ref, x_ref, v_ref = P.reference(enc, net, v, d, views, state, x0, steps)
+        cond_fq, x_fq, v_fq = P.fake_quant(plans, v, d, views, state, x0, steps)
+    torch.save({"x_fp32": x_ref, "v_fp32": v_ref, "x_fq": x_fq, "v_fq": v_fq, "x0": x0,
+                "cond_fp32": cond_ref, "cond_fq": cond_fq}, out / "reference.pt")
+    print(f"built {out}: {len(words)} instructions, DRAM {c.manifest['dram_bytes'] / 2**20:.2f} MiB, "
+          f"{steps} steps, encoder + DiT")
+
+
+def _policy_cond(c, saved, read):
+    from . import policy as P
+    from . import vision as V
+    if not c.manifest.get("vision"):
+        return {}
+    v = V.VisionDims(**{k: (tuple(tuple(x) for x in val) if k == "views" else val)
+                        for k, val in c.manifest["vision"].items()})
+    cond = P.read_cond(c, v, saved["state"], read)
+    bits = b"".join(read(a, 2048) for a in c.manifest["outputs"]["pooled"])
+    return {"cond": cond, "pooled_bits": bits}
+
+
 def _partial(net, x0, cond, d, steps):
     grid, x, vs = M.time_grid(d), x0.clone(), []
     for i in range(steps):
@@ -96,11 +143,13 @@ def _partial_fq(plan, x0, cond, d, steps):
 
 def golden(out: Path) -> None:
     from .funcsim import FuncSim
-    c = torch.load(out / "compiled.pt", weights_only=False)["compiled"]
-    sim = FuncSim(c.source, c.blobs, 4 << 20)
+    saved = torch.load(out / "compiled.pt", weights_only=False)
+    c = saved["compiled"]
+    sim = FuncSim(c.source, c.blobs, 64 << 20)
     t0 = time.time()
     sim.run(progress=lambda n, s, st: print(f"  {n} instructions, {s:.0f} s, step {st.read_csrf(0xC11)}", flush=True))
     res = C.read_outputs(c, sim.read_dram)
+    res.update(_policy_cond(c, saved, sim.read_dram))
     res.update({"instructions": sim.executed, "seconds": time.time() - t0})
     torch.save(res, out / "golden.pt")
     print(f"golden: {sim.executed} instructions in {time.time() - t0:.0f} s, DBG {sim.dbg}")
@@ -110,13 +159,17 @@ def golden(out: Path) -> None:
     bundle["check"] = [[addr, list(torch.frombuffer(bytearray(res[key]), dtype=torch.int32).numpy().astype("uint32").tolist())]
                        for key, addr in (("x_hi_bits", outs["x_hi"]), ("x_lo_bits", outs["x_lo"]), ("trace_bits", outs["trace"]))
                        if addr is not None]
+    for i, addr in enumerate(outs.get("pooled", []) if "pooled_bits" in res else []):
+        tile = res["pooled_bits"][2048 * i:2048 * (i + 1)]
+        bundle["check"].append([addr, list(torch.frombuffer(bytearray(tile), dtype=torch.int32).numpy().astype("uint32").tolist())])
     (out / "bundle_checked.json").write_text(json.dumps(bundle))
 
 
 def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget: float | None) -> None:
     sys.path.insert(0, str(HOST))
     import atlas_host as h
-    c = torch.load(out / "compiled.pt", weights_only=False)["compiled"]
+    saved = torch.load(out / "compiled.pt", weights_only=False)
+    c = saved["compiled"]
     bundle = json.loads((out / "bundle.json").read_text())
     if board:
         link, target, budget = h.TsiLink(port=port or TTY), "board", budget or 600.0
@@ -134,6 +187,7 @@ def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget
         words = link.read_words(atlas.dram(addr), n // 4)
         return torch.tensor(words, dtype=torch.int64).to(torch.int32).numpy().tobytes()
     res = C.read_outputs(c, read)
+    res.update(_policy_cond(c, saved, read))
     res.update({"cycles": r.cycles, "instret": r.instret, "wall_s": wall, "features": atlas.features})
     link.close()
     torch.save(res, out / f"{target}.pt")
@@ -151,6 +205,8 @@ def report(out: Path) -> dict:
     ref = torch.load(out / "reference.pt", weights_only=False)
     rep = {"fakequant_vs_fp32": {"x": metrics(ref["x_fq"], ref["x_fp32"]),
                                  "v_step0": metrics(ref["v_fq"][0], ref["v_fp32"][0])}}
+    if "cond_fp32" in ref:
+        rep["fakequant_vs_fp32"]["cond"] = metrics(ref["cond_fq"], ref["cond_fp32"])
     gold = torch.load(out / "golden.pt", weights_only=False) if (out / "golden.pt").exists() else None
     for name in ("golden", "sim", "board"):
         path = out / f"{name}.pt"
@@ -158,11 +214,14 @@ def report(out: Path) -> dict:
             continue
         res = torch.load(path, weights_only=False)
         entry = {"x_vs_fp32": metrics(res["x"], ref["x_fp32"]), "x_vs_fakequant": metrics(res["x"], ref["x_fq"])}
+        if "cond" in res and "cond_fp32" in ref:
+            entry["cond_vs_fp32"] = metrics(res["cond"], ref["cond_fp32"])
+            entry["cond_vs_fakequant"] = metrics(res["cond"], ref["cond_fq"])
         if "v" in res:
             per = [metrics(v, r)["rel_l2"] for v, r in zip(res["v"], ref["v_fp32"])]
             entry["v_vs_fp32_rel_l2"] = {"mean": sum(per) / len(per), "max": max(per), "first": per[0], "last": per[-1]}
         if gold is not None and name != "golden":
-            same = {k: res.get(k) == gold.get(k) for k in ("x_hi_bits", "x_lo_bits", "trace_bits") if k in gold}
+            same = {k: res.get(k) == gold.get(k) for k in ("x_hi_bits", "x_lo_bits", "trace_bits", "pooled_bits") if k in gold}
             entry["bit_exact_vs_golden"] = same
         for k in ("cycles", "instret", "wall_s", "instructions"):
             if k in res:
@@ -183,6 +242,7 @@ def main(argv=None) -> None:
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--input-seed", type=int, default=7)
     b.add_argument("--no-trace", action="store_true")
+    b.add_argument("--policy", action="store_true", help="encoder + DiT (the whole policy)")
     g = sub.add_parser("golden")
     g.add_argument("out", type=Path)
     r = sub.add_parser("run")
@@ -195,7 +255,9 @@ def main(argv=None) -> None:
     p = sub.add_parser("report")
     p.add_argument("out", type=Path)
     a = ap.parse_args(argv)
-    if a.cmd == "build":
+    if a.cmd == "build" and a.policy:
+        build_policy(a.out, a.steps, a.seed, a.input_seed, not a.no_trace)
+    elif a.cmd == "build":
         build(a.out, a.preset, a.steps, a.seed, a.input_seed, not a.no_trace)
     elif a.cmd == "golden":
         golden(a.out)

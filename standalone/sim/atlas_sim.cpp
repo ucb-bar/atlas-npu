@@ -6,6 +6,8 @@
 //   P <addr> <max_cycles>    read addr until nonzero, the core halts (CSR STATUS reason set),
 //                            or the budget runs out            -> "P <value> <cycles> <status>"
 //   C <n>                    run n idle cycles                 -> "C <cycle>"
+//   B <addr> <path>          load the file at DRAM address addr through a backdoor, in no
+//                            simulated time (the READY line lists B when supported) -> "K"
 //   Q                        exit                              -> "Q <cycle>"
 //
 // An assertion in the RTL (sim build keeps Atlas's Verification layer) stops the run: the
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include "Vatlas_soc_sim.h"
+#include "Vatlas_soc_sim___024root.h"
 #include "verilated.h"
 
 static VerilatedContext* ctx;
@@ -91,7 +94,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 20; ++i) tick();
     top->rst = 0;
     for (int i = 0; i < 20; ++i) tick();
-    printf("READY %llu\n", (unsigned long long)cycle);
+    printf("READY %llu B\n", (unsigned long long)cycle);
     fflush(stdout);
 
     std::string line;
@@ -131,6 +134,29 @@ int main(int argc, char** argv) {
                 for (int i = 0; i < 32; ++i) tick();
             }
             printf("P %x %llx %x\n", r, (unsigned long long)(cycle - start), status);
+        } else if (cmd == "B") {
+            uint32_t addr;
+            std::string path;
+            in >> std::hex >> addr >> path;
+            auto& mem = top->rootp->atlas_soc_sim__DOT__u_soc__DOT__g_onchip__DOT__u_dram__DOT__mem;
+            const uint64_t lines = sizeof(mem.m_storage) / sizeof(mem.m_storage[0]);
+            FILE* f = fopen(path.c_str(), "rb");
+            if (!f) {
+                printf("E %x\n", addr);
+            } else {
+                std::vector<uint8_t> buf;
+                uint8_t chunk[1 << 16];
+                size_t n;
+                while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) buf.insert(buf.end(), chunk, chunk + n);
+                fclose(f);
+                for (size_t i = 0; i < buf.size(); ++i) {
+                    uint64_t a = (uint64_t)addr + i;            // the RTL's aliasing: address bits [LINE_W+4:5]
+                    uint32_t& w = mem.m_storage[(a >> 5) & (lines - 1)].m_storage[(a & 31) >> 2];
+                    int sh = 8 * (a & 3);
+                    w = (w & ~(0xFFu << sh)) | ((uint32_t)buf[i] << sh);
+                }
+                printf("K\n");
+            }
         } else if (cmd == "C") {
             uint64_t n;
             in >> std::hex >> n;

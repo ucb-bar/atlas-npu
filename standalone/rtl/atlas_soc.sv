@@ -8,16 +8,19 @@
 //   0x0004_0000 - 0x0004_0FFF  Atlas CSR   CYCLE, INSTCNT, STATUS, ILLEGAL_PC, DBG0, DBG1, EXEC_CONTROL
 //   0x2000_0000 - 0x2017_FFFF  Atlas VMEM  1.5 MiB (0x2018_0000 - 0x201F_FFFF is denied)
 //   0x8000_0000 - 0xFFFF_FFFF  DRAM        2^DRAM_LINE_W x 32 B, aliased over the window
+//                                          (EXT_DRAM: the ext_* ports, 2 GiB of DDR4 on the VCU118)
 //
-// The DMA engine reaches the same DRAM through the second memory port. Unmapped accesses get a
-// denied response.
+// The DMA engine reaches the same DRAM through the second memory port. With EXT_DRAM both DRAM
+// ports leave the SoC (atlas_ddr4_dram in vcu118_atlas_top). Unmapped accesses get a denied
+// response.
 module atlas_soc
     import tl_pkg::*;
 #(
     parameter int CLK_HZ      = 50_000_000,
     parameter int BAUD        = 921_600,
     parameter int DRAM_LINE_W = 17,
-    parameter int DRAM_LAT    = 8
+    parameter int DRAM_LAT    = 8,
+    parameter bit EXT_DRAM    = 1'b0
 ) (
     input  logic       clk,
     input  logic       rst,
@@ -34,7 +37,28 @@ module atlas_soc
     input  logic       bad_cmd,
     output logic       denied,    // pulses for every denied response
     output logic       halted,    // Atlas scalar core halted
-    output logic [2:0] user_leds
+    output logic [2:0] user_leds,
+
+    // External DRAM (EXT_DRAM): the host port and the DMA port of atlas_dram
+    output logic          ext_a_valid,
+    input  logic          ext_a_ready,
+    output wa_t           ext_a,
+    input  logic          ext_d_valid,
+    output logic          ext_d_ready,
+    input  wd_t           ext_d,
+    output logic          ext_dma_a_valid,
+    input  logic          ext_dma_a_ready,
+    output logic [2:0]    ext_dma_a_opcode,
+    output logic [5:0]    ext_dma_a_source,
+    output logic [63:0]   ext_dma_a_address,
+    output logic [31:0]   ext_dma_a_mask,
+    output logic [255:0]  ext_dma_a_data,
+    input  logic          ext_dma_d_valid,
+    output logic          ext_dma_d_ready,
+    input  logic [2:0]    ext_dma_d_opcode,
+    input  logic [5:0]    ext_dma_d_source,
+    input  logic [255:0]  ext_dma_d_data,
+    input  logic          ext_dram_ready
 );
     localparam int N  = 5;
     localparam int SW = 6;  // DMA source ID width (DmaParams.tagBits)
@@ -251,21 +275,49 @@ module atlas_soc
         .io_dbg_dbg1              ());
 
     // ── System registers ────────────────────────────────────────────────────
-    atlas_sys_regs #(.CLK_HZ(CLK_HZ), .BAUD(BAUD), .DRAM_BYTES(32 << DRAM_LINE_W)) u_sys (
+    localparam logic [31:0] DRAM_BYTES = EXT_DRAM ? 32'h8000_0000 : 32'(32 << DRAM_LINE_W);
+    atlas_sys_regs #(.CLK_HZ(CLK_HZ), .BAUD(BAUD), .DRAM_BYTES(DRAM_BYTES)) u_sys (
         .clk, .rst,
         .a_valid(n_a_valid[SYS]), .a_ready(n_a_ready[SYS]), .a(n_a[SYS]),
         .d_valid(n_d_valid[SYS]), .d_ready(n_d_ready[SYS]), .d(n_d[SYS]),
-        .dropped, .bad_cmd, .denied, .features,
+        .dropped, .bad_cmd, .denied, .features, .dram_ready(EXT_DRAM ? ext_dram_ready : 1'b1),
         .atlas_status({dbg_dma, 1'b0, dbg_lsu, dbg_xlu, dbg_mxu1_comp, dbg_mxu1_data,
                        dbg_mxu0_comp, dbg_mxu0_data, halted}),
         .user_leds);
 
     // ── DRAM ────────────────────────────────────────────────────────────────
-    atlas_dram #(.LINE_W(DRAM_LINE_W), .LAT(DRAM_LAT), .SW(SW)) u_dram (
-        .clk, .rst,
-        .a_valid(dev_a_valid[DRAM]), .a_ready(dev_a_ready[DRAM]), .a(dev_a),
-        .d_valid(dev_d_valid[DRAM]), .d_ready(dev_d_ready[DRAM]), .d(dev_d[DRAM]),
-        .dma_a_valid, .dma_a_ready, .dma_a_opcode, .dma_a_source, .dma_a_address,
-        .dma_a_mask, .dma_a_data,
-        .dma_d_valid, .dma_d_ready, .dma_d_opcode, .dma_d_source, .dma_d_data);
+    if (EXT_DRAM) begin : g_ext
+        assign ext_a_valid          = dev_a_valid[DRAM];
+        assign dev_a_ready[DRAM]    = ext_a_ready;
+        assign ext_a                = dev_a;
+        assign dev_d_valid[DRAM]    = ext_d_valid;
+        assign ext_d_ready          = dev_d_ready[DRAM];
+        assign dev_d[DRAM]          = ext_d;
+        assign ext_dma_a_valid      = dma_a_valid;
+        assign dma_a_ready          = ext_dma_a_ready;
+        assign ext_dma_a_opcode     = dma_a_opcode;
+        assign ext_dma_a_source     = dma_a_source;
+        assign ext_dma_a_address    = dma_a_address;
+        assign ext_dma_a_mask       = dma_a_mask;
+        assign ext_dma_a_data       = dma_a_data;
+        assign dma_d_valid          = ext_dma_d_valid;
+        assign ext_dma_d_ready      = dma_d_ready;
+        assign dma_d_opcode         = ext_dma_d_opcode;
+        assign dma_d_source         = ext_dma_d_source;
+        assign dma_d_data           = ext_dma_d_data;
+    end else begin : g_onchip
+        atlas_dram #(.LINE_W(DRAM_LINE_W), .LAT(DRAM_LAT), .SW(SW)) u_dram (
+            .clk, .rst,
+            .a_valid(dev_a_valid[DRAM]), .a_ready(dev_a_ready[DRAM]), .a(dev_a),
+            .d_valid(dev_d_valid[DRAM]), .d_ready(dev_d_ready[DRAM]), .d(dev_d[DRAM]),
+            .dma_a_valid, .dma_a_ready, .dma_a_opcode, .dma_a_source, .dma_a_address,
+            .dma_a_mask, .dma_a_data,
+            .dma_d_valid, .dma_d_ready, .dma_d_opcode, .dma_d_source, .dma_d_data);
+        assign ext_a_valid = 1'b0;
+        assign ext_a = '0;
+        assign ext_d_ready = 1'b0;
+        assign ext_dma_a_valid = 1'b0;
+        assign {ext_dma_a_opcode, ext_dma_a_source, ext_dma_a_address, ext_dma_a_mask, ext_dma_a_data} = '0;
+        assign ext_dma_d_ready = 1'b0;
+    end
 endmodule

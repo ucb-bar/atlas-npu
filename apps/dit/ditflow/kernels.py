@@ -44,7 +44,7 @@ class Kernels:
         self.stage_bytes = stage_bytes
 
     # -- small helpers -----------------------------------------------------------------------
-    def quant_store(self, src_pair: int, acc: int, dst_addr: int | None, raw: int, keep: bool = False) -> int:
+    def quant_store(self, src_pair: int, acc: int, dst_addr, raw: int, keep: bool = False) -> int:
         """FP8(src * 2**(raw - 127)) through acc{acc}; vstore'd to dst_addr unless None.
         Returns the FP8 register if keep, else frees it."""
         b = self.b
@@ -207,41 +207,45 @@ class Kernels:
     # -- LayerNorm (no affine, eps 1e-6), adaLN modulation, FP8 out ----------------------------
     def ln_modulate_quant(self, x: Tensor, scale1: Tensor, shift: Tensor, out: Tensor, a: int) -> None:
         """out = FP8((LN(x) * scale1 + shift) / 2**a); scale1 = 1 + scale and shift are replicated rows."""
-        b, regs = self.b, self.b.regs
-        HT = x.ct
-        inv_n = bf16_bits(1.0 / x.cols)
-        b.prog.comment(f"layernorm+modulate {x.name} -> {out.name}")
+        self.b.prog.comment(f"layernorm+modulate {x.name} -> {out.name}")
         for r in range(x.rt):
-            mean, var, xj, t = regs.pair(), regs.pair(), regs.pair(), regs.pair()
-            for j in range(HT):                                     # mean
-                b.vload2(xj, x.tile(r, j))
-                b.v("vredsum.row.bf16", f"m{mean if j == 0 else t}", f"m{xj}")
-                if j:
-                    b.v("vadd.bf16", f"m{mean}", f"m{mean}", f"m{t}")
-            k = self.const(inv_n)
-            b.v("vmul.bf16", f"m{mean}", f"m{mean}", f"m{k}")
-            for j in range(HT):                                     # variance
-                b.vload2(xj, x.tile(r, j))
-                b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
-                b.v("vsquare.bf16", f"m{xj}", f"m{xj}")
-                b.v("vredsum.row.bf16", f"m{var if j == 0 else t}", f"m{xj}")
-                if j:
-                    b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{t}")
-            b.v("vmul.bf16", f"m{var}", f"m{var}", f"m{k}")
-            b.vli(k, bf16_bits(1e-6))
-            b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{k}")
-            b.v("vsqrt.bf16", f"m{var}", f"m{var}")
-            b.v("vrecip.bf16", f"m{var}", f"m{var}")                # 1 / std
-            for j in range(HT):                                     # normalize, modulate
-                b.vload2(xj, x.tile(r, j))
-                b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
-                b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{var}")
-                b.vload2(t, scale1.tile(0, j))
-                b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{t}")
-                b.vload2(t, shift.tile(0, j))
-                b.v("vadd.bf16", f"m{xj}", f"m{xj}", f"m{t}")
-                self.quant_store(xj, j % 2, out.tile(r, j), 127 - a)
-            regs.release(pairs=(mean, var, xj, t, k))
+            self.ln_row(lambda j, r=r: x.tile(r, j), lambda j, r=r: out.tile(r, j), x.ct, x.cols,
+                        scale1, shift, a, 1e-6)
+
+    def ln_row(self, xa, oa, HT: int, ncols: int, scale1: Tensor, shift: Tensor, a: int, eps: float) -> None:
+        """One row tile: LayerNorm (no affine) over HT tiles at xa(j), then * scale1 + shift, to FP8 at oa(j)."""
+        b, regs = self.b, self.b.regs
+        inv_n = bf16_bits(1.0 / ncols)
+        mean, var, xj, t = regs.pair(), regs.pair(), regs.pair(), regs.pair()
+        for j in range(HT):                                     # mean
+            b.vload2(xj, xa(j))
+            b.v("vredsum.row.bf16", f"m{mean if j == 0 else t}", f"m{xj}")
+            if j:
+                b.v("vadd.bf16", f"m{mean}", f"m{mean}", f"m{t}")
+        k = self.const(inv_n)
+        b.v("vmul.bf16", f"m{mean}", f"m{mean}", f"m{k}")
+        for j in range(HT):                                     # variance
+            b.vload2(xj, xa(j))
+            b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
+            b.v("vsquare.bf16", f"m{xj}", f"m{xj}")
+            b.v("vredsum.row.bf16", f"m{var if j == 0 else t}", f"m{xj}")
+            if j:
+                b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{t}")
+        b.v("vmul.bf16", f"m{var}", f"m{var}", f"m{k}")
+        b.vli(k, bf16_bits(eps))
+        b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{k}")
+        b.v("vsqrt.bf16", f"m{var}", f"m{var}")
+        b.v("vrecip.bf16", f"m{var}", f"m{var}")                # 1 / std
+        for j in range(HT):                                     # normalize, modulate
+            b.vload2(xj, xa(j))
+            b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
+            b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{var}")
+            b.vload2(t, scale1.tile(0, j))
+            b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{t}")
+            b.vload2(t, shift.tile(0, j))
+            b.v("vadd.bf16", f"m{xj}", f"m{xj}", f"m{t}")
+            self.quant_store(xj, j % 2, oa(j), 127 - a)
+        regs.release(pairs=(mean, var, xj, t, k))
 
     # -- RoPE self-attention, one head at a time -----------------------------------------------
     def attention(self, qkv: Tensor, rope_cos: Tensor, rope_sin: Tensor, kmask: Tensor | None,

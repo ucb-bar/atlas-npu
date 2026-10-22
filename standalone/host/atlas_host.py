@@ -12,6 +12,7 @@ Two links share one interface (write_words / read_words / poll):
     TsiLink(cosim=binary)  PyUARTSI against the UART-level model, build/vl_tsi/atlas_tsi_sim
 """
 import glob
+import os
 import struct
 import subprocess
 import time
@@ -58,7 +59,7 @@ class SimLink:
         self.messages = []
         self._p = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, bufsize=1)
-        self._reply("READY")
+        self.bulk = "B" in self._reply("READY")    # the model has the DRAM backdoor
 
     def _reply(self, prefix):
         """Return the next protocol line starting with prefix; keep any other output as messages."""
@@ -98,6 +99,17 @@ class SimLink:
                 raise LinkError("simulation exited:\n%s" % "".join(self.messages[-20:]))
             if line.startswith("E"):
                 raise LinkError("write denied at 0x%s" % line.split()[1])
+
+    def write_bulk(self, addr, data):
+        """DRAM bytes through the model's backdoor (no simulated time)."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(prefix="atlas_dram_", delete=False) as f:
+            f.write(data)
+        try:
+            self._send("B %x %s" % (addr, f.name))
+            self._reply("K")
+        finally:
+            os.unlink(f.name)
 
     def read_words(self, addr, n):
         out = []
@@ -250,7 +262,10 @@ class Atlas:
         link, name = self.link, test["name"]
         for addr, words in test["preload"]:
             for a, w in runs([(self.dram(addr + 4 * i), x) for i, x in enumerate(words)]):
-                link.write_words(a, w)
+                if getattr(link, "bulk", False):
+                    link.write_bulk(a, struct.pack("<%dI" % len(w), *w))
+                else:
+                    link.write_words(a, w)
 
         link.write_words(CSR_EXEC_CONTROL, [0])
         link.write_words(CSR_DBG0, [0])

@@ -2,12 +2,13 @@
 //
 //   0x000  ID          RO  0x4154_4C53 ("ATLS")
 //   0x004  SCRATCH     RW
-//   0x008  FLAGS       RO  [0] TSI receive queue overflowed, [1] bad TSI cmd, [2] a denied access occurred
+//   0x008  FLAGS       RO  [0] TSI receive queue overflowed, [1] bad TSI cmd, [2] a denied access occurred,
+//                          [3] DRAM ready (DDR4 calibrated; always 1 for on-chip DRAM)
 //   0x00C  DENIED      RO  number of denied (unmapped) accesses
 //   0x010  CYCLES      RO  free-running cycle counter
 //   0x014  CLK_HZ      RO
 //   0x018  BAUD        RO
-//   0x01C  DRAM_BYTES  RO  size of the on-chip DRAM (aliased over 0x8000_0000 up)
+//   0x01C  DRAM_BYTES  RO  size of the DRAM (aliased over 0x8000_0000 up): on-chip, or 2 GiB of DDR4
 //   0x020  ATLAS       RO  [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy,
 //                          [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy
 //   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required), [1] systolic-array MXU,
@@ -19,7 +20,7 @@ module atlas_sys_regs
 #(
     parameter int CLK_HZ     = 50_000_000,
     parameter int BAUD       = 921_600,
-    parameter int DRAM_BYTES = 4 << 20
+    parameter logic [31:0] DRAM_BYTES = 32'(4 << 20)
 ) (
     input  logic        clk,
     input  logic        rst,
@@ -35,6 +36,7 @@ module atlas_sys_regs
     input  logic        denied,
     input  logic [15:0] atlas_status,
     input  logic [3:0]  features,
+    input  logic        dram_ready,
     output logic [2:0]  user_leds
 );
     logic [31:0] scratch, denied_count, cycles, run_cycles, rdata;
@@ -48,7 +50,7 @@ module atlas_sys_regs
         case (word)
             10'h0:   rdata = 32'h4154_4C53;
             10'h1:   rdata = scratch;
-            10'h2:   rdata = {29'd0, denied_count != 0, bad_cmd, dropped};
+            10'h2:   rdata = {28'd0, dram_ready, denied_count != 0, bad_cmd, dropped};
             10'h3:   rdata = denied_count;
             10'h4:   rdata = cycles;
             10'h5:   rdata = CLK_HZ;

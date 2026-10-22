@@ -30,5 +30,10 @@ module atlas_soc_sim
         .clk, .rst,
         .a_valid(h_a_valid), .a_ready(h_a_ready), .a,
         .d_valid(h_d_valid), .d_ready(h_d_ready), .d,
-        .dropped(1'b0), .bad_cmd(1'b0), .denied(), .halted, .user_leds());
+        .dropped(1'b0), .bad_cmd(1'b0), .denied(), .halted, .user_leds(),
+        .ext_a_valid(), .ext_a_ready(1'b0), .ext_a(), .ext_d_valid(1'b0), .ext_d_ready(), .ext_d('0),
+        .ext_dma_a_valid(), .ext_dma_a_ready(1'b0), .ext_dma_a_opcode(), .ext_dma_a_source(),
+        .ext_dma_a_address(), .ext_dma_a_mask(), .ext_dma_a_data(), .ext_dma_d_valid(1'b0),
+        .ext_dma_d_ready(), .ext_dma_d_opcode('0), .ext_dma_d_source('0), .ext_dma_d_data('0),
+        .ext_dram_ready(1'b1));
 endmodule

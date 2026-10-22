@@ -120,7 +120,8 @@ module atlas_dram
 
     // ── Memory ──────────────────────────────────────────────────────────────
 `ifdef VERILATOR
-    logic [255:0] mem [2**LINE_W];
+    // public: atlas_sim.cpp's B command loads files straight into the array (a backdoor preload)
+    logic [255:0] mem [2**LINE_W] /*verilator public_flat_rw*/;
     logic [255:0] qa [LAT], qb [LAT];
 
     always_ff @(posedge clk) begin

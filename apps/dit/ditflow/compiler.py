@@ -27,6 +27,7 @@ from . import layout as L
 from . import model as M
 from .asm import Builder, Tensor, DRAM_BASE
 from .kernels import Kernels, Linear, HALF
+from .loopk import LoopKernels, Stream
 from .quant import QuantPlan
 
 E_ONE_COL = 0x0038      # vli.col bits: FP8 1.0 in byte 0 of every row (column 0), 0 in byte 1
@@ -43,11 +44,16 @@ class Compiled:
 
 
 class DiTProgram:
-    def __init__(self, d: M.DiTDims, plan: QuantPlan, x0: torch.Tensor, cond: torch.Tensor,
-                 steps: int | None = None, trace: bool = True, dram_size: int = 4 << 20):
+    def __init__(self, d: M.DiTDims, plan: QuantPlan, x0: torch.Tensor, cond: torch.Tensor | None,
+                 steps: int | None = None, trace: bool = True, dram_size: int = 4 << 20,
+                 builder: Builder | None = None, cond_tiles=None, cond_perm=None, state=None):
+        """cond: the conditioning vector, from DRAM. Or, when the observation encoder runs in the
+        same program: cond_tiles, (VMEM tile, row) per conditioning K tile; cond_perm, the
+        conditioning index of each of their columns (-1: none; the state is the last tile); state."""
         assert d.head_dim == 64 and d.horizon <= 64
         self.d, self.plan, self.steps, self.trace = d, plan, steps or d.steps, trace
-        self.b = Builder(dram_size)
+        self.b = builder or Builder(dram_size)
+        self.cond_tiles, self.cond_perm = cond_tiles, cond_perm
         b = self.b
         self.T, self.H = d.horizon, d.hidden
         self.HT, self.RT = L.tiles(d.hidden), L.tiles(d.horizon)
@@ -70,6 +76,15 @@ class DiTProgram:
         plus_one = torch.zeros(6 * d.hidden)
         plus_one[d.hidden:2 * d.hidden] = 1.0           # scale_msa
         plus_one[4 * d.hidden:5 * d.hidden] = 1.0       # scale_mlp
+        if cond_perm is not None:                         # adaLN columns in the order of cond_tiles
+            for l in range(d.layers):
+                c = codes[f"{l}.ada_c.w"]
+                cp = torch.zeros(c.shape[0], len(cond_perm), dtype=c.dtype)
+                for i, src in enumerate(cond_perm):
+                    if src >= 0:
+                        cp[:, i] = c[:, src]
+                codes = dict(codes)
+                codes[f"{l}.ada_c.w"] = cp
         for l in range(d.layers):
             linear(f"{l}.ada_c", f"{l}.ada_c.w", p[f"{l}.ada.b"] + plus_one)
             linear(f"{l}.ada_t", f"{l}.ada_t.w", None)
@@ -101,8 +116,12 @@ class DiTProgram:
         lo = (x0[0] - hi.float()).to(torch.bfloat16)
         consts = {
             "rope_cos": cos, "rope_sin": sin, "freq": L.replicated(M.sinusoidal_freqs(d)),
-            "rowmask": rowmask, "x_hi": hi, "x_lo": lo, "cond": cond.reshape(1, -1),
+            "rowmask": rowmask, "x_hi": hi, "x_lo": lo,
         }
+        if cond_tiles is None:
+            consts["cond"] = cond.reshape(1, -1)
+        else:
+            consts["state"] = state.reshape(1, -1)
         if kmask is not None:
             consts["kmask"] = kmask
         self.vm: dict[str, Tensor] = {}
@@ -112,6 +131,15 @@ class DiTProgram:
             t = b.vmem.tensor(name, m.shape[0], m.shape[1], "bf16")
             self.vm[name] = t
             self._const_loads.append((t.addr, daddr, t.nbytes))
+        if cond_tiles is not None:                        # FP8 tiles with 1.0 in column q (row q replicator)
+            rows = sorted({q for _, q in cond_tiles} | {0})
+            eq = torch.zeros(32 * len(rows), 32, dtype=torch.uint8)
+            for i, q in enumerate(rows):
+                eq[32 * i:32 * i + 32, q] = 0x38
+            self.eq_rows = rows
+            self.vm["e_cols"] = b.vmem.tensor("e_cols", 32 * len(rows), 32, "fp8")
+            self._const_loads.append((self.vm["e_cols"].addr, b.dram.add("e_cols", L.fp8_bytes(eq)),
+                                      self.vm["e_cols"].nbytes))
         tt_addr = b.dram.add("ttable", bytes(ttable))
         self.vm_ttable = b.vmem.alloc("ttable", len(ttable))
         self._const_loads.append((self.vm_ttable, tt_addr, len(ttable)))
@@ -125,14 +153,14 @@ class DiTProgram:
         # ---------------- VMEM working set -------------------------------------------------
         vt = lambda name, rows, cols, kind: self.vm.setdefault(name, b.vmem.tensor(name, rows, cols, kind))
         C, Tdim = d.cond_dim, d.tdim
-        vt("condq", 32, C, "fp8")
+        vt("condq", 64, len(cond_perm) if cond_perm is not None else C, "fp8")   # row tile 1: unused
         for l in range(d.layers):
             vt(f"{l}.condmod", 32, 6 * d.hidden, "bf16")
             vt(f"{l}.mod", 32, 6 * d.hidden, "bf16")
         vt("e00", 32, 32, "bf16")
         vt("embq", 32, Tdim, "fp8")
         vt("t1q", 32, 2 * Tdim, "fp8")
-        vt("stq", 32, Tdim, "fp8")
+        vt("stq", 64, Tdim, "fp8")                      # row tile 1: unused
         vt("x", self.T, self.H, "bf16")
         vt("xq", self.T, self.H, "fp8")
         vt("qkv", self.T, 3 * self.H, "bf16")
@@ -142,6 +170,7 @@ class DiTProgram:
         vt("vbuf", self.T, 32, "bf16")
         stage = max(lin.block_bytes for lin in self.lin.values())
         self.k = Kernels(b, stage)
+        self.lk = LoopKernels(b, self.k)
 
     # -------------------------------------------------------------------------------------
     def chunk(self, l: int, c: int) -> Tensor:
@@ -149,9 +178,10 @@ class DiTProgram:
         mod = self.vm[f"{l}.mod"]
         return Tensor(f"{l}.mod.{c}", mod.tile(0, c * self.HT), 32, self.H, "bf16")
 
-    def compile(self) -> Compiled:
+    def compile(self, standalone: bool = True) -> Compiled:
         b, k, d, a, vm = self.b, self.k, self.d, self.a, self.vm
-        b.begin()
+        if standalone:
+            b.begin()
         b.prog.comment("constants and inputs")
         for vaddr, daddr, n in self._const_loads:
             b.dma.load("const", vaddr, daddr, n)
@@ -215,24 +245,36 @@ class DiTProgram:
         """condmod[l] = SiLU(cond) @ W_c[l]^T + b[l] (+1 on the scales), replicated over rows."""
         b, k, a, vm = self.b, self.k, self.a, self.vm
         b.prog.comment("prologue: conditioning half of adaLN")
-        E = b.regs.one()
-        b.op(f"vli.col m{E}, {E_ONE_COL:#06x}")
-        cond, condq = vm["cond"], vm["condq"]
-        for j in range(cond.ct):
+        condq = vm["condq"]
+        if self.cond_tiles is None:
+            cond = vm["cond"]
+            sources = [(cond.tile(0, j), 0) for j in range(cond.ct)]
+        else:
+            sources = [(t.tile(0, 0), q) for t, q in self.cond_tiles] + [(vm["state"].tile(0, 0), 0)]
+        E = {}
+        for j, (src, row) in enumerate(sources):
+            if row not in E:
+                E[row] = b.regs.one()
+                if self.cond_tiles is None:
+                    b.op(f"vli.col m{E[row]}, {E_ONE_COL:#06x}")
+                else:
+                    b.vload(E[row], vm["e_cols"].tile(self.eq_rows.index(row), 0))
             p = b.regs.pair()
-            b.vload2(p, cond.tile(0, j))
+            b.vload2(p, src)
             k.silu(p)
-            zq = k.quant_store(p, 0, None, 127 - a["ada_c"], keep=True)   # row 0 valid
+            zq = k.quant_store(p, 0, None, 127 - a["ada_c"], keep=True)   # row `row` is the one used
             zt = b.regs.one()
             b.v("vtrpose.xlu", f"m{zt}", f"m{zq}")
             b.v("vmatpush.weight.mxu1", "w0", f"m{zt}")
-            b.v("vmatmul.mxu1", "acc1", f"m{E}", "w0")                      # every row = row 0
+            b.v("vmatmul.mxu1", "acc1", f"m{E[row]}", "w0")                 # every row = row `row`
             b.v("vmatpop.fp8.acc.mxu1", f"m{zq}", "acc1", f"e{b.erf(127)}")
             b.vstore(zq, condq.tile(0, j))
             b.regs.release(zq, zt, pairs=(p,))
-        b.regs.release(E)
+        b.regs.release(*E.values())
         for l in range(self.d.layers):
-            self.lin_call(f"{l}.ada_c", condq, a["ada_c"], k.epi_store(vm[f"{l}.condmod"]))
+            lin = self.lin[f"{l}.ada_c"]
+            self.lk.linear_rows(lin, lin.addr, condq, a["ada_c"] + lin.a_w,
+                                [Stream("cm", vm[f"{l}.condmod"], per_row=False)], row0(self.lk.epi_store("cm")))
 
     def time_path(self) -> None:
         """mod[l] = SiLU(time_mlp(t)) @ W_t[l]^T + condmod[l], replicated over rows."""
@@ -265,7 +307,18 @@ class DiTProgram:
             k.silu(o)
         self.lin_call("time2", vm["t1q"], a["t1"], k.epi_quant(vm["stq"], a["ada_t"], pre=gelu_silu))
         for l in range(d.layers):
-            self.lin_call(f"{l}.ada_t", vm["stq"], a["ada_t"], k.epi_add_store(vm[f"{l}.condmod"], vm[f"{l}.mod"]))
+            lin = self.lin[f"{l}.ada_t"]
+            self.lk.linear_rows(lin, lin.addr, vm["stq"], a["ada_t"] + lin.a_w,
+                                [Stream("cm", vm[f"{l}.condmod"], per_row=False), Stream("mod", vm[f"{l}.mod"], per_row=False)],
+                                row0(self.epi_add_mod))
+
+    def epi_add_mod(self, o: int, r: int, ptrs: dict) -> None:
+        b = self.b
+        g = b.regs.pair()
+        b.vload2(g, ptrs["cm"])
+        b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{g}")
+        b.vstore2(o, ptrs["mod"])
+        b.regs.release(pairs=(g,))
 
     def block(self, l: int) -> None:
         b, k, a, vm, d = self.b, self.k, self.a, self.vm, self.d
@@ -302,6 +355,11 @@ class DiTProgram:
         b.vstore2(t, vm["x_lo"].tile(r, 0))
         k.quant_store(o, r, vm["xin_q"].tile(r, 0), 127 - self.a["x"])
         b.regs.release(pairs=(dd, kk, t))
+
+
+def row0(epilogue):
+    """An epilogue for row tile 0 only (linear_rows works on row pairs; row 1 is padding)."""
+    return lambda o, r, ptrs: epilogue(o, r, ptrs) if r == 0 else None
 
 
 def compile_dit(d, plan, x0, cond, steps=None, trace=True) -> Compiled:

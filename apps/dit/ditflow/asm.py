@@ -14,9 +14,12 @@ Fixed scalar registers:
     x8            byte address of the timestep scratch tile
     x9            DRAM address of the current step's trace slot
     x10           CSR data
+    x19           kernel scratch (constants for ADD)
+    x11-x18, x26-x31   loop counters and pointers (Builder.xreg)
     x20 - x25     word addresses of the six 256 KiB VMEM segments (vload/vstore bases)
 """
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from .layout import BF16_TILE, FP8_TILE, tiles
@@ -29,6 +32,19 @@ DMA_MAX = 4096
 DMA_LOAD_CHANNELS = 7          # ch0-ch6 load weights and constants; ch7 stores results
 STORE_CHANNEL = 7
 CSR_DBG0, CSR_DBG1 = 0xC10, 0xC11
+SCRATCH = 19
+LOOP_REGS = [11, 12, 13, 14, 15, 16, 17, 18, 26, 27, 28, 29, 30, 31]
+RESIDENT_ERF = 28              # e0-e27 are set once in the header; e28-e31 are set at their use
+
+
+@dataclass(frozen=True)
+class Ptr:
+    """A VMEM byte address: x[reg] (a word address, as vload operands are) plus `off` bytes."""
+    reg: int
+    off: int = 0
+
+    def __add__(self, k: int) -> "Ptr":
+        return Ptr(self.reg, self.off + k)
 
 
 @dataclass
@@ -77,6 +93,13 @@ class VmemAlloc:
         t = Tensor(name, 0, rows, cols, kind)
         t.addr = self.alloc(name, t.nbytes)
         return t
+
+    def mark(self) -> int:
+        return self.top
+
+    def reset(self, mark: int) -> None:
+        """Free everything allocated after mark (its users' code must be done by then)."""
+        self.top = mark
 
 
 class DramImage:
@@ -163,8 +186,10 @@ class Builder:
         self.dram = DramImage(dram_size)
         self.dma = Dma(self)
         self._erf: dict[int, int] = {}
+        self._next_dynamic_erf = RESIDENT_ERF
         self._header = None
         self.xval: dict[int, int | None] = {}      # known values of x1-x3
+        self.xfree = list(LOOP_REGS)
 
     # -- program structure -------------------------------------------------------------------
     def begin(self) -> None:
@@ -207,15 +232,66 @@ class Builder:
 
     # -- scale registers ---------------------------------------------------------------------
     def erf(self, raw: int) -> int:
-        """The scale register holding raw ERF value `raw` (2**(raw - 127)); set by finish()."""
+        """A scale register holding raw ERF value `raw` (2**(raw - 127)). The first 28 values get a
+        register each, set once in the program header; later ones are set here, just before use."""
         assert 0 <= raw <= 255, raw
-        if raw not in self._erf:
+        if raw in self._erf:
+            return self._erf[raw]
+        if len(self._erf) < RESIDENT_ERF:
             self._erf[raw] = len(self._erf)
-            assert len(self._erf) <= 32, "out of scale registers"
-        return self._erf[raw]
+            return self._erf[raw]
+        e = self._next_dynamic_erf
+        self._next_dynamic_erf = RESIDENT_ERF + (e + 1 - RESIDENT_ERF) % (32 - RESIDENT_ERF)
+        self.op(f"seli e{e}, {raw}")
+        return e
+
+    # -- scalar registers and loops ----------------------------------------------------------
+    def xreg(self) -> int:
+        return self.xfree.pop(0)
+
+    def xrelease(self, *regs: int) -> None:
+        for r in regs:
+            assert r not in self.xfree and r in LOOP_REGS
+            self.xfree.insert(0, r)
+
+    def add_imm(self, rd: int, rs: int, value: int) -> None:
+        """x[rd] = x[rs] + value (any 32-bit value)."""
+        if -2048 <= value <= 2047:
+            if value or rd != rs:
+                self.op(f"ADDI x{rd}, x{rs}, {value}")
+        else:
+            self.li(SCRATCH, value)
+            self.op(f"ADD x{rd}, x{rs}, x{SCRATCH}")
+
+    @contextmanager
+    def loop(self, n: int, steps=()):
+        """Run the body n times (n >= 1). steps: (reg, delta) pairs added at the end of each pass."""
+        assert n >= 1
+        if n == 1:                                  # no branch; pointers still end one step on
+            yield
+            for reg, delta in steps:
+                self.add_imm(reg, reg, delta)
+            return
+        cnt = self.xreg()
+        self.li(cnt, n)
+        top, out = self.prog.new_label("loop"), self.prog.new_label("loop_end")
+        self.label(top)
+        yield
+        for reg, delta in steps:
+            self.add_imm(reg, reg, delta)
+        self.op(f"ADDI x{cnt}, x{cnt}, -1")
+        self.op(f"BEQ x{cnt}, x0, {out}")
+        self.op("NOP")
+        self.op(f"JAL x0, {top}")
+        self.op("NOP")
+        self.label(out)
+        self.xrelease(cnt)
 
     # -- VMEM tensor access ------------------------------------------------------------------
-    def _vaddr(self, addr: int) -> str:
+    def _vaddr(self, addr) -> str:
+        if isinstance(addr, Ptr):
+            assert addr.off % 128 == 0 and -SEGMENT <= addr.off < SEGMENT, addr
+            return f"{addr.off // 128}(x{addr.reg})"
         assert addr % 128 == 0 and 0 <= addr < VMEM_SIZE, addr
         s = addr // SEGMENT
         return f"{(addr - s * SEGMENT) // 128}(x{SEG_REGS[s]})"
