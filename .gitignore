@@ -77,3 +77,5 @@ project/**/metals.sbt
 
 # Standalone build
 /standalone/**/__pycache__/
+/apps/**/__pycache__/
+/apps/**/.pytest_cache/
