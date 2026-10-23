@@ -145,6 +145,38 @@ class AtlasCore(
       "Cycles MXU 1 is active in its data path")
     event("mxu1.commands", scalar.io.mxu1Cmd.valid.asUInt, "commands",
       "MXU 1 commands issued by the scalar core")
+    event("xlu.commands", xlu.io.cmd.valid.asUInt, "commands",
+      "XLU transpose commands issued by the scalar core")
+    event("xlu.active_cycles", xlu.io.busy.asUInt, "cycles",
+      "Cycles the XLU is processing a transpose")
+    event("xlu.mreg_write_rows", xlu.io.mregWriteReq.valid.asUInt, "rows",
+      "Transposed rows written by the XLU to MREG")
+    event("lsu.scalar_loads", lsu.io.vmemScalarRead.valid.asUInt, "operations",
+      "Scalar loads issued to VMEM")
+    event("lsu.scalar_stores", lsu.io.vmemScalarWrite.valid.asUInt, "operations",
+      "Scalar stores issued to VMEM")
+    event("lsu.scalar_load_completions", lsu.io.scalarResp.valid.asUInt, "operations",
+      "Scalar load results returned by the LSU")
+    event("lsu.vload_commands",
+      (lsu.io.cmd.valid && lsu.io.cmd.bits.op === LSU_VLOAD).asUInt, "commands",
+      "VLOAD commands issued to the LSU")
+    event("lsu.vstore_commands",
+      (lsu.io.cmd.valid && lsu.io.cmd.bits.op === LSU_VSTORE).asUInt, "commands",
+      "VSTORE commands issued to the LSU")
+    event("lsu.vload_lines_issued", lsu.io.vmemVecRead.valid.asUInt, "lines",
+      "VMEM lines requested by VLOAD")
+    event("lsu.vload_rows_written", lsu.io.mregWriteReq.valid.asUInt, "rows",
+      "MREG rows written by VLOAD")
+    event("lsu.vstore_rows_read", lsu.io.mregReadReq.valid.asUInt, "rows",
+      "MREG rows requested by VSTORE")
+    event("lsu.vstore_lines_written", lsu.io.vmemVecWrite.valid.asUInt, "lines",
+      "VMEM lines written by VSTORE")
+    event("lsu.scalar_busy_cycles", lsu.io.scalarBusy.asUInt, "cycles",
+      "Cycles a scalar load is in flight")
+    event("lsu.vload_active_cycles", lsu.io.vloadBusy.asUInt, "cycles",
+      "Cycles the VLOAD path is active")
+    event("lsu.vstore_active_cycles", lsu.io.vstoreBusy.asUInt, "cycles",
+      "Cycles the VSTORE path is active")
 
     for (bank <- 0 until mregP.numMregBanks) {
       event(f"mreg.bank_$bank%02d.read_cycles", mreg.io.perfReadAccess(bank).asUInt,
