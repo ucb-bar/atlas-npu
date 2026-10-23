@@ -5,17 +5,24 @@ the program into IMEM, starts the scalar core through EXEC_CONTROL, waits for th
 completion flag in DBG0, stops the core and reads the results back. This is the sequence of the
 Chipyard C harness that baremetal/atlas_asm.py generates.
 
-Two links share one interface (write_words / read_words / poll):
+The links share one interface (write_words / read_words / poll):
 
     SimLink(binary)        the Verilator model, build/vl_soc/atlas_sim (standalone/sim)
     TsiLink(port, baud)    the VCU118 over UART TSI with PyUARTSI, on the CP2105 port
     TsiLink(cosim=binary)  PyUARTSI against the UART-level model, build/vl_tsi/atlas_tsi_sim
+    EthLink(ip, port)      the VCU118 over TSI over UDP, on its 1000BASE-T port (docs/tsi-over-udp.md)
+    EthLink(cosim=binary)  the Ethernet model, build/vl_eth/atlas_eth_sim, on a local UDP port
 """
 import glob
 import os
+import queue
+import random
+import socket
 import struct
 import subprocess
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 IMEM_BASE = 0x0002_0000
@@ -41,13 +48,24 @@ PERF_NAMES = ["cycles", "instret", "stall_unit", "stall_data", "stall_dma", "sta
               "vload_busy", "vstore_busy", "dma_busy", "dma_beats"]
 
 SYS_ID = 0x00
+SYS_SCRATCH = 0x04
 SYS_FLAGS = 0x08
 SYS_CLK_HZ = 0x14
 SYS_BAUD = 0x18
 SYS_DRAM_BYTES = 0x1C
 SYS_ATLAS = 0x20
 SYS_FEATURES = 0x24
+SYS_LEDS = 0x28
 SYS_RUN_CYCLES = 0x2C
+SYS_ETH_IP = 0x30
+SYS_ETH_STATUS = 0x34
+SYS_ETH_RUN = 0x38
+SYS_ETH_DUP = 0x3C
+SYS_ETH_DROP = 0x40
+SYS_ETH_PORT = 0x44
+SYS_ETH_MAC_LO = 0x48
+SYS_ETH_MAC_HI = 0x4C
+SYS_ETH_RXERR = 0x50
 ATLS_ID = 0x4154_4C53
 
 # The VCU118's CP2105, interface 1: the UART on AW25/BB21.
@@ -55,6 +73,17 @@ VCU118_TSI_PORT = "/dev/serial/by-id/usb-Silicon_Labs_CP2105_Dual_USB_to_UART_Br
 TSI_BAUD = 921_600
 
 CHUNK_WORDS = 256
+
+# TSI over UDP (docs/tsi-over-udp.md)
+ETH_IP_DEFAULT = "172.20.1.18"
+ETH_PORT = 21587                    # 0x5453, "TS"
+ETH_PAYLOAD = 1472                  # UDP payload bytes in a 1500-byte IPv4 packet
+ETH_REPLY_WORDS = 364               # read words in one reply
+ETH_WRITE_WORDS = (ETH_PAYLOAD - 8 - 20) // 4   # 361: the largest write command
+ETH_SIM_TIMEOUT = 1.0               # least timeout on the Ethernet model: simulated time is slow
+ETH_SYNC, ETH_DUP, ETH_NOSYNC, ETH_DROP = 1, 2, 4, 8                        # reply flags
+ETH_CUT, ETH_BADCMD, ETH_OVERFLOW, ETH_DENIED = 1 << 16, 1 << 17, 1 << 18, 1 << 19   # reply status
+M32 = 0xFFFF_FFFF
 
 
 class LinkError(RuntimeError):
@@ -224,6 +253,433 @@ class TsiLink:
         self._t.close()
 
 
+def _seq_diff(a, b):
+    """a - b for 32-bit sequence numbers, signed."""
+    return ((a - b + 0x8000_0000) & M32) - 0x8000_0000
+
+
+class EthSim:
+    """The Ethernet model (standalone/sim/eth_cosim.cpp) as a child process. It is asked for a free
+    UDP port (0, in argv and ETH_SIM_PORT) and prints "PORT <n>" and "READY", in either order.
+    binary may also be a command list."""
+
+    def __init__(self, binary, wait=600.0):
+        cmd = [str(c) for c in binary] if isinstance(binary, (list, tuple)) else [str(binary)]
+        self.name = " ".join(cmd)
+        self.messages = deque(maxlen=200)
+        self.stopped = None                 # the "X <cycle>" line of an RTL assertion
+        self._lines = queue.Queue()
+        self._p = subprocess.Popen(cmd + ["0"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                   env=dict(os.environ, ETH_SIM_PORT="0"))
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+        port, ready, end = None, False, time.monotonic() + wait
+        try:
+            while port is None or not ready:
+                try:
+                    line = self._lines.get(timeout=max(0.0, end - time.monotonic()))
+                except queue.Empty:
+                    if ready:               # no PORT line: the model took the default port
+                        break
+                    raise LinkError(f"{self.name}: no READY after {wait:.0f} s")
+                if line is None:
+                    try:
+                        self._p.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    self.check()
+                    raise LinkError(f"{self.name} closed its output before READY")
+                f = line.split()
+                if f[:1] == ["PORT"] and len(f) > 1:
+                    port = int(f[1])
+                elif f[:1] == ["READY"]:
+                    ready = True
+                    end = min(end, time.monotonic() + 2.0)
+                elif f[:1] == ["X"]:
+                    self.check()
+        except BaseException:
+            self.close()
+            raise
+        self._lines = None
+        self.port = port or ETH_PORT
+
+    def _read(self):
+        for line in self._p.stdout:
+            self.messages.append(line)
+            if line.startswith("X ") and self.stopped is None:
+                self.stopped = line
+            q = self._lines
+            if q is not None:
+                q.put(line)
+        self._p.stdout.close()
+        q = self._lines
+        if q is not None:
+            q.put(None)
+
+    def check(self):
+        """Raise LinkError if the model stopped on an assertion or exited."""
+        if self.stopped is None and self._p.poll() is None:
+            return
+        self._p.poll()
+        self._reader.join(1.0)
+        tail = "".join(list(self.messages)[-20:])
+        if self.stopped:
+            raise LinkError("simulation stopped at cycle %s:\n%s" % (self.stopped.split()[1], tail))
+        raise LinkError("simulation exited (code %s):\n%s" % (self._p.returncode, tail))
+
+    def close(self):
+        """Close the model's input (it exits on EOF), then SIGTERM, then SIGKILL."""
+        try:
+            self._p.stdin.close()
+        except OSError:
+            pass
+        try:
+            self._p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self._p.terminate()
+            try:
+                self._p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._p.kill()
+                self._p.wait()
+        self._reader.join(1.0)
+
+
+class _Datagram:
+    """TSI commands of one kind (reads or writes) for one request. reads: (buffer, byte offset, words)
+    per read command. seq is given when it is first sent."""
+    __slots__ = ("body", "ncmd", "reads", "nread", "addr", "seq", "sent", "tries", "replies", "done")
+
+    def __init__(self, body, ncmd, reads, addr):
+        self.body, self.ncmd, self.reads, self.addr = body, ncmd, reads, addr
+        self.nread = sum(r[2] for r in reads)
+        self.seq, self.sent, self.tries, self.replies, self.done = None, 0.0, 0, 0, False
+
+
+class EthLink:
+    """TSI over UDP (docs/tsi-over-udp.md): the board's Ethernet port, or the Ethernet model (cosim=binary).
+
+    Up to window datagrams are unacknowledged. A lost request or reply is sent again (go-back-N); the
+    board runs each sequence number once, so a write never runs twice. A read whose reply was lost is
+    sent again as a new datagram, and a datagram with writes waits until every earlier read has its
+    data. Each call returns when the board has acknowledged all its datagrams: then its writes are done.
+    LinkError when the board does not answer for retries timeouts in a row (or answers only DROP),
+    and for a denied write whose reply arrives (a DUP reply has no status). On the model the timeout
+    is at least ETH_SIM_TIMEOUT. stats counts datagrams, resends, DUP and DROP replies, timeouts,
+    reads sent again and replies with a denied access."""
+
+    def __init__(self, ip=ETH_IP_DEFAULT, port=ETH_PORT, window=16, timeout=0.05, retries=50, cosim=None,
+                 seq=None):
+        self._sock = self.sim = None
+        if cosim is not None:
+            self.sim = EthSim(cosim)
+            ip, port, timeout = "127.0.0.1", self.sim.port, max(timeout, ETH_SIM_TIMEOUT)
+        self.ip, self.port = ip, port
+        self.name = f"{ip}:{port}" if self.sim is None else f"{self.sim.name} (UDP {port})"
+        self.window, self.timeout, self.retries = max(1, int(window)), timeout, retries
+        self.bulk = True
+        self.stats = dict.fromkeys(("datagrams", "resends", "dups", "drops", "timeouts", "reread", "denied"), 0)
+        self._rto, self._srtt, self._rttvar = timeout, None, 0.0
+        self._refused, self._error, self._behind = 0, None, None
+        self._fly, self._nreads = {}, 0         # see _go
+        try:
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            for opt in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+                self._sock.setsockopt(socket.SOL_SOCKET, opt, 1 << 20)
+            try:
+                self._sock.connect((ip, port))
+            except OSError as e:
+                raise LinkError(f"{ip}:{port}: {e}") from e
+            self._open(seq)
+        except BaseException:
+            self.close()
+            raise
+
+    def write_words(self, addr, words):
+        if len(words):
+            self._run(self._pack([("w", addr, struct.pack("<%dI" % len(words), *words))]))
+
+    def write_bulk(self, addr, data):
+        """Bytes, a whole number of little-endian words (the same pipelined path as write_words)."""
+        data = memoryview(data).cast("B")
+        if len(data) % 4:
+            raise ValueError("write_bulk takes whole 32-bit words")
+        if len(data):
+            self._run(self._pack([("w", addr, data)]))
+
+    def read_words(self, addr, n):
+        return self.batch([("r", addr, n)])[0]
+
+    def batch(self, ops):
+        """Run ("w", addr, words) and ("r", addr, n) in order, pipelined. Returns each read's words."""
+        cmds, outs = [], []
+        for op in ops:
+            if op[0] == "w":
+                if len(op[2]):
+                    cmds.append(("w", op[1], struct.pack("<%dI" % len(op[2]), *op[2])))
+            else:
+                buf = bytearray(4 * op[2])
+                outs.append(buf)
+                if op[2]:
+                    cmds.append(("r", op[1], op[2], buf))
+        self._run(self._pack(cmds))
+        return [list(struct.unpack("<%dI" % (len(b) // 4), b)) for b in outs]
+
+    def poll(self, addr, budget):
+        """Read addr until it is nonzero or the core halts; budget in seconds.
+        Returns (value, seconds waited)."""
+        t0 = time.time()
+        while True:
+            (value,), (status,) = self.batch([("r", addr, 1), ("r", CSR_STATUS, 1)])
+            if value or time.time() - t0 > budget or (status & 1 and status & 6):
+                return value, time.time() - t0
+
+    def close(self):
+        if self._sock is not None:
+            self._sock.close()
+            self._sock = None
+        if self.sim is not None:
+            self.sim.close()
+
+    @staticmethod
+    def _pack(cmds):
+        """Datagrams for ("w", addr, bytes) and ("r", addr, words, buffer), in order. A datagram holds
+        reads or writes, not both, within the payload and reply limits; a long command is split."""
+        parts, reads, ncmd, size, nread, kind, first = [], [], 0, 8, 0, None, 0
+        for c in cmds:
+            total = len(c[2]) // 4 if c[0] == "w" else c[2]
+            done = 0
+            while done < total:
+                if c[0] == "w":
+                    room = (ETH_PAYLOAD - size - 20) // 4
+                else:
+                    room = ETH_REPLY_WORDS - nread if size + 20 <= ETH_PAYLOAD else 0
+                if kind != c[0] or room < min(total - done, 32):
+                    if parts:
+                        yield _Datagram(b"".join(parts), ncmd, reads, first)
+                    parts, reads, ncmd, size, nread, kind = [], [], 0, 8, 0, c[0]
+                    continue
+                k = min(room, total - done)
+                a = c[1] + 4 * done
+                if not ncmd:
+                    first = a
+                parts.append(struct.pack("<5I", c[0] == "w", a & M32, a >> 32 & M32, k - 1, 0))
+                if c[0] == "w":
+                    parts.append(c[2][4 * done:4 * (done + k)])
+                    size += 4 * k
+                else:
+                    reads.append((c[3], 4 * done, k))
+                    nread += k
+                size += 20
+                ncmd += 1
+                done += k
+        if parts:
+            yield _Datagram(b"".join(parts), ncmd, reads, first)
+
+    def _open(self, seq):
+        """SYNC at a random sequence number; the session's first datagram is seq + 1."""
+        seq = random.SystemRandom().getrandbits(32) if seq is None else seq & M32
+        for _ in range(self.retries + 1):
+            self._put(struct.pack("<II", seq, ETH_SYNC))
+            end = time.monotonic() + self.timeout
+            while (pkt := self._get(end - time.monotonic())) is not None:
+                if len(pkt) >= 16:
+                    s, flags, expect, _ = struct.unpack_from("<4I", pkt)
+                    if s == seq and flags & ETH_SYNC:
+                        if expect != (seq + 1) & M32:
+                            raise LinkError(f"{self.name}: SYNC at {seq:#x} answered with expect {expect:#x}")
+                        self._next = expect
+                        return
+            self._check()
+        raise LinkError(self._silent("SYNC"))
+
+    def _run(self, datagrams):
+        """Send the datagrams in order, at most window unacknowledged, until the board has run them all.
+        If this stops early (an error), the datagrams in flight stay and are finished by the next call."""
+        try:
+            self._go(iter(datagrams))
+        except BaseException:
+            for d in self._fly.values():
+                d.done = True           # no reads sent again for them
+            raise
+
+    def _go(self, src):
+        todo = deque()          # to send next: reads to send again, then the next datagram of src
+        fly = self._fly         # sent, not acknowledged: seq -> datagram, oldest first (consecutive seqs)
+        idle = 0                # timeouts and go-backs since the last progress
+        stats = self.stats
+        progress = time.monotonic()
+        while True:
+            if not todo:
+                d = next(src, None)
+                if d is not None:
+                    todo.append(d)
+            # Writes wait for every earlier read: a read whose reply is lost is read again later,
+            # and then must not see later writes.
+            while todo and len(fly) < self.window and (todo[0].nread or not self._nreads):
+                d = todo.popleft()
+                d.seq, self._next = self._next, (self._next + 1) & M32
+                fly[d.seq] = d
+                self._nreads += d.nread > 0
+                stats["datagrams"] += 1
+                self._send(d)
+                if not todo:
+                    d = next(src, None)
+                    if d is not None:
+                        todo.append(d)
+            if not fly:
+                return
+            oldest = next(iter(fly.values()))
+            pkt = self._get(max(oldest.sent, progress) + self._rto - time.monotonic())
+            if pkt is None:
+                self._check()
+                idle += 1
+                stats["timeouts"] += 1
+                if idle > self.retries:
+                    raise LinkError(self._silent("seq %#x (datagram at 0x%x)" % (oldest.seq, oldest.addr)))
+                self._resend(fly)
+                continue
+            while pkt is not None:
+                now = time.monotonic()
+                if len(pkt) < 16 or len(pkt) % 4:
+                    pkt = self._get(0)
+                    continue
+                seq, flags, expect, status = struct.unpack_from("<4I", pkt)
+                d = fly.get(seq)
+                if flags & ETH_NOSYNC and d is not None:
+                    raise LinkError(f"{self.name} has no session open: the board was reset or reprogrammed")
+                if flags & (ETH_SYNC | ETH_NOSYNC):
+                    pkt = self._get(0)
+                    continue
+                if d is not None:
+                    d.replies += 1
+                if flags & ETH_DUP:
+                    stats["dups"] += 1
+                elif flags & ETH_DROP:
+                    stats["drops"] += 1
+                err = None
+                if not flags & (ETH_DUP | ETH_DROP) and d is not None and not d.done:   # ran: has its read data
+                    if d.tries == 1:
+                        self._sample(now - d.sent)
+                    try:
+                        self._finish(d, status, pkt)
+                    except LinkError as e:
+                        d.done, err = True, e
+                # Every datagram before expect has run.
+                again = []
+                while fly:
+                    s = next(iter(fly))
+                    if _seq_diff(expect, s) <= 0:
+                        break
+                    x = fly.pop(s)
+                    if x.nread:
+                        self._nreads -= 1
+                        if not x.done:
+                            again.append(_Datagram(x.body, x.ncmd, x.reads, x.addr))
+                    progress, idle = now, 0
+                if err:
+                    raise err
+                if again:
+                    stats["reread"] += len(again)
+                    todo.extendleft(reversed(again))
+                if flags & ETH_DROP and d is not None and fly:
+                    first = next(iter(fly))
+                    if first == expect:
+                        # The board still waits for the oldest. If this answers d's last copy, which was
+                        # sent after the oldest's last copy, that copy was lost: go back to it.
+                        if d.replies >= d.tries:
+                            idle += 1
+                            if idle > self.retries:
+                                raise LinkError(f"{self.name} does not run seq {expect:#x}: {idle} resends "
+                                                "answered DROP")
+                            self._resend(fly)
+                    elif _seq_diff(first, expect) > 0:
+                        self._behind = expect
+                pkt = self._get(0)
+
+    def _finish(self, d, status, pkt):
+        """Check the reply of a datagram that ran and store its read data."""
+        data = memoryview(pkt)[16:]
+        if status & (ETH_CUT | ETH_BADCMD | ETH_OVERFLOW) or status & 0xFFFF != d.ncmd or len(data) != 4 * d.nread:
+            raise LinkError("datagram at 0x%x: the board ran %d of %d commands (status 0x%x) and sent %d of %d "
+                            "read bytes" % (d.addr, status & 0xFFFF, d.ncmd, status, len(data), 4 * d.nread))
+        if status & ETH_DENIED:
+            self.stats["denied"] += 1
+            if not d.nread:
+                raise LinkError("write denied in the datagram at 0x%x (unmapped address)" % d.addr)
+        pos = 0
+        for buf, off, n in d.reads:
+            buf[off:off + 4 * n] = data[pos:pos + 4 * n]
+            pos += 4 * n
+        d.done = True
+
+    def _send(self, d):
+        d.sent = time.monotonic()
+        d.tries += 1
+        self._put(struct.pack("<II", d.seq, 0) + d.body)
+
+    def _resend(self, fly):
+        for d in fly.values():
+            self._send(d)
+        self.stats["resends"] += len(fly)
+
+    def _sample(self, rtt):
+        """Round-trip time of a datagram sent once (RFC 6298 estimator); the timeout follows it."""
+        if self._srtt is None:
+            self._srtt, self._rttvar = rtt, rtt / 2
+        else:
+            self._rttvar += (abs(self._srtt - rtt) - self._rttvar) / 4
+            self._srtt += (rtt - self._srtt) / 8
+        self._rto = min(max(self.timeout, self._srtt + 4 * self._rttvar), 60.0)
+
+    def _put(self, msg):
+        try:
+            self._sock.send(msg)
+        except OSError as e:            # also the ICMP error of an earlier datagram
+            self._note(e)
+
+    def _get(self, timeout):
+        """The next datagram from the board, or None after timeout seconds (0: only one already here)."""
+        end = time.monotonic() + timeout
+        while True:
+            try:
+                self._sock.settimeout(max(timeout, 0.0))
+                return self._sock.recv(65536)
+            except (socket.timeout, BlockingIOError):
+                return None
+            except OSError as e:
+                self._note(e)
+            timeout = end - time.monotonic()
+            if timeout <= 0:
+                return None
+
+    def _note(self, e):
+        if isinstance(e, ConnectionRefusedError):
+            self._refused += 1
+            self._check()
+        else:
+            self._error = e
+
+    def _check(self):
+        if self.sim is not None:
+            self.sim.check()
+
+    def _silent(self, what):
+        msg = f"no answer from {self.name} (UDP) to {what} after {self.retries + 1} tries"
+        if self._refused:
+            msg += "; the port is closed (ICMP port unreachable)"
+        if self._error is not None:
+            msg += f"; {self._error}"
+        if self._behind is not None:
+            msg += (f"; the board waits for seq {self._behind:#x}, before datagrams it acknowledged: "
+                    "its session was restarted (a SYNC from another host?)")
+        elif what == "SYNC" and self.sim is None and not self._refused:
+            msg += ("; check the cable, the host's address (on the board's subnet) and that the bitstream has "
+                    "Ethernet")
+        return msg
+
+
 def runs(pairs):
     """Group sorted (addr, word) pairs into [addr, [words]] runs of consecutive words."""
     out = []
@@ -288,7 +744,8 @@ class Atlas:
         return DRAM_BASE | (addr % self.dram_bytes)
 
     def run(self, test, budget):
-        """Run one bundled test (see make_bundle.py). budget: poll budget (cycles on SimLink, seconds on TsiLink)."""
+        """Run one bundled test (see make_bundle.py). budget: poll budget (cycles on SimLink, seconds on
+        TsiLink and EthLink)."""
         link, name = self.link, test["name"]
         for addr, words in test["preload"]:
             for a, w in runs([(self.dram(addr + 4 * i), x) for i, x in enumerate(words)]):
