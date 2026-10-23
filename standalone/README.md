@@ -157,7 +157,12 @@ the randomized hazard test (`apps/dit/ditflow/hazfuzz.py`, 64 programs and the d
 |---|---|---|---|---|---|---|---|---|---|
 | `default` | +0.022 / +0.009 | 619K (52%) | 118K | 537.5 | 115 | 126 / 126, 126 / 126 as expected | 65 / 65 | 47,039,818 cycles, bit-exact | 57,307,319 cycles, bit-exact |
 | `ipt` | +0.381 / +0.011 | 357K (30%) | 75K | 529.5 | 115 | 126 / 126, 126 / 126 as expected | 63 / 65 (2: model numerics) | 47,041,500 cycles, bit-exact | 57,307,630 cycles, bit-exact |
-| `ipt-nvfp4` | see below | | | | | | | | |
+| `ipt-nvfp4` | +0.599 / +0.010 | 538K (45%) | 179K | 538.5 | 243 | 126 / 126, 126 / 126 as expected | 65 / 65 | 47,041,552 cycles, bit-exact | 57,307,596 cycles, bit-exact |
+
+The `ipt-nvfp4` DDR4 build does not route with `build.tcl`'s default directives: congestion
+(level 7) around MREG and MXU1 leaves 10,074 nets unrouted. `fpga/impl_retry.tcl` re-places
+and re-routes `post_synth.dcp`; `SSI_SpreadLogic_high` placement with `Explore` routing closes
+at the WNS above (about 75 minutes).
 
 The performance counters cost 373 LUTs and 1.2K flip-flops in the CSR block. On tests of
 1,000 cycles or more, board cycle counts are within ±5% of the Verilator model's (median 0%):

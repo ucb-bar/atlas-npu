@@ -103,7 +103,7 @@ both copies points at the model's arithmetic, not at the interlock.
 | now, the same 64 programs spaced | 64 / 64 | 62 / 64 | 64 / 64 |
 | now, 256 programs × 600 instructions (seeds 2000-2255) | 251 / 256 | 254 / 256 | 253 / 256 |
 | now, the same 256 programs spaced | 251 / 256 | 254 / 256 | 253 / 256 |
-| now, VCU118 (DDR4 bitstream), 64 programs + directed | 65 / 65 | 63 / 65 | see standalone/README.md |
+| now, VCU118 (DDR4 bitstream), 64 programs + directed | 65 / 65 | 63 / 65 | 65 / 65 |
 
 Every failing program fails the same way in its spaced copy: same addresses, same values. So no
 program fails only without `DELAY`, over 963 programs and about 540,000 random tensor
