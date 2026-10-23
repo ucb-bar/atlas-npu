@@ -1,5 +1,5 @@
 // Verilator co-simulation of atlas_tsi_soc through its UART pins, driven by PyUARTSI
-// (atlas_host.TsiSimLink). Adapted from NVFP4's fpga/sim/tsi_cosim.cpp.
+// (atlas_host.TsiLink(cosim=...)). Adapted from ucb-bar/nvfp4@0c611e1:fpga/sim/tsi_cosim.cpp.
 //
 // stdin, one command per line:
 //   W <hex>  queue bytes for the target's RX pin

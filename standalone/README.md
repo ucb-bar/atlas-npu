@@ -4,7 +4,7 @@ A host-driven build of Atlas without Chipyard: no CPU, no rocket-chip. A host co
 the CPU's place over UART TSI (the protocol of [PyUARTSI](https://github.com/ucb-bar/pyuartsi)
 and Chipyard's UART-TSI). It loads the kernel into IMEM and the data into DRAM, starts the
 scalar core, waits for completion and reads the results. The structure follows the NVFP4 SoC
-(`ucb-bar/nvfp4`), whose UART TSI target and TL-UL fabric are reused here.
+(`ucb-bar/nvfp4@0c611e1`), whose UART TSI target and TL-UL fabric are reused here.
 
 ```text
 host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs          0x0000_0000
@@ -18,7 +18,7 @@ host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs      
 - `chisel/`: `EmitAtlasCore` writes AtlasCore's SystemVerilog with fixed TL-UL ports, and
   `tilelink/` stands in for the three rocket-chip TileLink names AtlasCore uses. The RTL under
   `src/main/scala` is shared with the Chipyard build unchanged.
-- `rtl/`: the SoC. `tsi/` is NVFP4's UART TSI target and fabric (copied from nvfp4 `0c611e1`).
+- `rtl/`: the SoC. `tsi/` is NVFP4's UART TSI target and fabric (copied from `ucb-bar/nvfp4@0c611e1:fpga/tsi` and `fpga/common`).
   The board's DRAM is 2 GiB of DDR4 through `atlas_ddr4_dram.sv` and the MIG (below).
   `atlas_dram.sv` is the Verilator model's DRAM, aliased over `0x8000_0000` up (DMA's 64-bit
   addresses fold onto it the same way); the baremetal tests use 465 KiB at `0x9000_0000`.
