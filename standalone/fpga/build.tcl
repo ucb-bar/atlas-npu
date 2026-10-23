@@ -1,6 +1,7 @@
 # Build the VCU118 bitstream of the standalone Atlas SoC (non-project flow).
 #   vivado -mode batch -source standalone/fpga/build.tcl -tclargs <rtl_dir> <out_dir> [clk_mhz] [jobs] [config]
-# DRAM is 2 GiB of the board's DDR4 C1 through the DDR4 MIG (top vcu118_atlas_top).
+# DRAM is 2 GiB of the board's DDR4 C1 through the DDR4 MIG (top vcu118_atlas_top). Ethernet (TSI
+# over UDP) goes through the SGMII PCS/PMA IP and verilog-ethernet (rtl/eth/vendor).
 # rtl_dir is the Chisel output without assertions, after fpga_mems.py (build_bitstream.sh does both):
 #   ./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-fpga
 #   python3 standalone/fpga/fpga_mems.py build/rtl-fpga
@@ -22,20 +23,26 @@ set_param general.maxThreads $jobs
 # default 1M-bit variable limit. (Chipyard's memory compiler splits them; this flow does not.)
 set_param synth.elaboration.rodinMoreOptions "rt::set_parameter var_size_limit 8388608"
 
-# The MIG is an IP: generate and synthesize it out of context in an in-memory project.
+# The MIG and the PCS/PMA are IPs: generate and synthesize them out of context in an in-memory
+# project.
 create_project -in_memory -part $part
 set ipdir $out/ip
 file mkdir $ipdir
 source $sa/fpga/vcu118_ddr4_mig.tcl
-generate_target {instantiation_template synthesis implementation} [get_ips vcu118mig]
-synth_ip -force [get_ips vcu118mig]
+source $sa/fpga/vcu118_sgmii_pcs.tcl
+foreach ip {vcu118mig gig_ethernet_pcs_pma_0} {
+    generate_target {instantiation_template synthesis implementation} [get_ips $ip]
+    synth_ip -force [get_ips $ip]
+}
 # atlas_dram.sv (the on-chip DRAM of the simulation model) is read for atlas_soc's unused branch.
 read_verilog -sv [list \
     $sa/rtl/tsi/tl_pkg.sv $sa/rtl/tsi/uart_rx.sv $sa/rtl/tsi/uart_tx.sv $sa/rtl/tsi/sync_fifo.sv \
     $sa/rtl/tsi/uart_tsi.sv $sa/rtl/tsi/tl_xbar.sv $sa/rtl/tsi/tl_widen.sv $sa/rtl/tsi/tl_narrow.sv \
-    $sa/rtl/atlas_tl_port.sv $sa/rtl/atlas_dram.sv $sa/rtl/atlas_sys_regs.sv \
+    $sa/rtl/tsi/tl_arbiter.sv $sa/rtl/atlas_tl_port.sv $sa/rtl/atlas_dram.sv $sa/rtl/atlas_sys_regs.sv \
     $sa/rtl/atlas_soc.sv $sa/rtl/atlas_tsi_soc.sv \
+    $sa/rtl/eth/eth_tsi.sv $sa/rtl/eth/eth_udp_stack.sv $sa/rtl/eth/vcu118_sgmii.sv \
     $sa/rtl/async_fifo.sv $sa/rtl/atlas_ddr4_dram.sv $sa/rtl/vcu118_atlas_top.sv]
+read_verilog [lsort [glob $sa/rtl/eth/vendor/*.v]]
 # SystemVerilog packages (dotprod_pkg of the NVFP4 MXU) before their users.
 set pkgs [glob -nocomplain $rtl/*_pkg.sv]
 set rest [lsort [glob $rtl/*.sv]]
@@ -43,13 +50,21 @@ foreach f $pkgs { set rest [lsearch -all -inline -not -exact $rest $f] }
 read_verilog -sv [concat $pkgs $rest]
 read_xdc $sa/fpga/vcu118_atlas.xdc
 read_xdc $sa/fpga/vcu118_ddr4.xdc
+read_xdc $sa/fpga/vcu118_eth.xdc
 auto_detect_xpm
 
 synth_design -top $top -part $part -generic CLK_MHZ=$clk_mhz
-# atlas_ddr4_dram crosses between the design clock and the MIG user clock (gray-coded FIFOs).
+# verilog-ethernet's constraint scripts (Tcl, they search the synthesized netlist): CDC of its
+# async FIFOs, reset synchronizers.
+foreach f {axis_async_fifo.tcl eth_mac_fifo.tcl sync_reset.tcl} {
+    source $sa/rtl/eth/vendor/$f
+}
+# Clock domains: the design clock, the MIG user clock (atlas_ddr4_dram's gray-coded FIFOs) and
+# the PCS/PMA clocks, all derived from the PHY's 625 MHz clock (eth_udp_stack's async FIFOs).
 set_clock_groups -asynchronous \
+    -group [get_clocks -of_objects [get_pins u_mmcm/CLKOUT0]] \
     -group [get_clocks -of_objects [get_pins u_mig/c0_ddr4_ui_clk]] \
-    -group [get_clocks -of_objects [get_pins u_mmcm/CLKOUT0]]
+    -group [get_clocks -include_generated_clocks -of_objects [get_ports phy_sgmii_clk_p]]
 report_clocks -file $out/clocks_post_synth.rpt
 write_checkpoint -force $out/post_synth.dcp
 report_utilization -file $out/utilization_synth.rpt

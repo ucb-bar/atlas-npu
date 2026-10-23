@@ -1,7 +1,8 @@
 // Standalone Atlas SoC: AtlasCore, its DRAM ports, and a TL-UL host fabric. A host (the UART
 // TSI target on the board, the simulation driver in Verilator) replaces the CPU: it loads the
 // kernel into IMEM and the data into DRAM, starts the core through EXEC_CONTROL, polls DBG0, and
-// reads the results back.
+// reads the results back. A second host port on the beat fabric (e_*, the Ethernet TSI target)
+// shares the fabric with the first through tl_arbiter; tie it off (e_a_valid 0) when unused.
 //
 //   0x0000_0000 - 0x0000_0FFF  sys_regs    link identification, status, Atlas busy bits
 //   0x0002_0000 - 0x0003_FFFF  Atlas IMEM  128 KiB (reads stall while the core runs)
@@ -21,7 +22,11 @@ module atlas_soc
     parameter int BAUD        = 921_600,
     parameter int DRAM_LINE_W = 17,
     parameter int DRAM_LAT    = 8,
-    parameter bit EXT_DRAM    = 1'b0
+    parameter bit EXT_DRAM    = 1'b0,
+    parameter bit          ETH      = 1'b0,  // Ethernet TSI present (sys_regs ETH_STATUS[18])
+    parameter logic [31:0] ETH_IP   = 32'hAC14_0112,
+    parameter logic [47:0] ETH_MAC  = 48'h02_00_41_54_4C_53,
+    parameter logic [15:0] ETH_PORT = 16'h5453
 ) (
     input  logic       clk,
     input  logic       rst,
@@ -34,11 +39,30 @@ module atlas_soc
     input  logic       d_ready,
     output d_t         d,
 
+    // Second host (Ethernet TSI): one 32-byte beat at a time.
+    input  logic       e_a_valid,
+    output logic       e_a_ready,
+    input  wa_t        e_a,
+    output logic       e_d_valid,
+    input  logic       e_d_ready,
+    output wd_t        e_d,
+
     input  logic       dropped,   // TSI link status, reported in sys_regs
     input  logic       bad_cmd,
     output logic       denied,    // pulses for every denied response
     output logic       halted,    // Atlas scalar core halted
     output logic [2:0] user_leds,
+
+    // Ethernet status (core clock), reported in sys_regs
+    input  logic [15:0] eth_pcs_status,
+    input  logic        eth_phy_ready,
+    input  logic        eth_synced,
+    input  logic [31:0] eth_n_exec,
+    input  logic [31:0] eth_n_dup,
+    input  logic [31:0] eth_n_drop,
+    input  logic [15:0] eth_rx_dropped,
+    input  logic [15:0] eth_rx_bad,
+    output logic [31:0] local_ip,   // sys_regs ETH_IP
 
     // External DRAM (EXT_DRAM): the host port and the DMA port of atlas_dram
     output logic          ext_a_valid,
@@ -70,14 +94,33 @@ module atlas_soc
     localparam int SYS = 0, IMEM = 1, CSR = 2, VMEM = 3, DRAM = 4;
 
     // ── Host fabric ─────────────────────────────────────────────────────────
+    // Host 0: the 32-bit port through tl_widen. Host 1: the beat port.
+    logic [1:0] h_a_valid, h_a_ready, h_d_valid, h_d_ready;
+    wa_t        h_a [2];
+    wd_t        h_d;
+
+    tl_widen u_widen (
+        .clk, .a_valid, .a_ready, .a, .d_valid, .d_ready, .d,
+        .w_a_valid(h_a_valid[0]), .w_a_ready(h_a_ready[0]), .w_a(h_a[0]),
+        .w_d_valid(h_d_valid[0]), .w_d_ready(h_d_ready[0]), .w_d(h_d));
+
+    assign h_a_valid[1] = e_a_valid;
+    assign e_a_ready    = h_a_ready[1];
+    assign h_a[1]       = e_a;
+    assign e_d_valid    = h_d_valid[1];
+    assign h_d_ready[1] = e_d_ready;
+    assign e_d          = h_d;
+
     logic   wa_valid, wa_ready, wd_valid, wd_ready;
     wa_t    wa;
     wd_t    wd;
 
-    tl_widen u_widen (
-        .clk, .a_valid, .a_ready, .a, .d_valid, .d_ready, .d,
-        .w_a_valid(wa_valid), .w_a_ready(wa_ready), .w_a(wa),
-        .w_d_valid(wd_valid), .w_d_ready(wd_ready), .w_d(wd));
+    tl_arbiter u_arb (
+        .clk, .rst,
+        .host_a_valid(h_a_valid), .host_a_ready(h_a_ready), .host_a(h_a),
+        .host_d_valid(h_d_valid), .host_d_ready(h_d_ready), .host_d(h_d),
+        .a_valid(wa_valid), .a_ready(wa_ready), .a(wa),
+        .d_valid(wd_valid), .d_ready(wd_ready), .d(wd));
 
     logic [N-1:0] dev_a_valid, dev_a_ready, dev_d_valid, dev_d_ready;
     wa_t          dev_a;
@@ -277,14 +320,17 @@ module atlas_soc
 
     // ── System registers ────────────────────────────────────────────────────
     localparam logic [31:0] DRAM_BYTES = EXT_DRAM ? 32'h8000_0000 : 32'(32 << DRAM_LINE_W);
-    atlas_sys_regs #(.CLK_HZ(CLK_HZ), .BAUD(BAUD), .DRAM_BYTES(DRAM_BYTES)) u_sys (
+    atlas_sys_regs #(.CLK_HZ(CLK_HZ), .BAUD(BAUD), .DRAM_BYTES(DRAM_BYTES), .ETH(ETH),
+                     .ETH_IP(ETH_IP), .ETH_MAC(ETH_MAC), .ETH_PORT(ETH_PORT)) u_sys (
         .clk, .rst,
         .a_valid(n_a_valid[SYS]), .a_ready(n_a_ready[SYS]), .a(n_a[SYS]),
         .d_valid(n_d_valid[SYS]), .d_ready(n_d_ready[SYS]), .d(n_d[SYS]),
         .dropped, .bad_cmd, .denied, .features, .dram_ready(EXT_DRAM ? ext_dram_ready : 1'b1),
         .atlas_status({dbg_dma, 1'b0, dbg_lsu, dbg_xlu, dbg_mxu1_comp, dbg_mxu1_data,
                        dbg_mxu0_comp, dbg_mxu0_data, halted}),
-        .user_leds);
+        .user_leds,
+        .eth_pcs_status, .eth_phy_ready, .eth_synced, .eth_n_exec, .eth_n_dup, .eth_n_drop,
+        .eth_rx_dropped, .eth_rx_bad, .eth_ip(local_ip));
 
     // ── DRAM ────────────────────────────────────────────────────────────────
     if (EXT_DRAM) begin : g_ext

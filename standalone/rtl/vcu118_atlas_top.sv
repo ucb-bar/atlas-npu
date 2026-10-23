@@ -6,8 +6,11 @@
 //   c0_ddr4_*      DDR4 C1 component memory, through the DDR4 MIG (IP vcu118mig,
 //                  fpga/vcu118_ddr4_mig.tcl); its reference clock is sys_clock, as in the
 //                  Chipyard VCU118 shell
+//   phy_*          DP83867 Ethernet PHY (RJ45, 1000BASE-T), SGMII over LVDS (vcu118_sgmii). TSI over
+//                  UDP port 21587 at ETH_IP (eth_udp_stack, eth_tsi; docs/tsi-over-udp.md).
+//                  phy_int_n is not used.
 //   led[0]         heartbeat (about 1.5 Hz)
-//   led[1]         TSI activity: toggles per completed command
+//   led[1]         TSI activity: toggles per completed command (UART) or datagram (Ethernet)
 //   led[2]         link error or denied access
 //   led[3]         MMCM locked and DDR4 calibrated
 //   led[4]         Atlas halted
@@ -18,8 +21,10 @@
 module vcu118_atlas_top
     import tl_pkg::*;
 #(
-    parameter int CLK_MHZ = 50,
-    parameter int BAUD    = 921_600
+    parameter int          CLK_MHZ = 50,
+    parameter int          BAUD    = 921_600,
+    parameter logic [31:0] ETH_IP  = 32'hAC14_0112,  // 172.20.1.18, sys_regs ETH_IP reset value
+    parameter logic [47:0] ETH_MAC = 48'h02_00_41_54_4C_53
 ) (
     input  logic        sys_clock_p,
     input  logic        sys_clock_n,
@@ -28,6 +33,17 @@ module vcu118_atlas_top
     output logic        uart_txd,
     output logic        uart_rtsn,
     output logic [7:0]  led,
+
+    input  logic        phy_sgmii_rx_p,
+    input  logic        phy_sgmii_rx_n,
+    output logic        phy_sgmii_tx_p,
+    output logic        phy_sgmii_tx_n,
+    input  logic        phy_sgmii_clk_p,
+    input  logic        phy_sgmii_clk_n,
+    output logic        phy_reset_n,
+    input  logic        phy_int_n,
+    inout  wire         phy_mdio,
+    output logic        phy_mdc,
 
     output logic [16:0] c0_ddr4_adr,
     output logic        c0_ddr4_bg,
@@ -67,7 +83,8 @@ module vcu118_atlas_top
     BUFG u_bufg (.I(clk_mmcm), .O(clk));
 
     // Reset: held until the MMCM locks and for 256 cycles after, and while CPU_RESET is pressed.
-    // CPU_RESET does not reset the MIG (that would recalibrate and disturb DRAM contents).
+    // CPU_RESET does not reset the MIG (that would recalibrate and disturb DRAM contents). It does
+    // restart the Ethernet PHY bring-up (the link goes down and renegotiates).
     (* ASYNC_REG = "TRUE" *) logic [1:0] btn_sync;
     logic [8:0] por;
     logic       rst;
@@ -84,6 +101,34 @@ module vcu118_atlas_top
     always_ff @(posedge clk_in) if (!(&mig_por)) mig_por <= mig_por + 1'b1;
     wire mig_rst = !(&mig_por);
 
+    // ── Ethernet: PHY, PCS/PMA, MAC/IP/UDP ──────────────────────────────────
+    localparam logic [15:0] ETH_PORT = 16'h5453;
+
+    logic        gmii_clk, gmii_rst, gmii_clk_en, gmii_rx_dv, gmii_rx_er, gmii_tx_en, gmii_tx_er;
+    logic [7:0]  gmii_rxd, gmii_txd;
+    logic [15:0] pcs_status, rx_dropped, rx_bad;
+    logic        phy_ready;
+    logic [31:0] local_ip, eth_rx_data, eth_tx_data;
+    logic        eth_rx_valid, eth_rx_ready, eth_rx_last, eth_tx_valid, eth_tx_ready, eth_tx_last;
+
+    vcu118_sgmii #(.CLK_HZ(CLK_MHZ * 1_000_000)) u_sgmii (
+        .clk, .rst,
+        .phy_sgmii_rx_p, .phy_sgmii_rx_n, .phy_sgmii_tx_p, .phy_sgmii_tx_n,
+        .phy_sgmii_clk_p, .phy_sgmii_clk_n, .phy_reset_n, .phy_mdio, .phy_mdc,
+        .gmii_clk, .gmii_rst, .gmii_clk_en, .gmii_rxd, .gmii_rx_dv, .gmii_rx_er,
+        .gmii_txd, .gmii_tx_en, .gmii_tx_er,
+        .status_vector(pcs_status), .phy_ready);
+
+    eth_udp_stack #(.LOCAL_MAC(ETH_MAC), .PORT(ETH_PORT)) u_eth (
+        .gmii_clk, .gmii_rst, .gmii_clk_en, .gmii_rxd, .gmii_rx_dv, .gmii_rx_er,
+        .gmii_txd, .gmii_tx_en, .gmii_tx_er,
+        .clk, .rst, .local_ip,
+        .rx_data(eth_rx_data), .rx_valid(eth_rx_valid), .rx_ready(eth_rx_ready),
+        .rx_last(eth_rx_last),
+        .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
+        .tx_last(eth_tx_last),
+        .rx_dropped, .rx_bad);
+
     // ── SoC ─────────────────────────────────────────────────────────────────
     logic          activity, error, halted, calibrated;
     logic [2:0]    user_leds;
@@ -97,9 +142,15 @@ module vcu118_atlas_top
     logic [31:0]   dma_a_mask;
     logic [255:0]  dma_a_data, dma_d_data;
 
-    atlas_tsi_soc #(.CLK_HZ(CLK_MHZ * 1_000_000), .BAUD(BAUD), .EXT_DRAM(1'b1)) u_soc (
+    atlas_tsi_soc #(.CLK_HZ(CLK_MHZ * 1_000_000), .BAUD(BAUD), .EXT_DRAM(1'b1), .ETH_IP(ETH_IP),
+                    .ETH_MAC(ETH_MAC), .ETH_PORT(ETH_PORT)) u_soc (
         .clk, .rst, .rxd(uart_rxd), .txd(uart_txd),
         .activity, .error, .halted, .user_leds,
+        .rx_data(eth_rx_data), .rx_valid(eth_rx_valid), .rx_ready(eth_rx_ready),
+        .rx_last(eth_rx_last),
+        .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
+        .tx_last(eth_tx_last),
+        .pcs_status, .phy_ready, .rx_dropped, .rx_bad, .local_ip,
         .ext_a_valid, .ext_a_ready, .ext_a, .ext_d_valid, .ext_d_ready, .ext_d,
         .ext_dma_a_valid(dma_a_valid), .ext_dma_a_ready(dma_a_ready),
         .ext_dma_a_opcode(dma_a_opcode), .ext_dma_a_source(dma_a_source),
