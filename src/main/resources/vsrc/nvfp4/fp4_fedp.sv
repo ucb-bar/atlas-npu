@@ -1,11 +1,12 @@
 // 64-element block-scaled FP4 fused dot product with FP32 accumulate:
 //   d = C + sum over blocks g = 0..3 of (sum of 16 E2M1 products in block g) x sA_g x sB_g
 // with the arithmetic of NVIDIA tensor cores, as measured on RTX 5090 (mma.sync) and Jetson Thor
-// (tcgen05) and modeled by tcgen05/nvfp4_tcgen05_check.py (rule "rtx5090"):
+// (tcgen05) and modeled by ucb-bar/nvfp4@0c611e1:tcgen05/nvfp4_tcgen05_check.py (rule "rtx5090"):
 //   - The sum of each 16-element block is exact. This part is the block datapath of
 //     sashakatne/nvfp4-dotprod-formal-dv (mul_lane_nvfp4, align_nvfp4, exact_acc_tree), in LUTs.
 //   - The scales, the alignment, the cuts toward zero and the special values are fp4_fedp_acc.
-// fp4_fedp_dsp computes the same outputs for a 2 x N grid with the products in DSP slices.
+// ucb-bar/nvfp4@0c611e1:fpga/pe/fp4_fedp_dsp.sv (not in Atlas) computes the same outputs for a
+// 2 x N grid with the products in DSP slices.
 //
 // mode: 0 NVFP4 (UE4M3 per 16), 1 MXFP4 (E8M0 per 32), 2 FP4 (no scale), 3 MXFP4 (E8M0 per 16).
 // Byte g of sfa / sfb scales block g (mode 1: bytes 0 and 1 scale elements 0-31 and 32-63).

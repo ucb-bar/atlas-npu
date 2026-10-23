@@ -1,7 +1,8 @@
 """Shared data and golden helpers for the NVFP4 MXU tests (gen_nvfp4_*.py).
 
-The arithmetic is npu_model/configs/nvfp4.py (the NVFP4 repo's model of fp4_fedp), loaded by path
-so the generators need no npu_model environment. Layouts follow docs/nvfp4-mxu.md:
+The arithmetic is npu_model/configs/nvfp4.py (from ucb-bar/nvfp4@0c611e1:host/nvfp4_model.py, the
+model of fp4_fedp), loaded by path so the generators need no npu_model environment. Layouts
+follow docs/nvfp4-mxu.md:
   tile data   32 rows x 32 bytes, 64 E2M1 codes per row (low nibble first)
   tile scales 32 rows x 4 UE4M3 bytes (128 bytes)
   FP32 tile   4 m-registers, register q row r = columns 8q .. 8q + 7

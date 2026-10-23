@@ -61,20 +61,75 @@ simulator does not model the NVFP4 MXU.
 
 ## Arithmetic
 
-Each output element is one `fp4_fedp` dot product from the NVFP4 repo
-(`src/main/resources/vsrc/nvfp4`): the arithmetic of NVIDIA tensor cores, as measured on an RTX
-5090 (`mma.sync` m16n8k64) and Jetson Thor (`tcgen05`):
+Each output element is one `fp4_fedp` dot product (`src/main/resources/vsrc/nvfp4`, see
+Provenance): the arithmetic of NVIDIA tensor cores, as measured on an RTX 5090 (`mma.sync`
+m16n8k64) and Jetson Thor (`tcgen05`):
 
 ```text
 acc[r][j] = acc[r][j] + sum over blocks g of (sum of 16 E2M1 products A[r][16g+i] W[j][16g+i]) x sA[r][g] x sW[j][g]
 ```
 
-The 16-element block sums are exact; every term, the old accumulator included, is cut toward zero
-at 2^(emax - 35), and the sum is cut toward zero to FP32 once. A NaN scale or accumulator gives
-`0x7FFFFFFF`, an infinite accumulator passes through, and a row of all-zero products returns the
-accumulator (with -0 becoming +0). So a chain of `vmatmul.acc.nv` over K = 64n equals a chain of
-n NVIDIA m16n8k64 MMAs bit for bit. The block sums come from
-sashakatne/nvfp4-dotprod-formal-dv (Apache-2.0).
+A UE4M3 scale byte has exponent field E (bits 6:3) and mantissa m (bits 2:0). Bit 7 is ignored,
+and E = 15, m = 7 (`0x7F`, `0xFF`) is NaN. The other codes decode to (S / 8) x 2^e:
+
+| Code | S | e | Value |
+|---|---|---|---|
+| E > 0 | 8 + m | E - 7 | (1 + m / 8) x 2^(E - 7), up to 448 (`0x7E`) |
+| E = 0, m > 0 | m | -6 | m / 8 x 2^-6 (subnormal) |
+| E = 0, m = 0 | 0 | -126 | 0 |
+
+The 16-element block sums are exact. Block g's term is its sum x sA x sW at exponent
+eA + eW, even when the sum or a scale is zero; the accumulator's exponent is
+max(Ec - 127, -126) for its biased exponent Ec, and emax is the largest of the five. Every term,
+the old accumulator included, is cut toward zero at 2^(emax - 35), and the sum is cut toward zero
+to FP32 once (overflow gives +-inf). A NaN scale or accumulator gives `0x7FFFFFFF`, an infinite
+accumulator passes through, and a row of all-zero products returns the accumulator (with -0
+becoming +0). So a chain of `vmatmul.acc.nv` over K = 64n equals a chain of n NVIDIA m16n8k64
+MMAs bit for bit, except for the known gap below.
+
+Known gap: when a 16-element block has only zero products and its scales give it the largest
+exponent, the model and `fp4_fedp` let it set emax (as MMA-Sim does), and silicon does not
+always do so; the rule is not known. The full NVFP4 vector sets (Evidence) have 16 vectors with
+such a block, all kept in `nvfp4_silicon` and counted by `check_nvfp4_silicon.py`. It changes
+the result on one, `random_nvfp4_seed1` vector 15 (an all-zero block with scale 448,
+C = -3e-10): model and RTL `0x42400000`, both GPUs `0x423fffff`. The model's
+other documented differences from silicon, 28 subnormal and 6 normal outputs off by 1 ULP in
+600,054 random vectors (<https://ucb-bar.github.io/nvfp4/> section 4, Model accuracy), are all
+MXFP4 vectors (ucb-bar/nvfp4@0c611e1 `tcgen05/tcgen05_results.zip`, `summary.json`), a mode
+Atlas does not use.
+
+### Provenance
+
+`fp4_fedp.sv` and `fp4_fedp_acc.sv` are from ucb-bar/nvfp4@0c611e1 `fpga/pe`
+(<https://github.com/ucb-bar/nvfp4/tree/0c611e1>; only the path references in `fp4_fedp.sv`'s
+header comment are changed). The five block-datapath files (`dotprod_pkg.sv`,
+`front_end_nvfp4.sv`, `mul_lane_nvfp4.sv`, `align_nvfp4.sv`, `exact_acc_tree.sv`) are from
+sashakatne/nvfp4-dotprod-formal-dv@125db59
+(<https://github.com/sashakatne/nvfp4-dotprod-formal-dv>, Apache-2.0,
+`LICENSE.nvfp4-dotprod-formal-dv`); only `dotprod_pkg.sv` is changed, as its header says. The
+model, `npu_model/configs/nvfp4.py`, is the NVFP4 mode of ucb-bar/nvfp4@0c611e1
+`host/nvfp4_model.py` plus Atlas layout helpers. The design and its arithmetic contract are
+described at <https://ucb-bar.github.io/nvfp4/> (section 4). Of the three open NVFP4 designs in
+the [survey](https://github.com/ucb-bar/nvfp4/blob/0c611e1/docs/survey.md), only
+nvfp4-dotprod-formal-dv agreed with the RTX 5090 on every vector (100,008 / 100,008; Allegro
+disagreed on 651 / 100,009 NVFP4 vectors and Vortex on 80,855 / 100,008).
+
+### Evidence
+
+The first three rows were measured in Atlas with
+`python3 -I baremetal/generators/check_nvfp4_silicon.py` (model) and
+`baremetal/generators/nvfp4_silicon/fp4_fedp_vec.sh` (Atlas's `fp4_fedp.sv` in Verilator, mode
+0); the vectors are described in `baremetal/generators/nvfp4_silicon/README.md`. The other rows
+are ucb-bar/nvfp4@0c611e1 results; their sources are paths in that repo.
+
+| Check | Result | Source |
+|---|---|---|
+| Model vs RTX 5090 and vs Thor, the 40,000 vectors in `nvfp4_silicon` | 39,999 / 40,000 each; the other is the known gap | `check_nvfp4_silicon.py` |
+| RTL vs RTX 5090 and vs Thor, same vectors | 39,999 / 40,000 each, the same vector (RTL = model there); d after 5 cycles on every vector | `fp4_fedp_vec.sh` |
+| Model and RTL on the full sets: stored NVFP4 vectors; random NVFP4 seed 1 | 300,025 / 300,025 (RTX 5090); 200,017 / 200,018 (both GPUs, the known gap) | the same tools on ucb-bar/nvfp4@0c611e1 `tcgen05/vectors/*.vec` and on the full seed-1 set (`nvfp4_silicon/README.md`), 2026-10-23 |
+| `fp4_fedp` vs RTX 5090 | NVFP4 300,025 / 300,025; random, all four modes, 99,998 / 100,000 (two all-zero-block cases) | `docs/compute.md` (Measured results); `host/run_pe.py` (the random cases cover the four modes); the same cases for `fp4_fedp_dsp` in `results/fp4_fedp_dsp_gpu.log` |
+| NVFP4 SoC on its board, m16n8k64 chains vs RTX 5090 | 60,416 / 60,416 outputs | `docs/compute.md` (Measured results) |
+| Jetson Thor vs RTX 5090 | the same bits on 920,079 vectors (NVFP4, MXFP4) | `tcgen05/README.md` (Status) |
 
 ## Microarchitecture and timing
 

@@ -6,10 +6,12 @@
 //        (UE4M3 per 16 elements, MregScaleFile)
 //   W  = weight slot w: row j holds output column j's 64 elements and scales
 //        (pushed from an m-register and its scales)
-// Each of the 32 lanes is an fp4_fedp (NVFP4 repo; NVIDIA tensor-core
-// arithmetic): lane j computes d = C + A_r . W_j for one activation row r per
-// cycle, so a matmul feeds 32 rows in 32 cycles and a K chain of vmatmul.acc
-// equals a chain of NVIDIA m16n8k64 MMAs bit for bit.
+// Each of the 32 lanes is an fp4_fedp (ucb-bar/nvfp4@0c611e1:fpga/pe; NVIDIA
+// tensor-core arithmetic): lane j computes d = C + A_r . W_j for one activation
+// row r per cycle, so a matmul feeds 32 rows in 32 cycles and a K chain of
+// vmatmul.acc equals a chain of NVIDIA m16n8k64 MMAs bit for bit, except for the
+// known gap in docs/nvfp4-mxu.md (an all-zero 16-element block can set the
+// alignment).
 //
 // Engines (one command register + step counter each, like the other MXUs):
 //   E0  mreg read port 0: matmul feed, weight push (if E1 is busy), acc push
@@ -28,7 +30,7 @@ import chisel3._
 import chisel3.util._
 import atlas.common.{Nvfp4MxuParams, MregParams, MregReadReq, MregWriteReq}
 
-/** fp4_fedp from the NVFP4 repo: 64-element NVFP4 dot product with FP32 accumulate. */
+/** fp4_fedp (ucb-bar/nvfp4@0c611e1:fpga/pe/fp4_fedp.sv): 64-element NVFP4 dot product with FP32 accumulate. */
 class Fp4Fedp extends BlackBox with HasBlackBoxResource {
   override def desiredName = "fp4_fedp"
   val io = IO(new Bundle {

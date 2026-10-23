@@ -3,7 +3,7 @@
 
 acc0 = sum over k = 0..3 of A_k @ W_k^T (K = 256): one vmatmul.nv and three vmatmul.acc.nv. Each
 step equals NVIDIA's m16n8k64 MMA with C from the previous step, so the chain matches a chain of
-MMAs bit for bit.
+MMAs bit for bit, apart from the known gap in docs/nvfp4-mxu.md.
 
 DRAM beats: A data 0-127 (4 tiles), A scales 128-143, W data 144-271, W scales 272-287,
 result 288-415.
