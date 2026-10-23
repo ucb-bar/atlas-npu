@@ -189,7 +189,7 @@ def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget
     res = C.read_outputs(c, read)
     res.update(_policy_cond(c, saved, read))
     res.update({"cycles": r.cycles, "instret": r.instret, "wall_s": wall, "features": atlas.features,
-                "run_s": r.wall_s, "perf": r.perf, "util": h.utilization(r.perf)})
+                "run_s": r.run_s, "perf": r.perf, "util": h.utilization(r.perf)})
     link.close()
     torch.save(res, out / f"{target}.pt")
     report(out)

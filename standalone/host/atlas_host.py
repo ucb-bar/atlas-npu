@@ -268,7 +268,7 @@ class Result:
     checked: int = 0
     util: dict = field(default_factory=dict)
     perf: dict = field(default_factory=dict)   # performance counters (read_perf)
-    wall_s: float = 0.0                         # host time from start to halt
+    run_s: float = 0.0                          # host time from the start to the completion poll
     detail: str = ""
 
 
@@ -317,7 +317,7 @@ class Atlas:
         _, instret, core_status, illegal_pc, dbg0, dbg1 = link.read_words(CSR_CYCLE, 6)
         cycles = link.read_words(SYS_RUN_CYCLES, 1)[0]
         r = Result(name, "PASS", dbg0=dbg0, dbg1=dbg1, cycles=cycles, instret=instret, core_status=core_status,
-                   variant=test.get("variant", ""), perf=read_perf(link), wall_s=wall)
+                   variant=test.get("variant", ""), perf=read_perf(link), run_s=wall)
         if dbg0 == 0:
             reason = (core_status >> 1) & 3
             if reason == 1:

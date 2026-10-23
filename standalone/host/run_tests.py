@@ -22,7 +22,7 @@ from atlas_host import PERF_NAMES, Atlas, LinkError, Result, SimLink, TsiLink  #
 import expect  # noqa: E402
 
 FIELDS = ["name", "variant", "status", "cycles", "instret", "dbg0", "dbg1", "util", "checked", "mismatches",
-          "wall_s", "detail"]
+          "run_s", "wall_s", "detail"]
 
 
 def run_sim(args):
@@ -44,7 +44,8 @@ def run_sim(args):
 def row(r, wall):
     d = {k: getattr(r, k) for k in FIELDS if hasattr(r, k)}
     d["util"] = " ".join(f"{k}={v}%" for k, v in r.util.items())
-    d["wall_s"] = f"{wall:.1f}"
+    d["wall_s"] = f"{wall:.1f}"                 # the whole test, with loading DRAM and IMEM
+    d["run_s"] = f"{r.run_s:.4f}"               # from the start to the completion poll
     return d
 
 
