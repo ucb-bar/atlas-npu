@@ -105,7 +105,7 @@ class AtlasCore(
   csrfile.io.csr <> scalar.io.csrPort
   pmuRegistry.foreach { registry =>
     def event(name: String, increment: UInt, unit: String, description: String): Unit =
-      registry.register(name, increment, unit, description)
+      registry.register(name, Mux(csrfile.io.execRun, increment, 0.U), unit, description)
 
     event("core.run_cycles", csrfile.io.execRun.asUInt, "cycles",
       "Cycles while Atlas execution is enabled")
