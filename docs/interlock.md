@@ -96,13 +96,18 @@ order, the architectural meaning on an interlocked core. A `--spaced` copy of ea
 `DELAY 200` after every tensor instruction, so nothing overlaps there. A program that fails in
 both copies points at the model's arithmetic, not at the interlock.
 
-| RTL, Verilator with all assertions | `default` (MXU0 + MXU1) | `ipt` | `ipt-nvfp4` (+ NVFP4) |
+| Run (Verilator with all assertions, unless VCU118) | `default` (MXU0 + MXU1) | `ipt` | `ipt-nvfp4` (+ NVFP4) |
 |---|---|---|---|
-| before (d6ef8b3), 64 programs × 400 instructions | 0 / 64: 51 port, 15 pop-WAR, 8 push-RAW assertions | | |
+| before (d6ef8b3), 64 MXU1 programs × 400 instructions | 0 / 64: 51 port, 15 pop-WAR, 8 push-RAW assertions | | |
 | now, 64 programs × 400 instructions + the directed test | 65 / 65 | 63 / 65 | 65 / 65 |
-| now, the same 64 programs spaced | see below | 62 / 64 | see below |
+| now, the same 64 programs spaced | 64 / 64 | 62 / 64 | 64 / 64 |
+| now, 256 programs × 600 instructions (seeds 2000-2255) | 251 / 256 | 254 / 256 | 253 / 256 |
+| now, the same 256 programs spaced | 251 / 256 | 254 / 256 | 253 / 256 |
+| now, VCU118 (DDR4 bitstream), 64 programs + directed | 65 / 65 | 63 / 65 | see standalone/README.md |
 
-On `ipt`, two programs (seeds 1000 and 1028) fail identically in both copies. Bisection puts
+Every failing program fails the same way in its spaced copy: same addresses, same values. So no
+program fails only without `DELAY`, over 963 programs and about 540,000 random tensor
+instructions. On `ipt`, two programs (seeds 1000 and 1028) were bisected, and they fail identically in both copies. Bisection puts
 the first difference at one instruction each: a `vsub.bf16` result one BF16 ULP from the RTL's,
 and a `vmatmul.acc.mxu1` onto a large BF16 partial sum. npu_model's `RtlNumerics` and ditflow's
 fast numerics agree with each other there, so the model's arithmetic is off in these two corner

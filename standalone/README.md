@@ -147,6 +147,23 @@ The DDR4 calibrates; host reads and writes across the 2 GiB match. The 126 tests
 as expected (121 pass, 5 illegal), with cycle counts within -1% to +8% of the on-chip build's.
 apps/dit's sampler (3.75 MiB) and whole policy (8.1 MiB) run bit-exact with their goldens.
 
+### DDR4 bitstreams with the performance counters (2026-10-22, commit 50977db)
+
+`bitstreams/AtlasStandaloneDDR4-v05/atlas_standalone_vcu118_<config>_ddr4_50mhz.bit`, Vivado 2024.1,
+50 MHz. The tests are the 126-test suite (original kernels, then every `DELAY` removed) and
+the randomized hazard test (`apps/dit/ditflow/hazfuzz.py`, 64 programs and the directed test).
+
+| Config | WNS / WHS (ns) | LUTs | FFs | RAMB36 | DSP | suite, board | hazard test, board | DiT 100 steps | policy |
+|---|---|---|---|---|---|---|---|---|---|
+| `default` | +0.022 / +0.009 | 619K (52%) | 118K | 537.5 | 115 | 126 / 126, 126 / 126 as expected | 65 / 65 | 47,039,818 cycles, bit-exact | 57,307,319 cycles, bit-exact |
+| `ipt` | +0.381 / +0.011 | 357K (30%) | 75K | 529.5 | 115 | 126 / 126, 126 / 126 as expected | 63 / 65 (2: model numerics) | 47,041,500 cycles, bit-exact | 57,307,630 cycles, bit-exact |
+| `ipt-nvfp4` | see below | | | | | | | | |
+
+The performance counters cost 373 LUTs and 1.2K flip-flops in the CSR block. On tests of
+1,000 cycles or more, board cycle counts are within ±5% of the Verilator model's (median 0%):
+the model's DRAM has a fixed 8-cycle latency, the DDR4 does not. `run_tests.py` writes each
+run's counters to `perf.csv`; the spec's §8.2 tabulates them.
+
 The Verilator model keeps the behavioral DRAM, 64 MiB by default (`DRAM_LINE_W=21`; 17 makes it
 the 4 MiB of the old on-chip build), and its `B <addr> <file>` command (used by `SimLink` for every DRAM preload) loads data
 through a backdoor in no simulated time. A 3.4 MiB image used to cost 35 minutes of simulated
