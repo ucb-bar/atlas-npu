@@ -170,6 +170,13 @@ model runs it in minutes. `build --policy` builds the whole policy (encoder + sa
 image needs the DDR4 board or a Verilator model with `DRAM_LINE_W=21`. `golden` also writes `bundle_checked.json`, which is the bundle with
 the golden as its DRAM checks, so `standalone/host/run_tests.py --sim/--board` can verify it.
 
+`flow run` also reads the performance counters (docs/perf-counters.md) after the halt and stores
+them, with each unit's utilization, in `board.pt` / `sim.pt` and `report.json`.
+
+`python -m ditflow.hazfuzz OUT --units mxu1,mxu0` writes randomized hazard-test bundles for
+`run_tests.py`: random dependent tensor-instruction streams without `DELAY`, checked against the
+functional model (docs/interlock.md, "Randomized hazard test").
+
 ## Files
 
 - `ditflow/model.py`: the LeRobot module with random weights, the FP32 sampler, and the forward
@@ -184,6 +191,7 @@ the golden as its DRAM checks, so `standalone/host/run_tests.py --sim/--board` c
 - `ditflow/compiler.py`: the sampler program.
 - `ditflow/funcsim.py`, `ditflow/numerics.py`: the functional model.
 - `ditflow/flow.py`: the command line.
+- `ditflow/hazfuzz.py`: the randomized hazard test of the interlock.
 
 ## Limits
 

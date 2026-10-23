@@ -1,4 +1,4 @@
-// Standalone Atlas SoC: AtlasCore, an on-chip DRAM, and a TL-UL host fabric. A host (the UART
+// Standalone Atlas SoC: AtlasCore, its DRAM ports, and a TL-UL host fabric. A host (the UART
 // TSI target on the board, the simulation driver in Verilator) replaces the CPU: it loads the
 // kernel into IMEM and the data into DRAM, starts the core through EXEC_CONTROL, polls DBG0, and
 // reads the results back.
@@ -7,8 +7,9 @@
 //   0x0002_0000 - 0x0003_FFFF  Atlas IMEM  128 KiB (reads stall while the core runs)
 //   0x0004_0000 - 0x0004_0FFF  Atlas CSR   CYCLE, INSTCNT, STATUS, ILLEGAL_PC, DBG0, DBG1, EXEC_CONTROL
 //   0x2000_0000 - 0x2017_FFFF  Atlas VMEM  1.5 MiB (0x2018_0000 - 0x201F_FFFF is denied)
-//   0x8000_0000 - 0xFFFF_FFFF  DRAM        2^DRAM_LINE_W x 32 B, aliased over the window
-//                                          (EXT_DRAM: the ext_* ports, 2 GiB of DDR4 on the VCU118)
+//   0x8000_0000 - 0xFFFF_FFFF  DRAM        EXT_DRAM (the VCU118): the ext_* ports, 2 GiB of DDR4;
+//                                          otherwise (the Verilator model) 2^DRAM_LINE_W x 32 B
+//                                          of atlas_dram, aliased over the window
 //
 // The DMA engine reaches the same DRAM through the second memory port. With EXT_DRAM both DRAM
 // ports leave the SoC (atlas_ddr4_dram in vcu118_atlas_top). Unmapped accesses get a denied

@@ -19,7 +19,7 @@ import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters}
 
 import atlas.common._
 import atlas.scalar.{ScalarCore, ScalarISA, VpuStatus, AtlasMemMap,
-                      CSRFile, LsuCmd, InstrMem, ImemFetchPort, DmaCmd,
+                      CSRFile, PerfCounters, LsuCmd, InstrMem, ImemFetchPort, DmaCmd,
                       MxuCmd => ScalarMxuCmd, VpuCmd, XluCmd,
                       MregBankTracker}
 import atlas.ipt.InnerProductTreesTop
@@ -364,6 +364,34 @@ class AtlasCore(
   // ==========================================================================
   // Debug
   // ==========================================================================
+
+  // Performance counter events (CSRFile, PerfCounters.names). They count while the core runs
+  // and after it halts until every unit is idle: a halt does not wait for running units, and a
+  // kernel may ecall while its last matmul or DMA store is still in flight.
+  private val slot0Busy = mxu0.map(m => m.io.dataBusy || m.io.computeBusy).orElse(nv.map(_.io.busy)).getOrElse(false.B)
+  private val unitsBusy = slot0Busy || mxu1.io.dataBusy || mxu1.io.computeBusy || vpu.io.busy || xlu.io.busy ||
+    lsu.io.scalarBusy || lsu.io.vecBusy || dma.io.channelBusy.asUInt.orR
+  private val run = scalar.io.perf.running || unitsBusy
+  private val slot0Feed = mxu0.map(_.io.feeding).orElse(nv.map(_.io.feeding)).getOrElse(false.B)
+  private val perfEvents: Seq[Bool] = Seq(
+    run,
+    scalar.io.perf.issue,
+    scalar.io.perf.stallUnit,
+    scalar.io.perf.stallData,
+    scalar.io.perf.stallDma,
+    scalar.io.perf.stallDelay,
+    run && slot0Busy,
+    run && slot0Feed,
+    run && (mxu1.io.dataBusy || mxu1.io.computeBusy),
+    run && mxu1.io.feeding,
+    run && vpu.io.busy,
+    run && xlu.io.busy,
+    run && lsu.io.vloadBusy,
+    run && lsu.io.vstoreBusy,
+    run && dma.io.channelBusy.asUInt.orR,
+    run && io.dmaTL.d.fire)
+  require(perfEvents.size == PerfCounters.num)
+  csrfile.io.perfEvents := VecInit(perfEvents)
 
   // Slot 0 busy bits report the systolic array or the NVFP4 MXU.
   io.dbg.mxu0DataBusy := mxu0.map(_.io.dataBusy).getOrElse(false.B)

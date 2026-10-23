@@ -31,6 +31,15 @@ CSR_DBG0 = CSR_BASE + 0x10
 CSR_DBG1 = CSR_BASE + 0x14
 CSR_EXEC_CONTROL = CSR_BASE + 0x18
 
+# Performance counters (CSRFile.scala, PerfCounters): 64-bit, counting while the core runs.
+CSR_PERF_RESET = CSR_BASE + 0x100     # write 1 to bit i: clear counter i
+CSR_PERF_INHIBIT = CSR_BASE + 0x104   # bit i = 1: counter i stops
+CSR_PERF_NUM = CSR_BASE + 0x108
+CSR_PERF_BASE = CSR_BASE + 0x200      # counter i at + 8 i (low word), + 8 i + 4 (high word)
+PERF_NAMES = ["cycles", "instret", "stall_unit", "stall_data", "stall_dma", "stall_delay",
+              "mxu0_busy", "mxu0_feed", "mxu1_busy", "mxu1_feed", "vpu_busy", "xlu_busy",
+              "vload_busy", "vstore_busy", "dma_busy", "dma_beats"]
+
 SYS_ID = 0x00
 SYS_FLAGS = 0x08
 SYS_CLK_HZ = 0x14
@@ -226,6 +235,25 @@ def runs(pairs):
     return out
 
 
+def read_perf(link):
+    """The performance counters by name, or {} on a bitstream without them (PERF_NUM reads 0)."""
+    if link.read_words(CSR_PERF_NUM, 1)[0] != len(PERF_NAMES):
+        return {}
+    w = link.read_words(CSR_PERF_BASE, 2 * len(PERF_NAMES))
+    return {n: w[2 * i] | w[2 * i + 1] << 32 for i, n in enumerate(PERF_NAMES)}
+
+
+def utilization(perf):
+    """Each counter as % of the run's cycles (dma_beats: bytes per cycle)."""
+    c = perf.get("cycles") or 0
+    if not c:
+        return {}
+    u = {n: 100.0 * v / c for n, v in perf.items() if n not in ("cycles", "instret", "dma_beats")}
+    u["ipc"] = perf["instret"] / c
+    u["dma_bytes_per_cycle"] = 32.0 * perf["dma_beats"] / c
+    return u
+
+
 @dataclass
 class Result:
     name: str
@@ -239,6 +267,8 @@ class Result:
     mismatches: int = 0
     checked: int = 0
     util: dict = field(default_factory=dict)
+    perf: dict = field(default_factory=dict)   # performance counters (read_perf)
+    wall_s: float = 0.0                         # host time from start to halt
     detail: str = ""
 
 
@@ -277,14 +307,17 @@ class Atlas:
 
         link.write_words(CSR_CYCLE, [0, 0])  # CYCLE and INSTCNT then count this run only
         link.write_words(SYS_RUN_CYCLES, [0])  # cycles until the core halts (ECALL)
+        link.write_words(CSR_PERF_RESET, [0xFFFF_FFFF])  # every performance counter to 0
+        t_start = time.time()
         link.write_words(CSR_EXEC_CONTROL, [1])
         dbg0, waited = link.poll(CSR_DBG0, budget)
+        wall = time.time() - t_start
         link.write_words(CSR_EXEC_CONTROL, [0])
         # Read DBG0 again: the poll may have seen it just before the kernel set it and halted.
         _, instret, core_status, illegal_pc, dbg0, dbg1 = link.read_words(CSR_CYCLE, 6)
         cycles = link.read_words(SYS_RUN_CYCLES, 1)[0]
         r = Result(name, "PASS", dbg0=dbg0, dbg1=dbg1, cycles=cycles, instret=instret, core_status=core_status,
-                   variant=test.get("variant", ""))
+                   variant=test.get("variant", ""), perf=read_perf(link), wall_s=wall)
         if dbg0 == 0:
             reason = (core_status >> 1) & 3
             if reason == 1:

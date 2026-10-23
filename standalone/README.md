@@ -12,16 +12,17 @@ host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs      
                                                  ├─ Atlas CSR         0x0004_0000
                                                  ├─ Atlas VMEM        0x2000_0000  (1.5 MiB)
                                                  └─ DRAM, port A      0x8000_0000 ─┐
-                                    AtlasCore DMA ── DRAM, port B ─────────────────┘
+                                    AtlasCore DMA ── DRAM, port B ─────────────────┴─ DDR4 bridge ─ MIG ─ 2 GiB DDR4
 ```
 
 - `chisel/`: `EmitAtlasCore` writes AtlasCore's SystemVerilog with fixed TL-UL ports, and
   `tilelink/` stands in for the three rocket-chip TileLink names AtlasCore uses. The RTL under
   `src/main/scala` is shared with the Chipyard build unchanged.
 - `rtl/`: the SoC. `tsi/` is NVFP4's UART TSI target and fabric (copied from nvfp4 `0c611e1`).
-  `atlas_dram.sv` is the DRAM stand-in: 4 MiB of UltraRAM, aliased over `0x8000_0000` up (DMA's
-  64-bit addresses fold onto it the same way); the baremetal tests use 465 KiB at `0x9000_0000`.
-  The DDR4 build replaces it with `atlas_ddr4_dram.sv` (below).
+  The board's DRAM is 2 GiB of DDR4 through `atlas_ddr4_dram.sv` and the MIG (below).
+  `atlas_dram.sv` is the Verilator model's DRAM, aliased over `0x8000_0000` up (DMA's 64-bit
+  addresses fold onto it the same way); the baremetal tests use 465 KiB at `0x9000_0000`.
+  (Until 2026-10-22 the board build could also use 4 MiB of UltraRAM; that option is gone.)
 - `sim/`: a Verilator model of `atlas_soc` with a word-level host port (no UART), and its driver.
 - `host/`: `atlas_host.py` (the host: `SimLink` for the model, `TsiLink` for the board),
   `make_bundle.py` (assembles the baremetal tests into JSON bundles), `run_tests.py`.
@@ -55,21 +56,26 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim --config ipt-n
 `--no-delay` removes every `DELAY` from the kernels (one in a branch delay slot would become a
 `NOP`). The model keeps all RTL assertions, so a hazard that got past the interlock fails the test.
 
-Bitstream (Vivado 2024.1 or later with a VU9P license on `PATH`; about 2 hours):
+Bitstream (Vivado 2024.1 or later with a VU9P license on `PATH`; about 2.5 hours):
 
 ```bash
-standalone/fpga/build_bitstream.sh build/vcu118 50 16 ipt-nvfp4   # build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_50mhz.bit
+standalone/fpga/build_bitstream.sh build/vcu118 50 16 ipt-nvfp4   # build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_ddr4_50mhz.bit
 ```
 
 Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (interface 1,
 921,600 baud). The host needs `pyuartsi`.
 
 ```bash
-vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_50mhz.bit
+vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_ddr4_50mhz.bit
 python3 standalone/host/run_tests.py --board --config ipt-nvfp4 --out build/board-nodelay build/bundle/nodelay/*.json
 ```
 
-## Results (2026-10-21)
+`run_tests.py` writes each run's performance counters (docs/perf-counters.md) to `OUT/perf.csv`.
+
+## Results (2026-10-21, on-chip DRAM)
+
+These builds predate the DDR4-only board build; the results for the current bitstreams are under
+"DDR4 DRAM" below.
 
 Bitstream `atlas_standalone_vcu118_50mhz.bit` (Vivado 2024.1, `pipeline-interlock` 18a3f1e): timing met
 at 50 MHz (WNS +0.005 ns, WHS +0.010 ns), 604K LUTs (51%), 98K FFs, 501 RAMB36, 128 URAM,
@@ -120,9 +126,8 @@ simulation.
 
 ## DDR4 DRAM
 
-`build_bitstream.sh <out> 50 16 <config> ddr4` builds `vcu118_atlas_ddr4_top`, whose DRAM is
-2 GiB of the board's DDR4 (C1 bank) instead of 4 MiB of UltraRAM. `sys_regs` DRAM_BYTES reads
-0x8000_0000, and FLAGS bit 3 is set once the memory is calibrated.
+The board build's top, `vcu118_atlas_top`, puts the DRAM in 2 GiB of the board's DDR4 (C1 bank).
+`sys_regs` DRAM_BYTES reads 0x8000_0000, and FLAGS bit 3 is set once the memory is calibrated.
 
 - The controller is the Xilinx DDR4 MIG (`fpga/vcu118_ddr4_mig.tcl`, IP `vcu118mig`). Its
   settings, pins and clocking come from Chipyard's VCU118 shell (fpga-shells), which calibrates
@@ -142,8 +147,8 @@ The DDR4 calibrates; host reads and writes across the 2 GiB match. The 126 tests
 as expected (121 pass, 5 illegal), with cycle counts within -1% to +8% of the on-chip build's.
 apps/dit's sampler (3.75 MiB) and whole policy (8.1 MiB) run bit-exact with their goldens.
 
-The Verilator model keeps the behavioral DRAM. `DRAM_LINE_W=21 sim/build.sh` makes it 64 MiB,
-and its `B <addr> <file>` command (used by `SimLink` for every DRAM preload) loads data
+The Verilator model keeps the behavioral DRAM, 64 MiB by default (`DRAM_LINE_W=21`; 17 makes it
+the 4 MiB of the old on-chip build), and its `B <addr> <file>` command (used by `SimLink` for every DRAM preload) loads data
 through a backdoor in no simulated time. A 3.4 MiB image used to cost 35 minutes of simulated
 bus writes.
 
@@ -179,15 +184,21 @@ outputs = link.read_words(0x9000_0800, 256)
 |---|---|---|
 | `0x000` | ID | `0x4154_4C53` ("ATLS") |
 | `0x004` | SCRATCH | read/write |
-| `0x008` | FLAGS | [0] TSI receive overflow, [1] bad TSI command, [2] denied access seen, [3] DRAM ready (DDR4 calibrated; 1 on-chip) |
+| `0x008` | FLAGS | [0] TSI receive overflow, [1] bad TSI command, [2] denied access seen, [3] DRAM ready (DDR4 calibrated; 1 in the Verilator model) |
 | `0x00C` | DENIED | denied (unmapped) accesses |
 | `0x010` | CYCLES | free-running cycle counter |
 | `0x014` | CLK_HZ | |
 | `0x018` | BAUD | |
-| `0x01C` | DRAM_BYTES | 4 MiB on-chip, 2 GiB DDR4 (`0x8000_0000`) |
+| `0x01C` | DRAM_BYTES | 2 GiB of DDR4 (`0x8000_0000`) on the board; the model's size in Verilator |
 | `0x020` | ATLAS | [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
 | `0x024` | FEATURES | [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 | `0x028` | LEDS | [2:0] |
 | `0x02C` | RUN_CYCLES | cycles the scalar core has run (not halted); a write clears it |
 
 Reads of IMEM stall while the scalar core runs (IMEM serves the fetch); stop the core first.
+
+## Performance counters
+
+The Atlas CSR block (`0x0004_0000`) has 16 64-bit counters: cycles, issued instructions, stall
+cycles by cause, and the busy cycles of each unit. Write 1 to bit i of PERF_RESET (`+0x100`) to
+clear counter i; counter i is at `+0x200 + 8i`. See docs/perf-counters.md.

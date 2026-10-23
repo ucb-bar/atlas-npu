@@ -54,6 +54,7 @@ class InnerProductTreesTop(
     val popBusy     = Output(Bool())
     val dataBusy    = Output(Bool())
     val computeBusy = Output(Bool())
+    val feeding     = Output(Bool())
 
     // ── Active mreg bank reports for direction-aware TRF tracking ──
     val activeReads  = Output(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
@@ -96,6 +97,7 @@ class InnerProductTreesTop(
   io.popBusy     := seq.io.popBusy
   io.dataBusy    := seq.io.dataBusy
   io.computeBusy := seq.io.computeBusy
+  io.feeding     := seq.io.feeding
 
   // ==========================================================================
   // Active mreg bank reports (forwarded from sequencer)

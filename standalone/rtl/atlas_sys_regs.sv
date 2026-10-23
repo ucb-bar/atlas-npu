@@ -3,12 +3,12 @@
 //   0x000  ID          RO  0x4154_4C53 ("ATLS")
 //   0x004  SCRATCH     RW
 //   0x008  FLAGS       RO  [0] TSI receive queue overflowed, [1] bad TSI cmd, [2] a denied access occurred,
-//                          [3] DRAM ready (DDR4 calibrated; always 1 for on-chip DRAM)
+//                          [3] DRAM ready (DDR4 calibrated; always 1 in the Verilator model)
 //   0x00C  DENIED      RO  number of denied (unmapped) accesses
 //   0x010  CYCLES      RO  free-running cycle counter
 //   0x014  CLK_HZ      RO
 //   0x018  BAUD        RO
-//   0x01C  DRAM_BYTES  RO  size of the DRAM (aliased over 0x8000_0000 up): on-chip, or 2 GiB of DDR4
+//   0x01C  DRAM_BYTES  RO  size of the DRAM (aliased over 0x8000_0000 up): 2 GiB of DDR4 on the board
 //   0x020  ATLAS       RO  [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy,
 //                          [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy
 //   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required), [1] systolic-array MXU,

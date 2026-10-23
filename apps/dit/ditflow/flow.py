@@ -188,7 +188,8 @@ def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget
         return torch.tensor(words, dtype=torch.int64).to(torch.int32).numpy().tobytes()
     res = C.read_outputs(c, read)
     res.update(_policy_cond(c, saved, read))
-    res.update({"cycles": r.cycles, "instret": r.instret, "wall_s": wall, "features": atlas.features})
+    res.update({"cycles": r.cycles, "instret": r.instret, "wall_s": wall, "features": atlas.features,
+                "run_s": r.wall_s, "perf": r.perf, "util": h.utilization(r.perf)})
     link.close()
     torch.save(res, out / f"{target}.pt")
     report(out)
@@ -223,7 +224,7 @@ def report(out: Path) -> dict:
         if gold is not None and name != "golden":
             same = {k: res.get(k) == gold.get(k) for k in ("x_hi_bits", "x_lo_bits", "trace_bits", "pooled_bits") if k in gold}
             entry["bit_exact_vs_golden"] = same
-        for k in ("cycles", "instret", "wall_s", "instructions"):
+        for k in ("cycles", "instret", "wall_s", "run_s", "instructions", "perf", "util"):
             if k in res:
                 entry[k] = res[k]
         rep[name] = entry

@@ -97,6 +97,7 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
     val scaleReadResp = Input(Vec(2, UInt(32.W)))
 
     val busy = Output(Bool())
+    val feeding = Output(Bool())   // a matmul feeds one row of A into the lanes (perf counter)
     // Registers still to be read / written after this cycle (MregBankTracker).
     val activeReads  = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
     val activeWrites = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
@@ -393,6 +394,7 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   // ==========================================================================
 
   io.busy := e0v || e1v || wv || laneVld || tagPipeV.asUInt.orR
+  io.feeding := e0Matmul
 
   val e0Next = e0n + 1.U
   val e1Next = e1n + 1.U

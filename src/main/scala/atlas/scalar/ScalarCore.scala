@@ -165,7 +165,7 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
       h := rb(dec.vd) || wb(dec.vd) || rb(dec.vd + 1.U) || wb(dec.vd + 1.U)
     }
     when(dec.is_lsu && dec.lsu_cmd === LSU_VLOAD) {
-      h := wb(dec.vd)
+      h := rb(dec.vd) || wb(dec.vd)
     }
     when(dec.xlu_cmd =/= XLU_NONE) {
       h := rb(dec.vd) || wb(dec.vd)
@@ -250,7 +250,12 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   val unitAbsent =
     (!hasMxu0.B && dec.mxu_cmd =/= MXU_NONE && !isNvCmd && dec.mxu_sel === MXUSEL_0) ||
     (!hasNvfp4.B && (isNvCmd || isScaleLsu))
-  val is_illegal = s1_valid && (dec.illegal || unitAbsent)
+  // A two-source VPU instruction streams both source pairs in the same cycles. Two different
+  // pairs in one physical bank (m_i and m_i+32 share bank i) can never be read together, so
+  // the instruction is illegal; the same pair twice is fine (one read serves both).
+  val vpuSourceBankClash = dec.vpu_cmd =/= VPU_NONE && vpuReadsSecondaryPair(dec.vpu_cmd) &&
+    dec.vs1(4, 0) === dec.vs2(4, 0) && dec.vs1 =/= dec.vs2
+  val is_illegal = s1_valid && (dec.illegal || unitAbsent || vpuSourceBankClash)
   val branch_in_delay_slot =
     pc_ctrl.io.in_delay_slot && (dec.br_type =/= BR_NONE || dec.is_jal || dec.is_jalr)
   val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
@@ -320,10 +325,12 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   val dmaNotReady = isDmaXfer && (io.dma_busy(dec.funct3) || !io.dma_can_enqueue)
 
   // ── MREG reservations and physical ports ──
-  // Reservations: no read of a register with a pending write (RAW), no
-  // write over a pending read (WAR; VLOAD is exempt, it writes each row
-  // after an earlier reader has read it) or write (WAW). Ports: m_i and
-  // m_{i+32} share one read port and one write port.
+  // Each register is a resource: no read of a register with a pending
+  // write (RAW), no write over a pending read (WAR) or write (WAW). VLOAD
+  // follows the same rules: it used to skip the WAR check on the grounds
+  // that it writes each row after an earlier reader has read it, which a
+  // VPU pair read breaks (it reads m_2k+1 only after all of m_2k).
+  // Ports: m_i and m_{i+32} share one read port and one write port.
   private val nPhys = 32
   val physReadBusy  = io.mregReadBusy(nPhys - 1, 0)  | io.mregReadBusy(2 * nPhys - 1, nPhys)
   val physWriteBusy = io.mregWriteBusy(nPhys - 1, 0) | io.mregWriteBusy(2 * nPhys - 1, nPhys)
@@ -368,7 +375,7 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
     (vpuWritesPair(dec.vpu_cmd),                                  dec.vd + 1.U))
   val mregHazard =
     mregReads.map { case (v, b) => v && (io.mregWriteBusy(b) || physReadBusy(phys(b))) }.reduce(_ || _) ||
-    mregWrites.map { case (v, b) => v && (physWriteBusy(phys(b)) || (!isVloadData && io.mregReadBusy(b))) }.reduce(_ || _)
+    mregWrites.map { case (v, b) => v && (physWriteBusy(phys(b)) || io.mregReadBusy(b)) }.reduce(_ || _)
 
   // ── VMEM banks ──
   // The LSU scalar and vector paths must never use one VMEM bank in the
@@ -427,6 +434,15 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
 
   val stall   = delay_stall || dma_wait_stall || interlock
   val s1_fire = s1_valid && !stall && !halt_now
+
+  // Performance events: one cause per stalled cycle, in this order.
+  val unitStall = mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady || dmaNotReady
+  io.perf.running    := !halted
+  io.perf.issue      := s1_fire
+  io.perf.stallDelay := !halted && delay_stall
+  io.perf.stallDma   := !halted && !delay_stall && dma_wait_stall
+  io.perf.stallUnit  := !halted && !delay_stall && !dma_wait_stall && interlock && unitStall
+  io.perf.stallData  := !halted && !delay_stall && !dma_wait_stall && interlock && !unitStall
 
   // ==============================================================
   // Software-scheduling assertions

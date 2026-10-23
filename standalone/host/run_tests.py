@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atlas_host import Atlas, LinkError, Result, SimLink, TsiLink  # noqa: E402
+from atlas_host import PERF_NAMES, Atlas, LinkError, Result, SimLink, TsiLink  # noqa: E402
 import expect  # noqa: E402
 
 FIELDS = ["name", "variant", "status", "cycles", "instret", "dbg0", "dbg1", "util", "checked", "mismatches",
@@ -104,6 +104,13 @@ def main():
                 if link.read_retries:
                     print(f"link: {link.read_retries} read chunk(s) retried after a lost byte")
                 link.close()
+
+    if any(r.perf for r in rows):     # the performance counters of every run
+        with open(out / "perf.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["name", "variant", "status"] + PERF_NAMES)
+            for r in rows:
+                w.writerow([r.name, r.variant, r.status] + [r.perf.get(n, "") for n in PERF_NAMES])
 
     passed = sum(r.status == "PASS" for r in rows)
     print(f"\nSUMMARY: {passed}/{len(rows)} passed")

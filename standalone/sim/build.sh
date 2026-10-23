@@ -5,8 +5,8 @@
 # rtl_dir is the Chisel output with assertions (default build/rtl-sim, from
 # `./mill standalone.runMain atlas.standalone.EmitAtlasCore build/rtl-sim --assertions`).
 # The UART model runs the link at 6.25 Mbaud (8 clocks per bit) instead of the board's 921,600.
-# DRAM_LINE_W=n sizes the behavioral DRAM to 2^n x 32 bytes (default 17: 4 MiB, as on-chip on the
-# board; the DDR4 board build has 2 GiB).
+# DRAM_LINE_W=n sizes the behavioral DRAM to 2^n x 32 bytes (default 21: 64 MiB; the board has
+# 2 GiB of DDR4).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -37,7 +37,7 @@ else
     srcs+=("$sa/sim/atlas_soc_sim.sv" "$sa/sim/atlas_sim.cpp")
     extra=()
 fi
-extra+=(-GDRAM_LINE_W="${DRAM_LINE_W:-17}")
+extra+=(-GDRAM_LINE_W="${DRAM_LINE_W:-21}")
 # SystemVerilog packages (dotprod_pkg of the NVFP4 MXU) must come before their users.
 shopt -s nullglob
 chisel=("$rtl"/*_pkg.sv)

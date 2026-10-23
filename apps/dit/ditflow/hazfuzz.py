@@ -1,0 +1,469 @@
+"""Randomized hazard test of the interlock.
+
+Each program is a random stream of dependent tensor instructions with no DELAY: vload, vstore,
+VPU operations, MXU push / matmul / pop, and XLU transposes, over 20 registers (m0-m11 and
+m32-m39, so m_i and m_i+32 also share a bank) and a few VMEM tiles. Instructions are biased to
+read or overwrite what the previous ones touch, so RAW, WAR and WAW hazards on MREG registers,
+weight slots, accumulators and VMEM tiles are frequent. The program ends by storing every
+register and the VMEM tiles to DRAM.
+
+The expected DRAM comes from the functional model (funcsim.py), which executes in program
+order: on an interlocked core that is the architecture's meaning. A hazard the interlock lets
+through gives a mismatch; an RTL assertion stops the Verilator run. --spaced puts DELAY 200
+after every tensor instruction, so no two overlap: a spaced program that fails points at the
+model's arithmetic, not at the interlock.
+
+Values stay finite: the generator tracks each register's type (FP8, BF16, FP32) and a bound on
+its magnitude, and only emits operations whose inputs have the right type and whose result
+stays far below the BF16 range. FP8 data never uses the NaN codes; NVFP4 scales stay small.
+
+    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1,mxu0     # default
+    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1          # ipt
+    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1,nv       # ipt-nvfp4
+    python standalone/host/run_tests.py --sim build/vl-default/atlas_sim -j 32 --out RES OUT/*.json
+"""
+import argparse
+import json
+import random
+from pathlib import Path
+
+import torch
+
+from . import layout as L
+from .asm import Builder, FP8_TILE, SEGMENT
+from .funcsim import FuncSim
+
+REGS = list(range(12)) + list(range(32, 40))
+PAIRS = [r for r in REGS if r % 2 == 0]
+QUADS = [r for r in REGS if r % 4 == 0]
+DATA_TILES = [0 * SEGMENT + i * FP8_TILE for i in range(12)] + [1 * SEGMENT + i * FP8_TILE for i in range(8)]
+SCALE_TILES = [3 * SEGMENT + i * 128 for i in range(8)]        # 128 B: one register's NVFP4 scales
+OUT_BASE = 2 * SEGMENT
+MAX_BOUND = 60          # log2 of the largest magnitude a BF16 value may reach
+FP8_BOUND = 9           # 448 < 2**9
+NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
+
+VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vmaximum.bf16")
+VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16")
+
+
+def fp8_codes(n: int, gen: torch.Generator) -> torch.Tensor:
+    """Random finite E4M3 codes with |value| <= 8 (exponent field <= 10), both signs."""
+    exp = torch.randint(0, 11, (n,), generator=gen)
+    man = torch.randint(0, 8, (n,), generator=gen)
+    sign = torch.randint(0, 2, (n,), generator=gen)
+    return (sign << 7 | exp << 3 | man).to(torch.uint8)
+
+
+def ue4m3_codes(n: int, gen: torch.Generator) -> torch.Tensor:
+    """Random UE4M3 scales in [2^-6, 15] (exponent field 1-10), never NaN."""
+    exp = torch.randint(1, 11, (n,), generator=gen)
+    man = torch.randint(0, 8, (n,), generator=gen)
+    return (exp << 3 | man).to(torch.uint8)
+
+
+class Gen:
+    def __init__(self, seed: int, length: int, units=("mxu1",), spaced: bool = False):
+        self.rng = random.Random(seed)
+        self.gen = torch.Generator().manual_seed(seed)
+        self.length = length
+        self.fp8_units = [u for u in units if u in ("mxu0", "mxu1")]
+        self.nv = "nv" in units
+        self.spaced = spaced
+        self.b = Builder()
+        self.b.begin()
+        self.rtype: dict[int, str] = {}        # per register: "fp8", "bf16" or "fp32"
+        self.rbound: dict[int, float] = {}     # and a log2 magnitude bound
+        self.ttype: dict[int, str] = {}        # VMEM tiles
+        self.tbound: dict[int, float] = {}
+        # Per MXU: accumulator bounds (None: undefined) and weight slots written.
+        self.acc = {u: {0: None, 1: None} for u in self.fp8_units + (["nv"] if self.nv else [])}
+        self.wslot = {u: {0: False, 1: False} for u in self.acc}
+        self.recent: list[int] = []            # registers the last instructions touched
+        self.stats = {"ops": 0}
+
+    # -- bookkeeping --------------------------------------------------------------------------
+    def touch(self, *regs):
+        self.recent = (list(regs) + self.recent)[:6]
+
+    def pick(self, cands, bias=0.6):
+        cands = list(cands)
+        if not cands:
+            return None
+        near = [c for c in cands if c in self.recent or (c ^ 1) in self.recent or (c + 32) % 64 in self.recent]
+        if near and self.rng.random() < bias:
+            return self.rng.choice(near)
+        return self.rng.choice(cands)
+
+    def typed(self, regs, t, n=1, max_bound=MAX_BOUND):
+        return [r for r in regs if all(self.rtype.get(r + i) == t and self.rbound[r + i] <= max_bound for i in range(n))]
+
+    def bf16_pairs(self, max_bound=MAX_BOUND):
+        return self.typed(PAIRS, "bf16", 2, max_bound)
+
+    def fp8_regs(self):
+        return self.typed(REGS, "fp8")
+
+    def set_regs(self, r, n, t, bound):
+        for i in range(n):
+            self.rtype[r + i], self.rbound[r + i] = t, bound
+
+    def count(self, key):
+        self.stats[key] = self.stats.get(key, 0) + 1
+        self.stats["ops"] += 1
+
+    def spacer(self):
+        if self.spaced:
+            self.b.op("DELAY 200")
+
+    def emit(self, mnemonic, *operands):
+        self.b.v(mnemonic, *operands)
+        self.count(mnemonic)
+        self.spacer()
+
+    # -- data ---------------------------------------------------------------------------------
+    def preload(self):
+        b = self.b
+        for i, t in enumerate(DATA_TILES):
+            if i % 2 == 0:
+                data = fp8_codes(1024, self.gen).numpy().tobytes()
+                self.ttype[t], self.tbound[t] = "fp8", FP8_BOUND
+            else:
+                v = torch.randn(32, 16, generator=self.gen) * 2
+                data = v.to(torch.bfloat16).view(torch.int16).numpy().tobytes()
+                self.ttype[t], self.tbound[t] = "bf16", 4
+            addr = b.dram.add(f"tile{i}", data)
+            b.dma.load(f"in{i}", t, addr, FP8_TILE)
+        if self.nv:
+            addr = b.dram.add("scales", ue4m3_codes(128 * len(SCALE_TILES), self.gen).numpy().tobytes())
+            b.dma.load("scales", SCALE_TILES[0], addr, 128 * len(SCALE_TILES))
+            b.dma.wait("scales")
+        for i in range(len(DATA_TILES)):
+            b.dma.wait(f"in{i}")
+        # Every register gets defined data (and NVFP4 scales) before the random part.
+        for j, r in enumerate(REGS):
+            t = DATA_TILES[j % len(DATA_TILES)]
+            b.vload(r, t)
+            self.set_regs(r, 1, self.ttype[t], self.tbound[t])
+            if self.nv:
+                b.op(f"vload.scale m{r}, {b._vaddr(SCALE_TILES[j % len(SCALE_TILES)])}")
+        for e, raw in enumerate((121, 124, 127, 129)):
+            b._erf[raw] = e
+
+    # -- one random instruction -----------------------------------------------------------------
+    def step(self):
+        r = self.rng.random()
+        if r < 0.17:
+            return self.op_vload()
+        if r < 0.27:
+            return self.op_vstore()
+        if r < 0.52:
+            return self.op_vpu()
+        if r < 0.90:
+            if self.nv and self.rng.random() < 0.45:
+                return self.op_nv()
+            return self.op_mxu(self.rng.choice(self.fp8_units))
+        return self.op_xlu()
+
+    def op_vload(self):
+        dst = self.pick(REGS)
+        t = self.rng.choice(DATA_TILES)
+        self.b.vload(dst, t)
+        self.count("vload")
+        self.spacer()
+        self.set_regs(dst, 1, self.ttype[t], self.tbound[t])
+        self.touch(dst)
+        return True
+
+    def op_vstore(self):
+        src = self.pick(REGS)
+        t = self.rng.choice(DATA_TILES)
+        self.b.vstore(src, t)
+        self.count("vstore")
+        self.spacer()
+        self.ttype[t], self.tbound[t] = self.rtype[src], self.rbound[src]
+        self.touch(src)
+        return True
+
+    def op_vpu(self):
+        rng = self.rng
+        kind = rng.random()
+        if kind < 0.1:
+            dst = self.pick(PAIRS)
+            val = rng.choice((0.5, -1.25, 3.0, 0.0078125))
+            self.b.vli(dst, L.bf16_bits(val))
+            self.count("vli.all")
+            self.spacer()
+            self.set_regs(dst, 2, "bf16", 2)
+            self.touch(dst, dst + 1)
+            return True
+        if kind < 0.65:
+            op = rng.choice(VPU_BINARY)
+            srcs = self.bf16_pairs()
+            a, c = self.pick(srcs), self.pick(srcs)
+            # Two different source pairs in one physical bank are an illegal instruction.
+            if a is None or (a % 32 == c % 32 and a != c):
+                return False
+            ba, bc = self.rbound[a], self.rbound[c]
+            bound = ba + bc if op == "vmul.bf16" else max(ba, bc) + (0 if op == "vmaximum.bf16" else 1)
+            if bound > MAX_BOUND:
+                return False
+            dst = self.pick(PAIRS)
+            self.emit(op, f"m{dst}", f"m{a}", f"m{c}")
+            self.set_regs(dst, 2, "bf16", bound)
+            self.touch(dst, dst + 1, a, a + 1, c, c + 1)
+            return True
+        op = rng.choice(VPU_UNARY)
+        a = self.pick(self.bf16_pairs())
+        if a is None:
+            return False
+        ba = self.rbound[a]
+        bound = {"vsquare.bf16": 2 * ba, "vredsum.row.bf16": ba + 5, "vredmax.row.bf16": ba}[op]
+        if bound > MAX_BOUND:
+            return False
+        dst = self.pick(PAIRS)
+        self.emit(op, f"m{dst}", f"m{a}")
+        self.set_regs(dst, 2, "bf16", max(bound, 1))
+        self.touch(dst, dst + 1, a, a + 1)
+        return True
+
+    def op_mxu(self, u):
+        rng = self.rng
+        acc, ws = self.acc[u], self.wslot[u]
+        kind = rng.random()
+        if kind < 0.2:                                           # weight push
+            src = self.pick(self.fp8_regs())
+            if src is None:
+                return False
+            w = rng.randrange(2)
+            self.emit(f"vmatpush.weight.{u}", f"w{w}", f"m{src}")
+            ws[w] = True
+            self.touch(src)
+            return True
+        if kind < 0.55:                                          # matmul
+            src = self.pick(self.fp8_regs())
+            w, a = rng.randrange(2), rng.randrange(2)
+            if src is None or not ws[w]:
+                return False
+            new = 2 * FP8_BOUND + 5
+            if rng.random() < 0.5 and acc[a] is not None and acc[a] < MAX_BOUND - 1:
+                self.emit(f"vmatmul.acc.{u}", f"acc{a}", f"m{src}", f"w{w}")
+                acc[a] = max(acc[a], new) + 1
+            else:
+                self.emit(f"vmatmul.{u}", f"acc{a}", f"m{src}", f"w{w}")
+                acc[a] = new
+            self.touch(src)
+            return True
+        if kind < 0.7:                                           # accumulator push from a BF16 pair
+            src = self.pick(self.bf16_pairs())
+            if src is None:
+                return False
+            a = rng.randrange(2)
+            self.emit(f"vmatpush.acc.bf16.{u}", f"acc{a}", f"m{src}")
+            acc[a] = self.rbound[src]
+            self.touch(src, src + 1)
+            return True
+        a = rng.randrange(2)                                     # pops
+        if acc[a] is None:
+            return False
+        if rng.random() < 0.5:
+            dst = self.pick(PAIRS)
+            self.emit(f"vmatpop.bf16.acc.{u}", f"m{dst}", f"acc{a}")
+            self.set_regs(dst, 2, "bf16", max(acc[a], 1))
+            self.touch(dst, dst + 1)
+        else:
+            dst = self.pick(REGS)
+            self.emit(f"vmatpop.fp8.acc.{u}", f"m{dst}", f"acc{a}", f"e{rng.randrange(4)}")
+            self.set_regs(dst, 1, "fp8", FP8_BOUND)
+            self.touch(dst)
+        return True
+
+    def op_nv(self):
+        """NVFP4 MXU. Any register is valid E2M1 data, and every register's scales stay valid."""
+        rng, b = self.rng, self.b
+        acc, ws = self.acc["nv"], self.wslot["nv"]
+        kind = rng.random()
+        if kind < 0.12:                                          # scale transfers
+            r, t = self.pick(REGS), rng.choice(SCALE_TILES)
+            op = "vload.scale" if rng.random() < 0.6 else "vstore.scale"
+            b.op(f"{op} m{r}, {b._vaddr(t)}")
+            self.count(op)
+            self.spacer()
+            self.touch(r)
+            return True
+        if kind < 0.3:                                           # weight push
+            src = self.pick(REGS)
+            w = rng.randrange(2)
+            self.emit("vmatpush.weight.nv", f"w{w}", f"m{src}")
+            ws[w] = True
+            self.touch(src)
+            return True
+        if kind < 0.6:                                           # matmul
+            src = self.pick(REGS)
+            w, a = rng.randrange(2), rng.randrange(2)
+            if not ws[w]:
+                return False
+            if rng.random() < 0.5 and acc[a] is not None and acc[a] < MAX_BOUND - 1:
+                self.emit("vmatmul.acc.nv", f"acc{a}", f"m{src}", f"w{w}")
+                acc[a] = max(acc[a], NV_BOUND) + 1
+            else:
+                self.emit("vmatmul.nv", f"acc{a}", f"m{src}", f"w{w}")
+                acc[a] = NV_BOUND
+            self.touch(src)
+            return True
+        if kind < 0.75:                                          # accumulator push: BF16 pair or FP32 quad
+            a = rng.randrange(2)
+            if rng.random() < 0.5:
+                src = self.pick(self.bf16_pairs())
+                if src is None:
+                    return False
+                self.emit("vmatpush.acc.bf16.nv", f"acc{a}", f"m{src}")
+                acc[a] = self.rbound[src]
+                self.touch(src, src + 1)
+            else:
+                src = self.pick(self.typed(QUADS, "fp32", 4))
+                if src is None:
+                    return False
+                self.emit("vmatpush.acc.fp32.nv", f"acc{a}", f"m{src}")
+                acc[a] = self.rbound[src]
+                self.touch(*range(src, src + 4))
+            return True
+        a = rng.randrange(2)                                     # pops
+        if acc[a] is None:
+            return False
+        if rng.random() < 0.5:
+            dst = self.pick(PAIRS)
+            self.emit("vmatpop.bf16.acc.nv", f"m{dst}", f"acc{a}")
+            self.set_regs(dst, 2, "bf16", max(acc[a], 1))
+            self.touch(dst, dst + 1)
+        else:
+            dst = self.pick(QUADS)
+            self.emit("vmatpop.fp32.acc.nv", f"m{dst}", f"acc{a}")
+            self.set_regs(dst, 4, "fp32", max(acc[a], 1))
+            self.touch(*range(dst, dst + 4))
+        return True
+
+    def op_xlu(self):
+        src = self.pick(self.fp8_regs())
+        if src is None:
+            return False
+        dst = self.pick(REGS)
+        self.emit("vtrpose.xlu", f"m{dst}", f"m{src}")
+        self.set_regs(dst, 1, "fp8", FP8_BOUND)
+        self.touch(dst, src)
+        return True
+
+    # -- the whole program --------------------------------------------------------------------
+    def build(self):
+        self.preload()
+        n = 0
+        while n < self.length:
+            if self.step():
+                n += 1
+        b = self.b
+        # Accumulators: pop each defined one into a pair, then store every register (and scales).
+        pair = 0
+        for u, accs in self.acc.items():
+            for a, bound in accs.items():
+                if bound is not None:
+                    self.emit(f"vmatpop.bf16.acc.{u}", f"m{PAIRS[pair]}", f"acc{a}")
+                    pair += 1
+        for j, r in enumerate(REGS):
+            b.vstore(r, OUT_BASE + j * FP8_TILE)
+        n_out = len(REGS) * FP8_TILE
+        if self.nv:
+            for j, r in enumerate(REGS):
+                b.op(f"vstore.scale m{r}, {b._vaddr(OUT_BASE + n_out + j * 128)}")
+            n_out += len(REGS) * 128
+        out_regs = b.dram.reserve("out.regs", n_out)
+        b.dma.store_now(OUT_BASE, out_regs, n_out)
+        outs = [(OUT_BASE, out_regs, n_out)]
+        for s in (0, 1):
+            n_tiles = sum(1 for t in DATA_TILES if t // SEGMENT == s)
+            d = b.dram.reserve(f"out.vmem{s}", n_tiles * FP8_TILE)
+            b.dma.store_now(s * SEGMENT, d, n_tiles * FP8_TILE)
+            outs.append((s * SEGMENT, d, n_tiles * FP8_TILE))
+        if self.nv:
+            d = b.dram.reserve("out.scales", 128 * len(SCALE_TILES))
+            b.dma.store_now(SCALE_TILES[0], d, 128 * len(SCALE_TILES))
+            outs.append((SCALE_TILES[0], d, 128 * len(SCALE_TILES)))
+        return b.finish(), outs
+
+
+def make(seed: int, length: int, units=("mxu1",), spaced: bool = False) -> dict:
+    from .flow import assemble, preload
+    g = Gen(seed, length, units, spaced)
+    source, outs = g.build()
+    sim = FuncSim(source, g.b.dram.blobs, g.b.dram.size)
+    sim.run()
+    assert sim.dbg[0] == 1
+    check = []
+    for _, dram, nbytes in outs:
+        data = sim.read_dram(dram, nbytes)
+        words = torch.frombuffer(bytearray(data), dtype=torch.int32).numpy().astype("uint32").tolist()
+        check.append([dram, words])
+    words = assemble(source)
+    tag = "+".join(units) + (" spaced" if spaced else "")
+    return {"name": f"hazfuzz_{seed:04d}", "variant": f"{length} ops {tag}", "program": words,
+            "preload": preload(g.b.dram.blobs), "check": check, "perf": {}, "timeout": None,
+            "source": source, "stats": g.stats}
+
+
+def directed_vload_war() -> dict:
+    """vload into the second register of a pair that a VPU instruction still reads.
+
+    vadd.bf16 m8, m2, m6 reads m2 for 32 cycles, then m3. A vload of m3 right after it must wait
+    for that read (WAR); if it does not, m9 = Z + B_hi instead of A_hi + B_hi."""
+    from .flow import assemble, preload
+    b = Builder()
+    b.begin()
+    gen = torch.Generator().manual_seed(1)
+    tiles = {}
+    for i, name in enumerate(("a0", "a1", "b0", "b1", "z")):
+        v = torch.randn(32, 16, generator=gen) * 2
+        tiles[name] = i * FP8_TILE
+        addr = b.dram.add(name, v.to(torch.bfloat16).view(torch.int16).numpy().tobytes())
+        b.dma.load_now(tiles[name], addr, FP8_TILE, block=name)
+    b.vload(2, tiles["a0"]); b.vload(3, tiles["a1"])
+    b.vload(6, tiles["b0"]); b.vload(7, tiles["b1"])
+    b.v("vadd.bf16", "m8", "m2", "m6")
+    b.vload(3, tiles["z"])
+    b.vstore(8, OUT_BASE); b.vstore(9, OUT_BASE + FP8_TILE); b.vstore(3, OUT_BASE + 2 * FP8_TILE)
+    out = b.dram.reserve("out", 3 * FP8_TILE)
+    b.dma.store_now(OUT_BASE, out, 3 * FP8_TILE)
+    source = b.finish()
+    sim = FuncSim(source, b.dram.blobs, b.dram.size)
+    sim.run()
+    words = torch.frombuffer(bytearray(sim.read_dram(out, 3 * FP8_TILE)), dtype=torch.int32).numpy().astype("uint32").tolist()
+    return {"name": "hazard_vload_war_vpu_pair", "variant": "directed", "program": assemble(source),
+            "preload": preload(b.dram.blobs), "check": [[out, words]], "perf": {}, "timeout": None, "source": source}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("out", type=Path)
+    ap.add_argument("--count", type=int, default=64)
+    ap.add_argument("--length", type=int, default=400)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--units", default="mxu1", help="comma-separated: mxu0, mxu1, nv")
+    ap.add_argument("--spaced", action="store_true", help="DELAY 200 after every tensor instruction")
+    ap.add_argument("--directed", action="store_true", help="also write the directed hazard tests")
+    a = ap.parse_args(argv)
+    units = tuple(a.units.split(","))
+    a.out.mkdir(parents=True, exist_ok=True)
+    if a.directed:
+        t = directed_vload_war()
+        (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
+        (a.out / f"{t['name']}.S").write_text(t["source"])
+    total = {}
+    for i in range(a.count):
+        t = make(a.seed + i, a.length, units, a.spaced)
+        (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
+        (a.out / f"{t['name']}.S").write_text(t["source"])
+        for k, v in t["stats"].items():
+            total[k] = total.get(k, 0) + v
+    print(f"{a.count} programs in {a.out}:", ", ".join(f"{k} {v}" for k, v in sorted(total.items())))
+
+
+if __name__ == "__main__":
+    main()

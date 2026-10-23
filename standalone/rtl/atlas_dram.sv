@@ -1,4 +1,5 @@
-// On-chip stand-in for DRAM: 2^LINE_W lines of 32 bytes in a two-port memory.
+// The DRAM of the Verilator model: 2^LINE_W lines of 32 bytes in a two-port memory. (The VCU118
+// build has the board's DDR4 instead: atlas_ddr4_dram, vcu118_atlas_top.)
 //
 //   port A  the host fabric (wa_t/wd_t), one transaction at a time
 //   port B  AtlasCore's DMA client: single-beat Get and PutFullData, up to QD requests in flight,
@@ -7,8 +8,8 @@
 // Both ports take the line index from address bits [LINE_W+4:5], so the whole DRAM window
 // (0x8000_0000 up) and DMA's 64-bit {dma.base, x[rs]} addresses alias onto the memory.
 //
-// The FPGA build uses UltraRAM through XPM (true dual port, no_change write mode, byte writes);
-// simulation uses a behavioral array with the same read latency.
+// Synthesis would map it to UltraRAM through XPM (true dual port, no_change write mode, byte
+// writes); simulation uses a behavioral array with the same read latency.
 module atlas_dram
     import tl_pkg::*;
 #(

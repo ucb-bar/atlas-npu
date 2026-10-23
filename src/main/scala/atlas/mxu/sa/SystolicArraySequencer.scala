@@ -98,6 +98,7 @@ class SystolicArraySequencer(
     val popBusy     = Output(Bool())
     val dataBusy    = Output(Bool())
     val computeBusy = Output(Bool())
+    val feeding     = Output(Bool())   // a matmul reads one row of A this cycle (perf counter)
 
     // ── Active mreg bank reports for direction-aware TRF tracking ──
     val activeReads  = Output(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
@@ -379,26 +380,23 @@ class SystolicArraySequencer(
     "SA: Pop issued before previous compute's row-0 writeback")
 
   // ── Mreg bank conflicts ──
+  // An engine counts as using its register while it will still access it after this cycle,
+  // as io.activeReads / io.activeWrites report it to the scalar core's interlock: a command
+  // issued now accesses MREG from the next cycle on, so an engine on its last row is done.
+  private def readsNow(r: UInt): Bool =
+    (!p0Boundary && r === p0Cmd.mregId) ||
+    (!p1Boundary && r === Mux(p1IsBF16, p1Cmd.mregId + 1.U, p1Cmd.mregId))
+  private def writesNow(r: UInt): Bool =
+    (!w0Boundary && r === w0Cmd.mregId) || (!w1Boundary && r === w1Cmd.mregId + 1.U)
+
   val popMregId  = io.cmd.bits.mregId
   val popMregId2 = io.cmd.bits.mregId + 1.U
 
-  val mregBankConflictPop = io.cmd.valid && isPop && (
-    (p0CmdValid && (popMregId === p0Cmd.mregId)) ||
-    (p1CmdValid && (popMregId === p1Cmd.mregId)) ||
-    (isPopBF16 && (
-      (p0CmdValid && (popMregId2 === p0Cmd.mregId)) ||
-      (p1CmdValid && (popMregId2 === p1Cmd.mregId))
-    ))
-  )
+  val mregBankConflictPop = io.cmd.valid && isPop &&
+    (readsNow(popMregId) || (isPopBF16 && readsNow(popMregId2)))
 
-  val mregBankConflictPush = io.cmd.valid && (isPush || isPushBF16) && (
-    (w0CmdValid && (io.cmd.bits.mregId === w0Cmd.mregId)) ||
-    (w1CmdValid && (io.cmd.bits.mregId === w1Cmd.mregId)) ||
-    (isPushBF16 && (
-      (w0CmdValid && ((io.cmd.bits.mregId + 1.U) === w0Cmd.mregId)) ||
-      (w1CmdValid && ((io.cmd.bits.mregId + 1.U) === w1Cmd.mregId))
-    ))
-  )
+  val mregBankConflictPush = io.cmd.valid && (isPush || isPushBF16) &&
+    (writesNow(io.cmd.bits.mregId) || (isPushBF16 && writesNow(io.cmd.bits.mregId + 1.U)))
 
   assert(!mregBankConflictPop,
     "SA: Pop writes to mreg bank currently being read by an active push/compute")
@@ -706,6 +704,7 @@ class SystolicArraySequencer(
   io.popBusy     := w0CmdValid || w1CmdValid
   io.dataBusy    := io.pushBusy || io.popBusy
   io.computeBusy := io.compBusy
+  io.feeding     := p0IsCompute
 
   // ── Active mreg bank reports ──
   // A port is reported while it will still access its bank after this cycle.

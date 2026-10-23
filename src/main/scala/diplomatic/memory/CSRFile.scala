@@ -13,6 +13,16 @@ TileLink byte-address map within the first 0x1C bytes of the CSR window:
   0x14  dbg1               (RW)
   0x18  execControl        (RW — bit 0: 1=start, 0=stop; auto-clears on scalar halt)
 
+Performance counters (host only; the scheme of RISC-V mhpmcounter / mcountinhibit, on MMIO):
+  0x100 PERF_RESET   (WO — write 1 to bit i to clear counter i; reads 0)
+  0x104 PERF_INHIBIT (RW — bit i = 1 stops counter i; reset 0)
+  0x108 PERF_NUM     (RO — number of counters)
+  0x200 + 8i         counter i, bits 31:0  (RO)
+  0x204 + 8i         counter i, bits 63:32 (RO)
+Every counter counts its event in the cycles from a start until the core has halted and every
+unit is idle (a halt does not wait for units), so it stops when a kernel finishes and the host
+reads it afterwards; PerfCounters.names lists the events.
+
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
 */
@@ -25,6 +35,32 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
 
 import ScalarISA._
+
+/** The performance counters: index i counts event names(i) (AtlasCore drives the events). */
+object PerfCounters {
+  val names: Seq[String] = Seq(
+    "cycles",       // the core runs, or a unit is still busy after the halt
+    "instret",      // an instruction issues
+    "stall_unit",   // S1 holds an instruction: its unit cannot take it (structural hazard)
+    "stall_data",   // S1 holds an instruction: MREG / VMEM / scalar-load / scale data hazard
+    "stall_dma",    // dma.wait on a busy channel
+    "stall_delay",  // a delay instruction counts down
+    "mxu0_busy",    // MXU slot 0 (systolic array or NVFP4 MXU): any engine active
+    "mxu0_feed",    // MXU slot 0: a matmul feeds one row of A (full MAC-array use)
+    "mxu1_busy",    // MXU1: any engine active
+    "mxu1_feed",    // MXU1: a matmul feeds one row of A
+    "vpu_busy",     // the VPU has an instruction in either slot
+    "xlu_busy",     // the XLU transposes
+    "vload_busy",   // the LSU's vload path is busy
+    "vstore_busy",  // the LSU's vstore path is busy
+    "dma_busy",     // some DMA channel is busy
+    "dma_beats")    // a 32-byte DMA beat completes on the memory port
+  val num: Int = names.size
+  val ResetOffset   = 0x100
+  val InhibitOffset = 0x104
+  val NumOffset     = 0x108
+  val CounterBase   = 0x200
+}
 
 /** TileLink-visible CSR register file shared with the scalar core.
   *
@@ -40,6 +76,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     val dbg1         = Output(UInt(32.W))
     val execRun      = Output(Bool())
     val execRunWrite = Output(Bool())
+    val perfEvents   = Input(Vec(PerfCounters.num, Bool()))
   })
 
   // ── Registers ────────────────────────────────────────────────────
@@ -70,6 +107,26 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     reg_halt_reason := 3.U
   }
 
+  // ── Performance counters ─────────────────────────────────────────
+  private val nPerf = PerfCounters.num
+  val perfCnt     = RegInit(VecInit(Seq.fill(nPerf)(0.U(64.W))))
+  val perfInhibit = RegInit(0.U(nPerf.W))
+  val perfClear   = WireDefault(0.U(nPerf.W))
+  for (i <- 0 until nPerf) {
+    when(perfClear(i)) {
+      perfCnt(i) := 0.U
+    }.elsewhen(io.perfEvents(i) && !perfInhibit(i)) {
+      perfCnt(i) := perfCnt(i) + 1.U
+    }
+  }
+  private val perfResetIdx   = (PerfCounters.ResetOffset / 4).U
+  private val perfInhibitIdx = (PerfCounters.InhibitOffset / 4).U
+  private val perfNumIdx     = (PerfCounters.NumOffset / 4).U
+  private val perfWords = (0 until nPerf).flatMap { i =>
+    val w = PerfCounters.CounterBase / 4 + 2 * i
+    Seq(w.U -> perfCnt(i)(31, 0), (w + 1).U -> perfCnt(i)(63, 32))
+  }
+
   // ── Word-index read helper ───────────────────────────────────────
   private def readWord(idx: UInt): UInt = MuxLookup(idx, 0.U)(Seq(
     0.U -> reg_cycle,
@@ -78,8 +135,10 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     3.U -> reg_illegal,
     4.U -> reg_dbg0,
     5.U -> reg_dbg1,
-    6.U -> Cat(0.U(31.W), reg_execRun)
-  ))
+    6.U -> Cat(0.U(31.W), reg_execRun),
+    perfInhibitIdx -> perfInhibit,
+    perfNumIdx     -> nPerf.U
+  ) ++ perfWords)
 
   // ── Internal (scalar-core) access ────────────────────────────────
   // Map 12-bit CSR addresses to word indices
@@ -146,6 +205,8 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
       // 2 (status) and 3 (illegal) are read-only from TL as well
       when(wordIdx === 4.U) { reg_dbg0  := tl.a.bits.data }
       when(wordIdx === 5.U) { reg_dbg1  := tl.a.bits.data }
+      when(wordIdx === perfResetIdx)   { perfClear   := tl.a.bits.data(nPerf - 1, 0) }
+      when(wordIdx === perfInhibitIdx) { perfInhibit := tl.a.bits.data(nPerf - 1, 0) }
       when(wordIdx === 6.U) {
         reg_execRun      := tl.a.bits.data(0)
         reg_execRunWrite := true.B

@@ -119,4 +119,15 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val halted        = Output(Bool())
   val execRun       = Input(Bool())
   val execRunWrite  = Input(Bool())
+  val perf          = Output(new ScalarPerfEvents)
+}
+
+/** Per-cycle front-end events for the performance counters (CSRFile). */
+class ScalarPerfEvents extends Bundle {
+  val running    = Bool()   // the core is not halted
+  val issue      = Bool()   // an instruction issued from S1
+  val stallUnit  = Bool()   // S1 holds an instruction: its unit cannot take the command (structural)
+  val stallData  = Bool()   // S1 holds an instruction for a data hazard: MREG, VMEM bank, scalar load, scale
+  val stallDma   = Bool()   // dma.wait on a busy channel
+  val stallDelay = Bool()   // a delay instruction counts down
 }

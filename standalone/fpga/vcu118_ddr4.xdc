@@ -1,4 +1,4 @@
-# DDR4 C1 of the VCU118 (standalone/rtl/vcu118_atlas_top.sv with DDR4=1).
+# DDR4 C1 of the VCU118 (standalone/rtl/vcu118_atlas_top.sv).
 # Pin assignments copied from the Chipyard VCU118 shell (fpga-shells VCU118NewShell), which builds
 # and calibrates on this board; the DDR4 MIG IP supplies the I/O standards.
 set_property PACKAGE_PIN {D14} [get_ports {c0_ddr4_adr[0]}]
