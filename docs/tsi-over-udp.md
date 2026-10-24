@@ -174,9 +174,9 @@ These signals cross between the core clock and the GMII clock:
 
 - Datagrams: `axis_async_fifo_adapter` in each direction, 8 to 32 bits on receive and 32 to 8 bits
   on transmit. The receive FIFO's bad-frame mark becomes `rx_abort`.
-- ETH_IP to the GMII clock, and the receive counters (ETH_RXERR) to the core clock: `eth_cdc_word`,
-  a request/acknowledge handshake. The destination takes the data 2 cycles after the synchronized
-  request edge.
+- ETH_IP to the GMII clock, and the receive counters (ETH_RXERR, ETH_RXFRAMES) to the core clock:
+  `eth_cdc_word`, a request/acknowledge handshake. The destination takes the data 2 cycles after the
+  synchronized request edge.
 - PCS/PMA status: a two-flop synchronizer per bit in `atlas_tsi_soc`.
 - `gmii_alive`: `vcu118_sgmii` synchronizes a divided `gmii_clk` into the core clock. `gmii_alive`
   is 0 when that signal does not toggle for 4 us, or while the PCS/PMA is in reset.
@@ -242,6 +242,11 @@ Find the first bit in this table that is 0:
 
 On a 1 Gb/s full-duplex link, bits [0], [1], [7] and [12] are 1, and [11:10] is 2 (`0b10`).
 ETH_RXERR counts the frames that the FPGA dropped before `eth_tsi`, and the frames with a bad FCS.
+If a datagram gets no reply, read ETH_RXFRAMES over UART TSI before and after you send it. Both
+halves count all received frames, also frames that are not for the FPGA. If [15:0] does not
+increase, the frame did not get to the GMII interface: it is lost or waits in the PHY, the PCS/PMA
+or a switch. If [15:0] increases but [31:16] does not, the frame waits in the MAC, or the MAC
+dropped it and ETH_RXERR increases.
 
 ### Change the FPGA's address
 
@@ -268,12 +273,13 @@ the build's value (parameter ETH_IP of `vcu118_atlas_top`) after CPU_RESET and a
 | `0x048` | ETH_MAC_LO | MAC address [31:0] |
 | `0x04C` | ETH_MAC_HI | MAC address [47:32]. The default MAC is `02:00:41:54:4c:53`. |
 | `0x050` | ETH_RXERR | [15:0] frames dropped before `eth_tsi`, [31:16] frames with a bad FCS or a GMII error |
+| `0x054` | ETH_RXFRAMES | [15:0] frames at the GMII input (rising edges of GMII rx_dv), [31:16] frames out of the MAC |
 
-ETH_RUN, ETH_DUP and ETH_DROP reset with the SoC. The ETH_RXERR counters wrap at 16 bits and reset
-with the GMII side. ETH_RXERR [15:0] counts these frames: MAC FIFO full, bad frames, IP header
-errors, UDP to ETH_IP on another port, IP fragments, datagram FIFO full, payloads shorter than the
-UDP length, and datagrams cut by a core reset. In a build without Ethernet (the word-level Verilator
-model), ETH_STATUS and the counters read 0.
+ETH_RUN, ETH_DUP and ETH_DROP reset with the SoC. The ETH_RXERR and ETH_RXFRAMES counters wrap at
+16 bits and reset with the GMII side. ETH_RXERR [15:0] counts these frames: MAC FIFO full, bad
+frames, IP header errors, UDP to ETH_IP on another port, IP fragments, datagram FIFO full, payloads
+shorter than the UDP length, and datagrams cut by a core reset. In a build without Ethernet (the
+word-level Verilator model), ETH_STATUS and the counters read 0.
 
 ## Host software
 
@@ -293,8 +299,9 @@ print(link.stats)                                # datagrams, resends, dups, dro
 link.close()
 ```
 
-`EthLink(ip, port, window, timeout, retries, cosim, seq)` has the defaults `ip="172.20.1.18"`,
-`port=21587`, `window=16`, `timeout=0.05` (seconds) and `retries=50`. `cosim=BINARY` starts the
+`EthLink(ip, port, window, timeout, retries, cosim, seq, nudge)` has the defaults
+`ip="172.20.1.18"`, `port=21587`, `window=16`, `timeout=0.05` (seconds), `retries=50` and
+`nudge=0.001` (seconds). `cosim=BINARY` starts the
 Ethernet model and connects to it. `batch(ops)` runs a list of `("w", addr, words)` and `("r", addr,
 n)` in order, pipelined, and returns the read words. `Atlas.run` loads DRAM with `write_bulk` when
 the link has `bulk`.
@@ -308,6 +315,10 @@ EthLink follows these rules:
 - Up to `window` datagrams are unacknowledged. After an RTO expiry or a DROP reply, EthLink sends
   again from the oldest unacknowledged datagram (go-back-N). It goes back at most once for each DROP
   expect, until the next RTO expiry.
+- When nothing arrives for `nudge` seconds after the last datagram that it sent or received, EthLink
+  sends the newest unacknowledged datagram once more. On the VCU118, a lone frame can wait in the
+  receive path until the next frame arrives (see Results). The copy releases it, and the board
+  answers the copy DUP. `nudge=None` turns this off; the model never uses it.
 - The retransmission timeout (RTO) follows the measured round-trip time (RFC 6298). It doubles each
   time it expires, up to 16 x `timeout` on the board and 30 s on the model.
 - EthLink raises LinkError when the board acknowledges nothing for `retries` x `timeout` (about 2.5
@@ -431,22 +442,53 @@ then takes less than line rate.
 
 ## Resources and timing
 
-The first board build with Ethernet (default config, 50 MHz, before the session and cut-datagram
-changes above) met timing with WNS +0.108 ns.
+Vivado 2024.1, 50 MHz, all three configurations meet timing (`bitstreams/AtlasStandaloneEth`).
+`ipt-nvfp4` uses `SSI_SpreadLogic_high` placement and `Explore` routing (build_bitstream.sh
+arguments 5 and 6); the others use the defaults.
+
+| Config | WNS / WHS (ns) | PCS/PMA 312.5 MHz WNS (ns) | LUTs |
+|---|---|---|---|
+| `default` | +0.144 / +0.011 | +0.287 | 624K (52.8%) |
+| `ipt` | +0.150 / +0.017 | +0.043 | 362K (30.6%) |
+| `ipt-nvfp4` | +0.184 / +0.011 | +0.341 | 543K (46.0%) |
 
 | Module | LUTs | FFs | Block RAM |
 |---|---|---|---|
-| `eth_udp_stack` | 2,261 | 3,590 | 14 RAMB36 + 4 RAMB18 |
-| `vcu118_sgmii` (with the PCS/PMA IP) | 915 | 1,181 | |
-| `eth_tsi` | 995 | 1,311 | 1 RAMB18 |
+| `eth_udp_stack` | 2,264 | 3,609 | 14 RAMB36 + 4 RAMB18 |
+| `vcu118_sgmii` (with the PCS/PMA IP) | 945 | 1,247 | |
+| `eth_tsi` | 1,085 | 1,403 | 1 RAMB18 |
+| `tl_arbiter` | 189 | 4 | |
 
-Together that is 4,171 LUTs and 6,082 flip-flops.
+Together that is about 4,500 LUTs and 6,300 flip-flops.
 
 ## Results
 
-Board results: pending.
+VCU118, `ipt-nvfp4` bitstream, host NIC at 1 Gb/s through a switch (2026-10-23). The link comes up
+with ETH_STATUS `0x1f388b`: PHY ID matched, SGMII sync, 1 Gb/s full duplex.
 
-The target is 20 MB/s or more for writes into DDR4 (UART TSI: about 0.09 MB/s).
+`link_bench.py --eth --uart` (16 MiB into DDR4 over Ethernet, 256 KiB over UART; 0 errors):
+
+| Link | write_words | write_bulk | read_words | read latency (median / p99) |
+|---|---|---|---|---|
+| Ethernet | 62.5 MB/s | 98 MB/s | 38.6 MB/s | 59 us / 2.4 ms |
+| UART TSI | 0.077 MB/s | | 0.091 MB/s | 449 us / 536 us |
+
+| Run | UART TSI | Ethernet |
+|---|---|---|
+| 126 baremetal tests (`run_tests.py`, no-DELAY bundles) | 93 s | 1.0 s |
+| specialist_dit policy (`ditflow.flow run`, 8.1 MiB image, 1.15 s kernel) | 110 s | 1.7 s |
+
+The test results over Ethernet equal those over UART TSI in status, instret, DBG0, DBG1 and all
+264,384 checked words. Only the cycle counts differ, by DDR4 timing (median 0.4%). The policy is
+bit-exact with its golden in both runs.
+
+A lone frame that the board receives sometimes waits until the next frame arrives: 13% of
+single-word requests waited up to 1 s, the period of a broadcast on that network. A datagram sent
+right after the request removes all of the wait, so the frame waits at or before the UDP port
+filter. In simulation no frame waits. ETH_RXFRAMES (`0x054`) tells whether the frame waits before or
+after the GMII interface. EthLink's nudge (above) sends the newest datagram again after 1 ms without
+a reply. With it, a 16 MiB `link_bench` run has 0 timeouts (435 nudges, answered DUP); without it,
+548 timeouts of 50 ms each.
 
 ## Limits
 
@@ -461,3 +503,5 @@ The target is 20 MB/s or more for writes into DDR4 (UART TSI: about 0.09 MB/s).
 - ETH_IP returns to the build's value after CPU_RESET.
 - IMEM reads while the scalar core runs are denied and return 0. Stop the core first.
 - On the board, DRAM accesses before the DDR4 is calibrated are denied.
+- A lone received frame can wait until the next frame (see Results). EthLink works around it; a
+  host that does not use EthLink sees replies late, up to the time to the next frame.
