@@ -7,7 +7,8 @@ For each link: write random words into DRAM with write_words (and with write_bul
 it), read them back and compare, then time single-word reads (sys_regs ID) and writes (SCRATCH).
 UART TSI writes are not acknowledged, so their latency is the time to send them. --mb sets the size
 (default 16 MiB on Ethernet, 256 KiB on the UART, 64 KiB on the Ethernet model, 1 KiB on the UART
-model). Results: a table on stdout.
+model). Results: a table on stdout. The board serves one host at a time: --eth takes over its
+session, so a run_tests.py --eth in progress fails with LinkError.
 """
 import argparse
 import random

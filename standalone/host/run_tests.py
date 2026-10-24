@@ -10,7 +10,9 @@
 with the interlock means a hazard got through, fails the test. --board runs the tests one after
 another over UART TSI; --tsi-sim does the same against the UART-level model. --eth runs them one after
 another over TSI over UDP (default 172.20.1.18:21587); --eth-sim runs each test in a fresh Ethernet model
-on its own UDP port, in parallel with -j. Results: OUT/results.csv and a summary on stdout.
+on its own UDP port, in parallel with -j. The board serves one host at a time: another EthLink
+(link_bench.py, a second run) takes over its session, and the tests of this run then fail with
+LinkError. Results: OUT/results.csv and a summary on stdout.
 """
 import argparse
 import csv

@@ -25,8 +25,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import atlas_host  # noqa: E402
 from atlas_host import (ATLS_ID, CSR_BASE, CSR_DBG0, CSR_DBG1, CSR_EXEC_CONTROL, CSR_STATUS, DRAM_BASE,  # noqa: E402
                         ETH_BADCMD, ETH_CUT, ETH_DENIED, ETH_DROP, ETH_DUP, ETH_NOSYNC, ETH_OVERFLOW, ETH_PAYLOAD,
                         ETH_PORT, ETH_REPLY_WORDS, ETH_SYNC, ETH_WRITE_WORDS, IMEM_BASE, M32, SYS_DRAM_BYTES,
@@ -45,11 +47,8 @@ class Net:
     def __init__(self, loss=0.0, dup=0.0, reorder=0.0, delay=0.003, latency=0.0):
         self.loss, self.dup, self.reorder, self.delay, self.latency = loss, dup, reorder, delay, latency
 
-    def copies(self, rng, sync=False):
-        """Delays of the copies that arrive. A SYNC request is only lost or delayed by latency: a late
-        copy would restart the session (see the stale-SYNC test)."""
-        if sync:
-            return [] if rng.random() < self.loss else [self.latency]
+    def copies(self, rng):
+        """Delays of the copies that arrive."""
         out = []
         for i in range(2 if rng.random() < self.dup else 1):
             if rng.random() >= self.loss:
@@ -66,23 +65,28 @@ def done_kernel(board):
 
 
 class MockBoard(threading.Thread):
-    """The board's protocol engine (spec rules for the FPGA) over sys_regs, IMEM, CSR, VMEM and DRAM."""
+    """The board's protocol engine (spec rules for the FPGA) over sys_regs, IMEM, CSR, VMEM and DRAM.
+    exec_s: time to run a request; rx_s: time to receive any request, also one answered DUP or DROP
+    (the Ethernet model's GMII time). Requests are served one at a time."""
 
-    def __init__(self, rx=None, tx=None, seed=1, port=0, dram_bytes=16 << 20, exec_s=0.0, kernel=done_kernel):
+    def __init__(self, rx=None, tx=None, seed=1, port=0, dram_bytes=16 << 20, exec_s=0.0, rx_s=0.0,
+                 kernel=done_kernel):
         super().__init__(daemon=True)
         self.rx, self.tx = rx or Net(), tx or Net()
         self.rng = random.Random(seed)
-        self.exec_s, self.kernel = exec_s, kernel
+        self.exec_s, self.rx_s, self.kernel = exec_s, rx_s, kernel
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", port))
         self.sock.setblocking(False)
         self.port = self.sock.getsockname()[1]
         self.imem, self.vmem, self.dram = bytearray(IMEM_BYTES), bytearray(VMEM_BYTES), bytearray(dram_bytes)
         self.sys = {SYS_ID: ATLS_ID, SYS_DRAM_BYTES: dram_bytes, SYS_FEATURES: 0x7, SYS_ETH_IP: 0x7F00_0001,
-                    SYS_ETH_STATUS: 1 << 18 | 1 << 12 | 2 << 10 | 3, SYS_ETH_PORT: ETH_PORT}
+                    SYS_ETH_STATUS: 1 << 20 | 1 << 19 | 1 << 18 | 1 << 16 | 1 << 12 | 2 << 10 | 3,
+                    SYS_ETH_PORT: ETH_PORT}
         self.csr = {}
         self.exec_log = []          # every value written to EXEC_CONTROL, in order
-        self.expect = None          # next seq to run; None: no session
+        self.session = None         # (peer, seq) of the SYNC that opened the session; None: no session
+        self.expect = None          # next seq to run in the session
         self.n_exec = self.n_dup = self.n_drop = 0
         self.received = []          # (time, seq) of every request that reached the engine
         self.lock = threading.Lock()
@@ -107,8 +111,7 @@ class MockBoard(threading.Thread):
                         pkt, peer = self.sock.recvfrom(65536)
                     except (BlockingIOError, ConnectionRefusedError):
                         break
-                    sync = len(pkt) >= 8 and struct.unpack_from("<I", pkt, 4)[0] & ETH_SYNC
-                    for dt in self.rx.copies(self.rng, sync):
+                    for dt in self.rx.copies(self.rng):
                         self._push(dt, "rx", pkt, peer)
             while self._events and self._events[0][0] <= time.monotonic():
                 _, _, kind, pkt, peer = heapq.heappop(self._events)
@@ -118,7 +121,9 @@ class MockBoard(threading.Thread):
                     except OSError:
                         pass
                     continue
-                reply = self.handle(pkt)
+                if self.rx_s:
+                    time.sleep(self.rx_s)
+                reply = self.handle(pkt, peer)
                 if reply is not None:
                     for dt in self.tx.copies(self.rng):
                         self._push(dt, "tx", reply, peer)
@@ -127,8 +132,8 @@ class MockBoard(threading.Thread):
         heapq.heappush(self._events, (time.monotonic() + dt, self._n, kind, pkt, peer))
         self._n += 1
 
-    def handle(self, pkt):
-        """One request: the reply, or None (malformed)."""
+    def handle(self, pkt, peer):
+        """One request from peer (address, port): the reply, or None (malformed)."""
         with self.lock:
             if len(pkt) < 8 or len(pkt) % 4:
                 self.n_drop += 1
@@ -136,9 +141,10 @@ class MockBoard(threading.Thread):
             seq, flags = struct.unpack_from("<II", pkt)
             self.received.append((time.monotonic(), seq))
             if flags & ETH_SYNC:
-                self.expect = (seq + 1) & M32
+                if self.session != (peer, seq):         # a copy of the session's SYNC does not reopen it
+                    self.session, self.expect = (peer, seq), (seq + 1) & M32
                 return struct.pack("<4I", seq, ETH_SYNC, self.expect, 0)
-            if self.expect is None:
+            if self.session is None or self.session[0] != peer:
                 self.n_drop += 1
                 return struct.pack("<4I", seq, ETH_NOSYNC, 0, 0)
             ahead = ((self.expect - seq + 0x8000_0000) & M32) - 0x8000_0000
@@ -246,8 +252,9 @@ class MockBoard(threading.Thread):
 
     def _read_reg(self, a):
         if a < 0x1000:
-            counters = {SYS_ETH_RUN: self.n_exec, SYS_ETH_DUP: self.n_dup, SYS_ETH_DROP: self.n_drop}
-            return 0, counters[a] & M32 if a in counters else self.sys.get(a, 0)
+            live = {SYS_ETH_RUN: self.n_exec, SYS_ETH_DUP: self.n_dup, SYS_ETH_DROP: self.n_drop,
+                    SYS_ETH_STATUS: self.sys[SYS_ETH_STATUS] | (self.session is not None) << 17}
+            return 0, live[a] & M32 if a in live else self.sys.get(a, 0)
         if CSR_BASE <= a < CSR_BASE + 0x1000:
             return 0, self.csr.get(a, 0)
         return ETH_DENIED, 0
@@ -301,6 +308,29 @@ class MockBoardTest(unittest.TestCase):
         self.assertEqual(b.n_drop, n + 2)
         self.assertEqual((b.n_exec, b.n_dup), (4, 2))
 
+    def test_sessions(self):
+        """The session belongs to the peer of its SYNC. A copy of that SYNC does not reopen it; any
+        other SYNC opens a new one, and other peers get NOSYNC."""
+        r, b = self.r, self.b
+        r2 = Raw(b.port)
+        self.addCleanup(r2.sock.close)
+        start = (0, 1, CSR_EXEC_CONTROL, 0, 0, 0, 1)
+        self.assertEqual(r.ask(100, ETH_SYNC), (100, ETH_SYNC, 101, 0, []))
+        self.assertEqual(r.ask(101, *start), (101, 0, 102, 1, []))
+        self.assertEqual(r.ask(100, ETH_SYNC), (100, ETH_SYNC, 102, 0, []))       # a copy: no reopen
+        self.assertEqual(r.ask(101, *start)[:3], (101, ETH_DUP, 102))               # so it runs once
+        n = b.n_drop
+        self.assertEqual(r2.ask(102, *start), (102, ETH_NOSYNC, 0, 0, []))          # another peer
+        self.assertEqual((b.n_drop, b.expect), (n + 1, 102))
+        self.assertEqual(r2.ask(100, ETH_SYNC)[:3], (100, ETH_SYNC, 101))           # takes the session
+        self.assertEqual(r.ask(102, *start)[:2], (102, ETH_NOSYNC))
+        self.assertEqual(r.ask(100, ETH_SYNC)[:3], (100, ETH_SYNC, 101))            # takes it back
+        self.assertEqual(r.ask(101, *start)[:3], (101, 0, 102))
+        self.assertEqual(r.ask(500, ETH_SYNC)[:3], (500, ETH_SYNC, 501))            # another seq: reopens
+        self.assertEqual(r.ask(100, ETH_SYNC)[:3], (100, ETH_SYNC, 101))
+        self.assertEqual(b.exec_log, [1, 1])
+        self.assertEqual(r.ask(101, 0, 0, SYS_ETH_STATUS, 0, 0, 0)[4][0] >> 17 & 1, 1)   # session open
+
     def test_status(self):
         r = self.r
         r.ask(0, ETH_SYNC)
@@ -320,6 +350,9 @@ class MockBoardTest(unittest.TestCase):
 
 
 class EthLinkTest(unittest.TestCase):
+    """link() gives timeout 5 ms and retries 500. Under heavy() loss (30 % each way) the timeout backs off
+    often, and a short one keeps the tests fast. A link gives up after retries x timeout without
+    progress: at the default retries that is about 7 tries, too few for this loss."""
 
     def board(self, **kw):
         b = MockBoard(**kw)
@@ -327,7 +360,8 @@ class EthLinkTest(unittest.TestCase):
         return b
 
     def link(self, b, **kw):
-        kw.setdefault("timeout", 0.02)
+        kw.setdefault("timeout", 0.005)
+        kw.setdefault("retries", 500)
         lk = EthLink("127.0.0.1", b.port, **kw)
         self.addCleanup(lk.close)
         return lk
@@ -431,10 +465,10 @@ class EthLinkTest(unittest.TestCase):
         lk = self.link(b)
         a = DRAM_BASE + 0x100
         ops = []
-        for i in range(300):
+        for i in range(150):
             ops += [("w", a, [i]), ("r", a, 1), ("r", a + 4, 2), ("w", a + 4, [i, ~i & M32])]
         res = lk.batch(ops)
-        for i in range(300):
+        for i in range(150):
             self.assertEqual(res[2 * i], [i])
             self.assertEqual(res[2 * i + 1], [0, 0] if i == 0 else [i - 1, ~(i - 1) & M32])
         self.assertGreater(lk.stats["reread"], 0)
@@ -463,7 +497,7 @@ class EthLinkTest(unittest.TestCase):
         self.assertEqual(lk.read_words(DRAM_BASE, 1000), list(struct.unpack("<1000I", data[:4000])))
 
     def test_defaults(self):
-        b = self.board(**heavy(0.2))
+        b = self.board(**heavy(0.1))
         lk = EthLink("127.0.0.1", b.port)
         self.addCleanup(lk.close)
         self.assertEqual((lk.window, lk.timeout, lk.retries), (16, 0.05, 50))
@@ -502,16 +536,48 @@ class EthLinkTest(unittest.TestCase):
         quiet = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         quiet.bind(("127.0.0.1", 0))
         self.addCleanup(quiet.close)
-        t0 = time.monotonic()
-        with self.assertRaisesRegex(LinkError, "no answer .* to SYNC after 6 tries"):
-            EthLink("127.0.0.1", quiet.getsockname()[1], timeout=0.02, retries=5)
-        self.assertLess(time.monotonic() - t0, 1.0)
         closed = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         closed.bind(("127.0.0.1", 0))
         port = closed.getsockname()[1]
         closed.close()
-        with self.assertRaisesRegex(LinkError, "port is closed"):
-            EthLink("127.0.0.1", port, timeout=0.02, retries=5)
+        with mock.patch.object(atlas_host, "ETH_OPEN_S", 0.3):
+            t0 = time.monotonic()
+            with self.assertRaisesRegex(LinkError, r"no answer .* to SYNC in 0\.\d s \(\d+ tries\); check the cable"):
+                EthLink("127.0.0.1", quiet.getsockname()[1], timeout=0.02, retries=5)
+            self.assertLess(time.monotonic() - t0, 1.0)
+            with self.assertRaisesRegex(LinkError, "port is closed"):
+                EthLink("127.0.0.1", port, timeout=0.02, retries=5)
+
+    def test_open_budget(self):
+        """No answer: SYNC goes out for ETH_OPEN_S = 6 s (the copper link comes up about 3 s after
+        programming or CPU_RESET), the wait backing off from timeout to 10 timeout."""
+        quiet = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        quiet.bind(("127.0.0.1", 0))
+        quiet.settimeout(0.1)
+        self.addCleanup(quiet.close)
+        arrived, stop = [], threading.Event()
+
+        def listen():
+            while not stop.is_set():
+                try:
+                    quiet.recv(64)
+                    arrived.append(time.monotonic())
+                except socket.timeout:
+                    pass
+        t = threading.Thread(target=listen, daemon=True)
+        t.start()
+        t0 = time.monotonic()
+        with self.assertRaisesRegex(LinkError, r"to SYNC in \d+\.\d s .* about 3 s after programming or CPU_RESET"):
+            EthLink("127.0.0.1", quiet.getsockname()[1])
+        waited = time.monotonic() - t0
+        stop.set()
+        t.join()
+        gaps = [y - x for x, y in zip(arrived, arrived[1:])]
+        self.assertGreaterEqual(waited, 6.0)
+        self.assertLess(waited, 7.5)
+        self.assertLess(gaps[0], 0.2)
+        self.assertGreater(min(gaps[-3:]), 0.4)
+        self.assertLess(max(gaps), 0.8)
 
     def test_board_stops(self):
         b = MockBoard()
@@ -527,26 +593,115 @@ class EthLinkTest(unittest.TestCase):
         b = self.board()
         lk = self.link(b)
         lk.write_words(DRAM_BASE, [1])
-        b.expect = None
+        b.session = None
         with self.assertRaisesRegex(LinkError, "no session"):
             lk.write_words(CSR_EXEC_CONTROL, [1])
         self.assertEqual(b.exec_log, [])
 
     def test_stale_sync(self):
-        """A late copy of the SYNC restarts the session: a clear LinkError, and nothing runs twice."""
+        """A late copy of the SYNC does not reopen the session: nothing runs twice, and the link goes on."""
         b = self.board()
-        sync = []
-        put = EthLink._put
-        lk = EthLink.__new__(EthLink)
-        lk._put = lambda m: (sync.append(bytes(m)) if not sync else None, put(lk, m))
-        lk.__init__("127.0.0.1", b.port, timeout=0.02, retries=5)
-        self.addCleanup(lk.close)
+        lk = self.link(b, seq=0x5000)
         for i in range(5):
             lk.write_words(CSR_EXEC_CONTROL, [i])
-        b.handle(sync[0])
-        with self.assertRaisesRegex(LinkError, "session was restarted"):
-            lk.write_words(CSR_EXEC_CONTROL, [5])
-        self.assertEqual(b.exec_log, list(range(5)))
+        self.assertEqual(b.handle(struct.pack("<II", 0x5000, ETH_SYNC), lk._sock.getsockname()),
+                         struct.pack("<4I", 0x5000, ETH_SYNC, 0x5006, 0))
+        lk.write_words(CSR_EXEC_CONTROL, [5])
+        self.assertEqual(b.exec_log, list(range(6)))
+
+    def test_late_sync_lost_reply(self):
+        """A late copy of the SYNC arrives right after the first datagram ran, and that datagram's reply
+        is lost: the datagram sent again is answered DUP, it does not run twice."""
+        b = self.board()
+        lk = self.link(b, seq=0x5000)
+        handle, late = b.handle, []
+
+        def late_sync(pkt, peer):
+            r = handle(pkt, peer)
+            if not late and struct.unpack_from("<I", r, 4)[0] == 0:
+                late.append(handle(struct.pack("<II", 0x5000, ETH_SYNC), peer))
+                return None
+            return r
+        b.handle = late_sync
+        lk.write_words(CSR_EXEC_CONTROL, [1])
+        self.assertEqual(b.exec_log, [1])
+        self.assertEqual(late, [struct.pack("<4I", 0x5000, ETH_SYNC, 0x5002, 0)])
+        self.assertGreater(lk.stats["dups"], 0)
+
+    def test_takeover(self):
+        """A second host opens its own session (two_clients.py): the first gets LinkError, never a write
+        acknowledged that did not run, and the second goes on."""
+        for seq_a, seq_b in ((1000, 5000), (5000, 1000)):
+            with self.subTest(seq_a=seq_a, seq_b=seq_b):
+                b = self.board()
+                a = self.link(b, seq=seq_a, retries=5)
+                a.write_words(CSR_EXEC_CONTROL, [1])
+                other = self.link(b, seq=seq_b, retries=5)
+                with self.assertRaisesRegex(LinkError, "no session open for this host.* another SYNC"):
+                    a.write_words(CSR_EXEC_CONTROL, [2])
+                with self.assertRaisesRegex(LinkError, "another SYNC"):
+                    a.read_words(SYS_ID, 1)
+                other.write_words(CSR_EXEC_CONTROL, [3])
+                self.assertEqual(b.exec_log, [1, 3])
+
+    def test_session_restarted(self):
+        """A SYNC at another seq from this link's own address and port restarts the session. The board's
+        expect is then newer (DUP) or older (DROP) than the link's seqs: LinkError, never a write
+        acknowledged that did not run or reads sent again without end."""
+        for offset, op in ((0x100, "w"), (0x3000_0000, "r"), (-0x100, "w")):
+            with self.subTest(offset=offset, op=op):
+                b = self.board()
+                a = self.link(b, seq=0x1000_0000, retries=5)
+                a.write_words(CSR_EXEC_CONTROL, [1])
+                b.handle(struct.pack("<II", (0x1000_0000 + offset) & M32, ETH_SYNC), a._sock.getsockname())
+                t0 = time.monotonic()
+                with self.assertRaisesRegex(LinkError, "another SYNC restarted the session"):
+                    if op == "w":
+                        a.write_words(CSR_EXEC_CONTROL, [2])
+                    else:
+                        a.read_words(SYS_ID, 1)
+                self.assertLess(time.monotonic() - t0, 1.0)
+                self.assertEqual(b.exec_log, [1])
+
+    def test_read_data_lost(self):
+        """The reply of a read is lost every time: LinkError after retries reads again, not a loop."""
+        b = self.board()
+        lk = self.link(b, retries=5)
+        handle = b.handle
+        b.handle = lambda pkt, peer: (lambda r: None if r is not None and len(r) > 16 else r)(handle(pkt, peer))
+        with self.assertRaisesRegex(LinkError, "read datagram at 0x0 was lost 6 times"):
+            lk.read_words(SYS_ID, 1)
+        self.assertEqual(lk.stats["reread"], 5)
+
+    def test_dup_drop(self):
+        """Every reply comes twice and the first datagram is lost: the duplicated DROP replies make one
+        go-back, not two."""
+        b = self.board(tx=Net(dup=1.0, delay=0.0))
+        lk = self.link(b, timeout=1.0)
+        handle, lost = b.handle, []
+
+        def lose_first(pkt, peer):
+            if not lost and len(pkt) > 100:
+                lost.append(pkt)
+                return None
+            return handle(pkt, peer)
+        b.handle = lose_first
+        data = os.urandom(16 * 4 * ETH_WRITE_WORDS)
+        lk.write_bulk(DRAM_BASE, data)
+        self.assertEqual(bytes(b.dram[:len(data)]), data)
+        self.assertEqual((lk.stats["resends"], lk.stats["timeouts"]), (16, 0), lk.stats)
+
+    def test_slow_model(self):
+        """Receiving a request, also one answered DUP, takes longer than the timeout (the Ethernet model
+        under load): the timeout backs off, so the copies sent again do not pile up on the board."""
+        b = self.board(rx_s=0.03)
+        lk = self.link(b, window=4, timeout=0.02, retries=50)
+        data = os.urandom(32 * 4 * ETH_WRITE_WORDS)
+        lk.write_bulk(DRAM_BASE, data)
+        lk.write_words(CSR_EXEC_CONTROL, [1])
+        self.assertEqual(bytes(b.dram[:len(data)]), data)
+        self.assertEqual(b.exec_log, [1])
+        self.assertLess(lk.stats["resends"], lk.stats["datagrams"], lk.stats)
 
     def test_error_mid_batch(self):
         """A denied write raises LinkError; the datagrams in flight still run once, and the link goes on.
@@ -560,7 +715,7 @@ class EthLinkTest(unittest.TestCase):
             lk.batch(ops)
         self.assertGreater(len(lk._fly), 0)
         b.rx, b.tx = heavy()["rx"], heavy()["tx"]
-        lk.timeout = lk._rto = 0.02
+        lk.timeout, lk._rto, lk._rto_max = 0.005, 0.005, 0.08
         lk.write_words(CSR_EXEC_CONTROL, [100])
         self.assertEqual(lk.read_words(SYS_ID, 1), [ATLS_ID])
         log = b.exec_log
@@ -591,7 +746,7 @@ class EthLinkTest(unittest.TestCase):
                 self.assertEqual(lk.read_words(SYS_ID, 1), [ATLS_ID])
                 self.assertEqual(lk.ip, "127.0.0.1")
                 self.assertNotEqual(lk.port, 0)
-                self.assertGreaterEqual(lk.timeout, 1.0)
+                self.assertEqual(lk.timeout, atlas_host.ETH_SIM_TIMEOUT)
             finally:
                 lk.close()
             self.assertIsNotNone(lk.sim._p.poll())

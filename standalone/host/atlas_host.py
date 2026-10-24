@@ -80,7 +80,8 @@ ETH_PORT = 21587                    # 0x5453, "TS"
 ETH_PAYLOAD = 1472                  # UDP payload bytes in a 1500-byte IPv4 packet
 ETH_REPLY_WORDS = 364               # read words in one reply
 ETH_WRITE_WORDS = (ETH_PAYLOAD - 8 - 20) // 4   # 361: the largest write command
-ETH_SIM_TIMEOUT = 1.0               # least timeout on the Ethernet model: simulated time is slow
+ETH_SIM_TIMEOUT = 3.0               # least timeout on the Ethernet model: simulated time is slow
+ETH_OPEN_S = 6.0                    # least time to send SYNC: the copper link takes ~3 s to come up
 ETH_SYNC, ETH_DUP, ETH_NOSYNC, ETH_DROP = 1, 2, 4, 8                        # reply flags
 ETH_CUT, ETH_BADCMD, ETH_OVERFLOW, ETH_DENIED = 1 << 16, 1 << 17, 1 << 18, 1 << 19   # reply status
 M32 = 0xFFFF_FFFF
@@ -349,10 +350,10 @@ class EthSim:
 class _Datagram:
     """TSI commands of one kind (reads or writes) for one request. reads: (buffer, byte offset, words)
     per read command. seq is given when it is first sent."""
-    __slots__ = ("body", "ncmd", "reads", "nread", "addr", "seq", "sent", "tries", "replies", "done")
+    __slots__ = ("body", "ncmd", "reads", "nread", "addr", "rereads", "seq", "sent", "tries", "replies", "done")
 
-    def __init__(self, body, ncmd, reads, addr):
-        self.body, self.ncmd, self.reads, self.addr = body, ncmd, reads, addr
+    def __init__(self, body, ncmd, reads, addr, rereads=0):
+        self.body, self.ncmd, self.reads, self.addr, self.rereads = body, ncmd, reads, addr, rereads
         self.nread = sum(r[2] for r in reads)
         self.seq, self.sent, self.tries, self.replies, self.done = None, 0.0, 0, 0, False
 
@@ -364,10 +365,13 @@ class EthLink:
     board runs each sequence number once, so a write never runs twice. A read whose reply was lost is
     sent again as a new datagram, and a datagram with writes waits until every earlier read has its
     data. Each call returns when the board has acknowledged all its datagrams: then its writes are done.
-    LinkError when the board does not answer for retries timeouts in a row (or answers only DROP),
-    and for a denied write whose reply arrives (a DUP reply has no status). On the model the timeout
-    is at least ETH_SIM_TIMEOUT. stats counts datagrams, resends, DUP and DROP replies, timeouts,
-    reads sent again and replies with a denied access."""
+    The timeout follows the round trip and doubles at each expiry, up to 16 timeout (30 s on the model).
+    The SYNC that opens the session is sent for at least ETH_OPEN_S. LinkError when nothing is
+    acknowledged for retries x timeout seconds (and at least 3 expiries), when the board has no session
+    for this link (it was reset, or another host sent SYNC), when the data of a read is lost more than
+    retries times, and for a denied write whose reply arrives (a DUP reply has no status). On the model
+    the timeout is at least ETH_SIM_TIMEOUT. stats counts datagrams, resends, DUP and DROP replies,
+    timeouts, reads sent again and replies with a denied access."""
 
     def __init__(self, ip=ETH_IP_DEFAULT, port=ETH_PORT, window=16, timeout=0.05, retries=50, cosim=None,
                  seq=None):
@@ -381,6 +385,7 @@ class EthLink:
         self.bulk = True
         self.stats = dict.fromkeys(("datagrams", "resends", "dups", "drops", "timeouts", "reread", "denied"), 0)
         self._rto, self._srtt, self._rttvar = timeout, None, 0.0
+        self._rto_max = 16 * timeout if self.sim is None else max(30.0, timeout)
         self._refused, self._error, self._behind = 0, None, None
         self._fly, self._nreads = {}, 0         # see _go
         try:
@@ -478,11 +483,14 @@ class EthLink:
             yield _Datagram(b"".join(parts), ncmd, reads, first)
 
     def _open(self, seq):
-        """SYNC at a random sequence number; the session's first datagram is seq + 1."""
+        """SYNC at a random sequence number; the session's first datagram is seq + 1. The SYNC is sent
+        again, waiting from timeout up to 10 timeout, for at least ETH_OPEN_S and retries x timeout."""
         seq = random.SystemRandom().getrandbits(32) if seq is None else seq & M32
-        for _ in range(self.retries + 1):
+        t0, wait, tries = time.monotonic(), self.timeout, 0
+        while True:
             self._put(struct.pack("<II", seq, ETH_SYNC))
-            end = time.monotonic() + self.timeout
+            tries += 1
+            end = time.monotonic() + wait
             while (pkt := self._get(end - time.monotonic())) is not None:
                 if len(pkt) >= 16:
                     s, flags, expect, _ = struct.unpack_from("<4I", pkt)
@@ -492,7 +500,10 @@ class EthLink:
                         self._next = expect
                         return
             self._check()
-        raise LinkError(self._silent("SYNC"))
+            waited = time.monotonic() - t0
+            if waited > max(ETH_OPEN_S, self.retries * self.timeout):
+                raise LinkError(self._silent("SYNC", waited, tries))
+            wait = min(2 * wait, 10 * self.timeout)
 
     def _run(self, datagrams):
         """Send the datagrams in order, at most window unacknowledged, until the board has run them all.
@@ -507,7 +518,8 @@ class EthLink:
     def _go(self, src):
         todo = deque()          # to send next: reads to send again, then the next datagram of src
         fly = self._fly         # sent, not acknowledged: seq -> datagram, oldest first (consecutive seqs)
-        idle = 0                # timeouts and go-backs since the last progress
+        idle = 0                # timeouts since the last progress
+        recover = None          # expect of the last go-back on DROP: one per loss event, until a timeout
         stats = self.stats
         progress = time.monotonic()
         while True:
@@ -536,8 +548,14 @@ class EthLink:
                 self._check()
                 idle += 1
                 stats["timeouts"] += 1
-                if idle > self.retries:
-                    raise LinkError(self._silent("seq %#x (datagram at 0x%x)" % (oldest.seq, oldest.addr)))
+                waited = time.monotonic() - progress
+                if idle >= 3 and waited > self.retries * self.timeout:
+                    raise LinkError(self._silent("seq %#x (datagram at 0x%x)" % (oldest.seq, oldest.addr),
+                                                 waited, oldest.tries))
+                # Back off (RFC 6298 5.5): resent datagrams give no RTT sample, so a timeout shorter than
+                # the round trip (a slow model) would send the window again and again.
+                self._rto = min(2 * self._rto, self._rto_max)
+                recover = None
                 self._resend(fly)
                 continue
             while pkt is not None:
@@ -547,11 +565,15 @@ class EthLink:
                     continue
                 seq, flags, expect, status = struct.unpack_from("<4I", pkt)
                 d = fly.get(seq)
-                if flags & ETH_NOSYNC and d is not None:
-                    raise LinkError(f"{self.name} has no session open: the board was reset or reprogrammed")
                 if flags & (ETH_SYNC | ETH_NOSYNC):
+                    if d is not None:
+                        raise LinkError(f"{self.name} has no session open for this host: the board was reset or "
+                                        "reprogrammed, or another SYNC restarted the session (second host?)")
                     pkt = self._get(0)
                     continue
+                if _seq_diff(expect, self._next) > 0:
+                    raise LinkError(f"{self.name} expects seq {expect:#x}, beyond every seq sent ({self._next:#x}): "
+                                    "another SYNC restarted the session (second host?)")
                 if d is not None:
                     d.replies += 1
                 if flags & ETH_DUP:
@@ -576,8 +598,11 @@ class EthLink:
                     if x.nread:
                         self._nreads -= 1
                         if not x.done:
-                            again.append(_Datagram(x.body, x.ncmd, x.reads, x.addr))
-                    progress, idle = now, 0
+                            if x.rereads >= self.retries:
+                                err = err or LinkError(f"{self.name}: the data of the read datagram at "
+                                                       f"0x{x.addr:x} was lost {x.rereads + 1} times")
+                            again.append(_Datagram(x.body, x.ncmd, x.reads, x.addr, x.rereads + 1))
+                    progress, idle, self._behind = now, 0, None
                 if err:
                     raise err
                 if again:
@@ -587,12 +612,10 @@ class EthLink:
                     first = next(iter(fly))
                     if first == expect:
                         # The board still waits for the oldest. If this answers d's last copy, which was
-                        # sent after the oldest's last copy, that copy was lost: go back to it.
-                        if d.replies >= d.tries:
-                            idle += 1
-                            if idle > self.retries:
-                                raise LinkError(f"{self.name} does not run seq {expect:#x}: {idle} resends "
-                                                "answered DROP")
+                        # sent after the oldest's last copy, that copy was lost: go back to it, once until
+                        # the next timeout (a duplicated DROP must not send the window again).
+                        if d.replies >= d.tries and expect != recover:
+                            recover = expect
                             self._resend(fly)
                     elif _seq_diff(first, expect) > 0:
                         self._behind = expect
@@ -631,7 +654,7 @@ class EthLink:
         else:
             self._rttvar += (abs(self._srtt - rtt) - self._rttvar) / 4
             self._srtt += (rtt - self._srtt) / 8
-        self._rto = min(max(self.timeout, self._srtt + 4 * self._rttvar), 60.0)
+        self._rto = min(max(self.timeout, self._srtt + 4 * self._rttvar), self._rto_max)
 
     def _put(self, msg):
         try:
@@ -665,18 +688,18 @@ class EthLink:
         if self.sim is not None:
             self.sim.check()
 
-    def _silent(self, what):
-        msg = f"no answer from {self.name} (UDP) to {what} after {self.retries + 1} tries"
+    def _silent(self, what, waited, tries):
+        msg = f"no answer from {self.name} (UDP) to {what} in {waited:.1f} s ({tries} tries)"
         if self._refused:
             msg += "; the port is closed (ICMP port unreachable)"
         if self._error is not None:
             msg += f"; {self._error}"
         if self._behind is not None:
             msg += (f"; the board waits for seq {self._behind:#x}, before datagrams it acknowledged: "
-                    "its session was restarted (a SYNC from another host?)")
+                    "another SYNC restarted the session (second host?)")
         elif what == "SYNC" and self.sim is None and not self._refused:
             msg += ("; check the cable, the host's address (on the board's subnet) and that the bitstream has "
-                    "Ethernet")
+                    "Ethernet (the copper link comes up about 3 s after programming or CPU_RESET)")
         return msg
 
 
