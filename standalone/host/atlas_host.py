@@ -66,6 +66,7 @@ SYS_ETH_PORT = 0x44
 SYS_ETH_MAC_LO = 0x48
 SYS_ETH_MAC_HI = 0x4C
 SYS_ETH_RXERR = 0x50
+SYS_ETH_RXFRAMES = 0x54
 ATLS_ID = 0x4154_4C53
 
 # The VCU118's CP2105, interface 1: the UART on AW25/BB21.
@@ -366,15 +367,18 @@ class EthLink:
     sent again as a new datagram, and a datagram with writes waits until every earlier read has its
     data. Each call returns when the board has acknowledged all its datagrams: then its writes are done.
     The timeout follows the round trip and doubles at each expiry, up to 16 timeout (30 s on the model).
+    When nothing arrives for nudge seconds after the last datagram, the newest datagram in flight is
+    sent once more: on the VCU118 a lone frame can wait in the receive path until the next frame comes
+    (docs/tsi-over-udp.md), and the board answers the copy DUP. Not on the model.
     The SYNC that opens the session is sent for at least ETH_OPEN_S. LinkError when nothing is
     acknowledged for retries x timeout seconds (and at least 3 expiries), when the board has no session
     for this link (it was reset, or another host sent SYNC), when the data of a read is lost more than
     retries times, and for a denied write whose reply arrives (a DUP reply has no status). On the model
     the timeout is at least ETH_SIM_TIMEOUT. stats counts datagrams, resends, DUP and DROP replies,
-    timeouts, reads sent again and replies with a denied access."""
+    timeouts, reads sent again, replies with a denied access and nudges."""
 
     def __init__(self, ip=ETH_IP_DEFAULT, port=ETH_PORT, window=16, timeout=0.05, retries=50, cosim=None,
-                 seq=None):
+                 seq=None, nudge=0.001):
         self._sock = self.sim = None
         if cosim is not None:
             self.sim = EthSim(cosim)
@@ -382,12 +386,15 @@ class EthLink:
         self.ip, self.port = ip, port
         self.name = f"{ip}:{port}" if self.sim is None else f"{self.sim.name} (UDP {port})"
         self.window, self.timeout, self.retries = max(1, int(window)), timeout, retries
+        self.nudge = nudge if self.sim is None else None
         self.bulk = True
-        self.stats = dict.fromkeys(("datagrams", "resends", "dups", "drops", "timeouts", "reread", "denied"), 0)
+        self.stats = dict.fromkeys(("datagrams", "resends", "dups", "drops", "timeouts", "reread", "denied",
+                                    "nudges"), 0)
         self._rto, self._srtt, self._rttvar = timeout, None, 0.0
         self._rto_max = 16 * timeout if self.sim is None else max(30.0, timeout)
         self._refused, self._error, self._behind = 0, None, None
         self._fly, self._nreads = {}, 0         # see _go
+        self._heard = 0.0                       # time of the last datagram sent or received
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             for opt in (socket.SO_RCVBUF, socket.SO_SNDBUF):
@@ -522,6 +529,7 @@ class EthLink:
         recover = None          # expect of the last go-back on DROP: one per loss event, until a timeout
         stats = self.stats
         progress = time.monotonic()
+        nudged = False          # the newest datagram was sent again since the last datagram sent or received
         while True:
             if not todo:
                 d = next(src, None)
@@ -536,6 +544,7 @@ class EthLink:
                 self._nreads += d.nread > 0
                 stats["datagrams"] += 1
                 self._send(d)
+                nudged = False
                 if not todo:
                     d = next(src, None)
                     if d is not None:
@@ -543,7 +552,15 @@ class EthLink:
             if not fly:
                 return
             oldest = next(iter(fly.values()))
-            pkt = self._get(max(oldest.sent, progress) + self._rto - time.monotonic())
+            deadline = max(oldest.sent, progress) + self._rto
+            early = self.nudge is not None and not nudged and self._heard + self.nudge < deadline
+            pkt = self._get((self._heard + self.nudge if early else deadline) - time.monotonic())
+            if pkt is None and early:
+                newest = fly[next(reversed(fly))]
+                self._put(struct.pack("<II", newest.seq, 0) + newest.body)
+                stats["nudges"] += 1
+                nudged = True
+                continue
             if pkt is None:
                 self._check()
                 idle += 1
@@ -557,9 +574,11 @@ class EthLink:
                 self._rto = min(2 * self._rto, self._rto_max)
                 recover = None
                 self._resend(fly)
+                nudged = False
                 continue
+            nudged = False
             while pkt is not None:
-                now = time.monotonic()
+                now = self._heard = time.monotonic()
                 if len(pkt) < 16 or len(pkt) % 4:
                     pkt = self._get(0)
                     continue
@@ -657,6 +676,7 @@ class EthLink:
         self._rto = min(max(self.timeout, self._srtt + 4 * self._rttvar), self._rto_max)
 
     def _put(self, msg):
+        self._heard = time.monotonic()
         try:
             self._sock.send(msg)
         except OSError as e:            # also the ICMP error of an earlier datagram

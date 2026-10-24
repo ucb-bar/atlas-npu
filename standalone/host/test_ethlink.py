@@ -70,8 +70,9 @@ class MockBoard(threading.Thread):
     (the Ethernet model's GMII time). Requests are served one at a time."""
 
     def __init__(self, rx=None, tx=None, seed=1, port=0, dram_bytes=16 << 20, exec_s=0.0, rx_s=0.0,
-                 kernel=done_kernel):
+                 kernel=done_kernel, hold=0.0):
         super().__init__(daemon=True)
+        self.hold, self._held = hold, None   # hold: a request waits for the next one (the VCU118's receive path)
         self.rx, self.tx = rx or Net(), tx or Net()
         self.rng = random.Random(seed)
         self.exec_s, self.rx_s, self.kernel = exec_s, rx_s, kernel
@@ -111,6 +112,12 @@ class MockBoard(threading.Thread):
                         pkt, peer = self.sock.recvfrom(65536)
                     except (BlockingIOError, ConnectionRefusedError):
                         break
+                    if self._held is not None:
+                        self._push(0.0, "rx", *self._held)
+                        self._held = None
+                    if self.rng.random() < self.hold:
+                        self._held = (pkt, peer)
+                        continue
                     for dt in self.rx.copies(self.rng):
                         self._push(dt, "rx", pkt, peer)
             while self._events and self._events[0][0] <= time.monotonic():
@@ -390,7 +397,7 @@ class EthLinkTest(unittest.TestCase):
 
     def test_packing_limits(self):
         b = self.board()
-        lk = self.link(b, timeout=1.0)
+        lk = self.link(b, timeout=1.0, nudge=None)    # counts every datagram sent
         sent = []
         put = lk._put
         lk._put = lambda m: (sent.append(bytes(m)), put(m))
@@ -426,7 +433,7 @@ class EthLinkTest(unittest.TestCase):
         lk = self.link(b, window=4, timeout=1.0)
         t0 = time.monotonic()
         lk.write_bulk(DRAM_BASE, os.urandom(4 * ETH_WRITE_WORDS * 12))
-        first = [s for t, s in b.received if t0 <= t < t0 + 0.04]
+        first = {s for t, s in b.received if t0 <= t < t0 + 0.04}   # a nudge copy is not a new datagram
         self.assertEqual(len(first), 4)
         self.assertEqual(lk.stats["datagrams"], 12)
 
@@ -495,6 +502,25 @@ class EthLinkTest(unittest.TestCase):
         self.assertEqual(bytes(b.dram[:len(data)]), data)
         self.assertEqual(b.exec_log, [7, 8, 9])
         self.assertEqual(lk.read_words(DRAM_BASE, 1000), list(struct.unpack("<1000I", data[:4000])))
+
+    def test_held_frame(self):
+        """Half the requests wait in the board's receive path for the next datagram (as on the VCU118):
+        the nudge sends the newest datagram again after 1 ms, so no transaction waits for the timeout."""
+        b = self.board(hold=0.5)
+        lk = self.link(b, timeout=1.0)
+        lk.batch([("w", CSR_EXEC_CONTROL, [5])])
+        t0 = time.monotonic()
+        for i in range(100):
+            lk.write_words(SYS_SCRATCH, [i])
+            self.assertEqual(lk.read_words(SYS_SCRATCH, 1), [i])
+        self.assertLess(time.monotonic() - t0, 10.0)        # 200 transactions; one timeout would be 1 s
+        self.assertEqual(lk.stats["timeouts"], 0)
+        self.assertGreater(lk.stats["nudges"], 0)
+        self.assertEqual(b.exec_log, [5])
+        lk2 = self.link(b, timeout=0.2, nudge=None)          # without the nudge: timeouts
+        for i in range(20):
+            lk2.read_words(SYS_SCRATCH, 1)
+        self.assertGreater(lk2.stats["timeouts"], 0)
 
     def test_defaults(self):
         b = self.board(**heavy(0.1))
