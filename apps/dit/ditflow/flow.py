@@ -2,7 +2,7 @@
 
     python -m ditflow.flow build  OUT [--preset small] [--steps N] [--seed S] [--input-seed I] [--policy]
     python -m ditflow.flow golden OUT                 # functional model, bit-exact with the RTL
-    python -m ditflow.flow run    OUT --board [--port TTY] | --sim ATLAS_SIM
+    python -m ditflow.flow run    OUT --board [--port TTY] | --eth [IP] | --sim ATLAS_SIM
     python -m ditflow.flow report OUT
 
 build writes OUT/program.S, OUT/bundle.json (program words and DRAM preload, the format
@@ -165,13 +165,16 @@ def golden(out: Path) -> None:
     (out / "bundle_checked.json").write_text(json.dumps(bundle))
 
 
-def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget: float | None) -> None:
+def run(out: Path, board: bool, port: str | None, sim_binary: str | None, budget: float | None,
+        eth: str | None = None) -> None:
     sys.path.insert(0, str(HOST))
     import atlas_host as h
     saved = torch.load(out / "compiled.pt", weights_only=False)
     c = saved["compiled"]
     bundle = json.loads((out / "bundle.json").read_text())
-    if board:
+    if eth is not None:
+        link, target, budget = h.EthLink(eth or h.ETH_IP_DEFAULT), "board", budget or 600.0
+    elif board:
         link, target, budget = h.TsiLink(port=port or TTY), "board", budget or 600.0
     else:
         link, target, budget = h.SimLink(sim_binary), "sim", budget or 2e9
@@ -250,6 +253,7 @@ def main(argv=None) -> None:
     r.add_argument("out", type=Path)
     t = r.add_mutually_exclusive_group(required=True)
     t.add_argument("--board", action="store_true")
+    t.add_argument("--eth", nargs="?", const="", metavar="IP", help="the board over TSI over UDP")
     t.add_argument("--sim", metavar="ATLAS_SIM")
     r.add_argument("--port")
     r.add_argument("--budget", type=float, help="seconds on the board, cycles in simulation")
@@ -263,7 +267,7 @@ def main(argv=None) -> None:
     elif a.cmd == "golden":
         golden(a.out)
     elif a.cmd == "run":
-        run(a.out, a.board, a.port, a.sim, a.budget)
+        run(a.out, a.board, a.port, a.sim, a.budget, a.eth)
     else:
         report(a.out)
 
