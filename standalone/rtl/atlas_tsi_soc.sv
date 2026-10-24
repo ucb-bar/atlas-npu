@@ -39,6 +39,7 @@ module atlas_tsi_soc
     input  logic        gmii_alive,  // GMII clock running
     input  logic [15:0] rx_dropped,
     input  logic [15:0] rx_bad,
+    input  logic [31:0] rx_frames,
     output logic [31:0] local_ip,    // sys_regs ETH_IP
 
     // External DRAM (EXT_DRAM), see atlas_soc
@@ -101,7 +102,7 @@ module atlas_tsi_soc
         .dropped, .bad_cmd, .denied, .halted, .user_leds,
         .eth_pcs_status(pcs_sync[1]), .eth_phy_ready(phy_ready), .eth_phy_id_ok(phy_id_ok),
         .eth_gmii_alive(gmii_alive), .eth_synced, .eth_n_exec, .eth_n_dup, .eth_n_drop,
-        .eth_rx_dropped(rx_dropped), .eth_rx_bad(rx_bad), .local_ip,
+        .eth_rx_dropped(rx_dropped), .eth_rx_bad(rx_bad), .eth_rx_frames(rx_frames), .local_ip,
         .ext_a_valid, .ext_a_ready, .ext_a,
         .ext_d_valid, .ext_d_ready, .ext_d, .ext_dma_a_valid, .ext_dma_a_ready, .ext_dma_a_opcode,
         .ext_dma_a_source, .ext_dma_a_address, .ext_dma_a_mask, .ext_dma_a_data, .ext_dma_d_valid,

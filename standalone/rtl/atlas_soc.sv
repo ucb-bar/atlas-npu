@@ -65,6 +65,7 @@ module atlas_soc
     input  logic [31:0] eth_n_drop,
     input  logic [15:0] eth_rx_dropped,
     input  logic [15:0] eth_rx_bad,
+    input  logic [31:0] eth_rx_frames,
     output logic [31:0] local_ip,   // sys_regs ETH_IP
 
     // External DRAM (EXT_DRAM): the host port and the DMA port of atlas_dram
@@ -366,7 +367,8 @@ module atlas_soc
                        dbg_mxu0_comp, dbg_mxu0_data, halted}),
         .user_leds,
         .eth_pcs_status, .eth_phy_ready, .eth_phy_id_ok, .eth_gmii_alive, .eth_synced,
-        .eth_n_exec, .eth_n_dup, .eth_n_drop, .eth_rx_dropped, .eth_rx_bad, .eth_ip(local_ip));
+        .eth_n_exec, .eth_n_dup, .eth_n_drop, .eth_rx_dropped, .eth_rx_bad, .eth_rx_frames,
+        .eth_ip(local_ip));
 
     // ── DRAM ────────────────────────────────────────────────────────────────
     if (EXT_DRAM) begin : g_ext

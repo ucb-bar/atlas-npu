@@ -108,7 +108,7 @@ module vcu118_atlas_top
     logic [7:0]  gmii_rxd, gmii_txd;
     logic [15:0] pcs_status, rx_dropped, rx_bad;
     logic        phy_ready, phy_id_ok, gmii_alive;
-    logic [31:0] local_ip, eth_rx_data, eth_tx_data;
+    logic [31:0] local_ip, eth_rx_data, eth_tx_data, rx_frames;
     logic        eth_rx_valid, eth_rx_ready, eth_rx_last, eth_rx_abort;
     logic        eth_tx_valid, eth_tx_ready, eth_tx_last;
 
@@ -128,7 +128,7 @@ module vcu118_atlas_top
         .rx_last(eth_rx_last), .rx_abort(eth_rx_abort),
         .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
         .tx_last(eth_tx_last),
-        .rx_dropped, .rx_bad);
+        .rx_dropped, .rx_bad, .rx_frames);
 
     // ── SoC ─────────────────────────────────────────────────────────────────
     logic          activity, error, halted, calibrated;
@@ -151,7 +151,8 @@ module vcu118_atlas_top
         .rx_last(eth_rx_last), .rx_abort(eth_rx_abort),
         .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
         .tx_last(eth_tx_last),
-        .pcs_status, .phy_ready, .phy_id_ok, .gmii_alive, .rx_dropped, .rx_bad, .local_ip,
+        .pcs_status, .phy_ready, .phy_id_ok, .gmii_alive, .rx_dropped, .rx_bad, .rx_frames,
+        .local_ip,
         .ext_a_valid, .ext_a_ready, .ext_a, .ext_d_valid, .ext_d_ready, .ext_d,
         .ext_dma_a_valid(dma_a_valid), .ext_dma_a_ready(dma_a_ready),
         .ext_dma_a_opcode(dma_a_opcode), .ext_dma_a_source(dma_a_source),

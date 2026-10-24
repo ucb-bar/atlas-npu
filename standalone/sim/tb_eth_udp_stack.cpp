@@ -158,7 +158,10 @@ struct GmiiDriver {  // frames into gmii_rxd
     struct Beat { uint8_t d, dv, er; int tag; };
     std::deque<Beat> q;
     std::vector<uint64_t> end_cyc = std::vector<uint64_t>(64, 0);
+    unsigned sent = 0, good = 0;  // frames, and those without a bad FCS or GMII error
     void frame(Bytes f, bool bad_fcs = false, bool er = false, int tag = -1) {
+        sent++;
+        good += !bad_fcs && !er;
         while (f.size() < 60) f.push_back(0);
         uint32_t c = crc32(f.data(), f.size()) ^ (bad_fcs ? 1u : 0u);
         for (int i = 0; i < 4; i++) f.push_back(uint8_t(c >> (8 * i)));
@@ -428,6 +431,25 @@ static Words reply_words(uint32_t ip, uint16_t port, const Bytes& data) {
 
 static void settle() { run(200); }  // let local_ip and the counters cross
 
+// rx_frames counts the frames at the GMII input ([15:0]) and out of the MAC ([31:16]). The MAC
+// passes those without a bad FCS or GMII error: its FIFO never fills, as the stack drains it.
+struct FrameCount { uint32_t rx; unsigned sent, good; };
+
+static FrameCount frame_count() {  // once the frames queued so far are through
+    wait_for([] { return drv.q.empty(); }, 1000000);
+    run(5000);
+    return {top->rx_frames, drv.sent, drv.good};
+}
+
+static void check_frames(const FrameCount& c, const char* what) {
+    auto at = [&](int sh) { return uint16_t((top->rx_frames >> sh) - (c.rx >> sh)); };
+    uint16_t g = uint16_t(drv.sent - c.sent), m = uint16_t(drv.good - c.good);
+    wait_for([&] { return drv.q.empty() && at(0) == g && at(16) == m; }, 200000);
+    run(3000);
+    CHECK(at(0) == g && at(16) == m, "%s: rx_frames GMII +%u MAC +%u, want +%u +%u", what, at(0),
+          at(16), g, m);
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 static void test_arp() {
     send_arp_request(MAC_A, IP_A, local_ip);
@@ -461,13 +483,14 @@ static void test_arp_for_peer() {
 }
 
 static void test_filter() {
-    settle();
+    FrameCount fc = frame_count();
     unsigned drop0 = top->rx_dropped, bad0 = top->rx_bad;
     auto expect = [&](unsigned drop, unsigned bad, const char* what) {
         quiet(3000, what);
         CHECK(unsigned(top->rx_dropped - drop0) == drop && unsigned(top->rx_bad - bad0) == bad,
               "%s: rx_dropped +%u rx_bad +%u, want +%u +%u", what, unsigned(top->rx_dropped - drop0),
               unsigned(top->rx_bad - bad0), drop, bad);
+        check_frames(fc, what);
     };
     Bytes d = pattern(5, 16);
     auto to_us = [&](const Bytes& u, uint16_t flags_frag = 0x4000, bool bad_sum = false) {
@@ -493,8 +516,14 @@ static void test_filter() {
     expect(7, 2, "GMII rx_er");
     drv.frame(eth(LOCAL_MAC, MAC_A, 0x86DD, Bytes(80, 0x11)));
     expect(7, 2, "IPv6");
+    top->gmii_clk_en = 0;  // the MAC does not see the frame; rx_frames [15:0] counts it
+    send_udp(MAC_A, IP_A, 40000, local_ip, PORT, d);
+    drv.good--;
+    expect(7, 2, "gmii_clk_en low");
+    top->gmii_clk_en = 1;
     send_udp(MAC_A, IP_A, 40000, local_ip, PORT, d);
     check_dgram(next_rx(), IP_A, 40000, d);
+    check_frames(fc, "datagram");
     printf("filter and counters: ok\n");
 }
 
@@ -778,6 +807,7 @@ int main(int argc, char** argv) {
     top->rst = 0;
     settle();
 
+    FrameCount fc = frame_count();
     test_arp();
     test_echo_a();
     test_arp_for_peer();
@@ -787,8 +817,12 @@ int main(int argc, char** argv) {
     test_line_rate();
     test_backpressure();
     test_core_reset();
+    check_frames(fc, "all tests before the GMII resets");
     test_gmii_resets(200);
+    fc = frame_count();
     test_ip_change();
+    check_frames(fc, "local_ip change");
+    printf("rx_frames: ok\n");
 
     top->final();
     printf("%s: %d failures, seed %u, core clock %.2f MHz, %llu GMII cycles, %llu core cycles\n",

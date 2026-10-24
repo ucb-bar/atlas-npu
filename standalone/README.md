@@ -275,6 +275,7 @@ outputs = link.read_words(0x9000_0800, 256)
 | `0x048` | ETH_MAC_LO | MAC address [31:0] |
 | `0x04C` | ETH_MAC_HI | MAC address [47:32] |
 | `0x050` | ETH_RXERR | [15:0] frames dropped before the TSI target, [31:16] frames with a bad FCS or a GMII error |
+| `0x054` | ETH_RXFRAMES | [15:0] frames at the GMII input, [31:16] frames out of the MAC |
 
 In a build without Ethernet (the word-level Verilator model), ETH_STATUS and the Ethernet
 counters read 0. docs/tsi-over-udp.md has the bit details.

@@ -28,6 +28,7 @@
 //   0x04C  ETH_MAC_HI  RO  MAC address [47:32]
 //   0x050  ETH_RXERR   RO  [15:0] frames dropped before the TSI target, [31:16] frames with a bad FCS
 //                          or a GMII error
+//   0x054  ETH_RXFRAMES RO [15:0] frames at the GMII input, [31:16] frames out of the MAC
 //
 // In a build without Ethernet (ETH = 0, the word-level Verilator model) ETH_STATUS and the
 // counters read 0.
@@ -69,6 +70,7 @@ module atlas_sys_regs
     input  logic [31:0] eth_n_drop,
     input  logic [15:0] eth_rx_dropped,
     input  logic [15:0] eth_rx_bad,
+    input  logic [31:0] eth_rx_frames,
     output logic [31:0] eth_ip
 );
     logic [31:0] scratch, denied_count, cycles, run_cycles, rdata;
@@ -102,6 +104,7 @@ module atlas_sys_regs
             10'h12:  rdata = ETH_MAC[31:0];
             10'h13:  rdata = {16'd0, ETH_MAC[47:32]};
             10'h14:  rdata = {eth_rx_bad, eth_rx_dropped};
+            10'h15:  rdata = eth_rx_frames;
             default: begin
                 rdata = '0;
                 hit   = 1'b0;

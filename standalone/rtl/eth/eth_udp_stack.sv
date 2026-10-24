@@ -48,7 +48,8 @@ module eth_udp_stack #(
     output logic        tx_ready,
     input  logic        tx_last,
     output logic [15:0] rx_dropped,  // frames dropped before the core (see Counters)
-    output logic [15:0] rx_bad       // frames with a bad FCS or a GMII error
+    output logic [15:0] rx_bad,      // frames with a bad FCS or a GMII error
+    output logic [31:0] rx_frames    // [15:0] frames at the GMII input, [31:16] out of the MAC
 );
     localparam int MAC_RX_DEPTH = 8192;    // the stack drains it at line rate; covers ARP stalls
     localparam int MAX_PAYLOAD  = 1472;    // one 1500-byte IP packet
@@ -364,23 +365,31 @@ module eth_udp_stack #(
     // ── Counters ────────────────────────────────────────────────────────────
     // rx_dropped: MAC FIFO full or bad frame, IP header errors, UDP without payload, UDP to
     // local_ip on another port or fragmented, datagram FIFO full or short payload, cut by a core
-    // reset. Both wrap at 16 bits and reset with the GMII side.
-    logic [15:0] n_drop, n_bad;
+    // reset. rx_frames: rising edges of gmii_rx_dv (every gmii_clk cycle, not gated by
+    // gmii_clk_en) and frames the MAC passes on. All wrap at 16 bits and reset with the GMII side.
+    logic [15:0] n_drop, n_bad, n_gmii, n_mac;
+    logic        dv_q;
 
     always_ff @(posedge gmii_clk) begin
+        dv_q <= gmii_rx_dv;
         if (grst) begin
             n_drop <= '0;
             n_bad  <= '0;
+            n_gmii <= '0;
+            n_mac  <= '0;
         end else begin
             n_bad  <= n_bad + 16'(mac_bad);
             n_drop <= n_drop + 16'(mac_overflow) + 16'(mac_drop_bad) + 16'(ip_bad_hdr)
                     + 16'(ip_bad_sum) + 16'(ip_short_hdr) + 16'(udp_short_hdr) + 16'(other_port)
                     + 16'(q_overflow) + 16'(q_bad) + 16'(x_overflow);
+            n_gmii <= n_gmii + 16'(gmii_rx_dv && !dv_q);
+            n_mac  <= n_mac + 16'(mrx_valid && mrx_ready && mrx_last);
         end
     end
 
-    eth_cdc_word #(.W(32)) u_cnt (
-        .sclk(gmii_clk), .sdata({n_bad, n_drop}), .dclk(clk), .ddata({rx_bad, rx_dropped}));
+    eth_cdc_word #(.W(64)) u_cnt (
+        .sclk(gmii_clk), .sdata({n_mac, n_gmii, n_bad, n_drop}), .dclk(clk),
+        .ddata({rx_frames, rx_bad, rx_dropped}));
 endmodule
 
 // Carries a word to another clock domain. The source holds a copy, toggles req and waits for the

@@ -30,6 +30,7 @@ module atlas_eth_sim
     logic [31:0] rx_data, tx_data;
     logic        rx_valid, rx_ready, rx_last, rx_abort, tx_valid, tx_ready, tx_last;
     logic [15:0] rx_dropped, rx_bad;
+    logic [31:0] rx_frames;
 
     assign local_mac = ETH_MAC;
 
@@ -39,7 +40,7 @@ module atlas_eth_sim
         .clk, .rst, .local_ip,
         .rx_data, .rx_valid, .rx_ready, .rx_last, .rx_abort,
         .tx_data, .tx_valid, .tx_ready, .tx_last,
-        .rx_dropped, .rx_bad);
+        .rx_dropped, .rx_bad, .rx_frames);
 
     atlas_tsi_soc #(.DRAM_LINE_W(DRAM_LINE_W), .ETH_IP(ETH_IP), .ETH_MAC(ETH_MAC),
                     .ETH_PORT(ETH_PORT)) u_soc (
@@ -47,7 +48,7 @@ module atlas_eth_sim
         .rx_data, .rx_valid, .rx_ready, .rx_last, .rx_abort,
         .tx_data, .tx_valid, .tx_ready, .tx_last,
         .pcs_status(16'h1883), .phy_ready(1'b1), .phy_id_ok(1'b1), .gmii_alive(1'b1),
-        .rx_dropped, .rx_bad, .local_ip,
+        .rx_dropped, .rx_bad, .rx_frames, .local_ip,
         .ext_a_valid(), .ext_a_ready(1'b0), .ext_a(), .ext_d_valid(1'b0), .ext_d_ready(), .ext_d('0),
         .ext_dma_a_valid(), .ext_dma_a_ready(1'b0), .ext_dma_a_opcode(), .ext_dma_a_source(),
         .ext_dma_a_address(), .ext_dma_a_mask(), .ext_dma_a_data(), .ext_dma_d_valid(1'b0),

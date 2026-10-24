@@ -35,7 +35,7 @@ module atlas_soc_sim
         .dropped(1'b0), .bad_cmd(1'b0), .denied(), .halted, .user_leds(),
         .eth_pcs_status('0), .eth_phy_ready(1'b0), .eth_phy_id_ok(1'b0), .eth_gmii_alive(1'b0),
         .eth_synced(1'b0), .eth_n_exec('0), .eth_n_dup('0), .eth_n_drop('0), .eth_rx_dropped('0),
-        .eth_rx_bad('0), .local_ip(),
+        .eth_rx_bad('0), .eth_rx_frames('0), .local_ip(),
         .ext_a_valid(), .ext_a_ready(1'b0), .ext_a(), .ext_d_valid(1'b0), .ext_d_ready(), .ext_d('0),
         .ext_dma_a_valid(), .ext_dma_a_ready(1'b0), .ext_dma_a_opcode(), .ext_dma_a_source(),
         .ext_dma_a_address(), .ext_dma_a_mask(), .ext_dma_a_data(), .ext_dma_d_valid(1'b0),
