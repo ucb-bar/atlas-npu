@@ -3,8 +3,9 @@
 //
 //   tb_eth_tsi     eth_tsi is host 1 of tl_arbiter, a random host 0 shares the fabric. A reference
 //                  model of the protocol predicts every reply, the counters and the final memory.
-//                  Directed cases, then random datagrams (+n=<count>), then cycles per 32-byte line
-//                  for long DRAM writes and reads.
+//                  Directed cases (commands, sessions of several peers, datagrams cut short or
+//                  longer than their length), then random datagrams (+n=<count>), then cycles per
+//                  32-byte line for long DRAM writes and reads.
 //   tb_tl_arbiter  tl_arbiter between two random hosts.
 package tb_eth_pkg;
     import tl_pkg::*;
@@ -198,7 +199,7 @@ module tb_eth_tsi;
 
     // ── DUT, host 0, arbiter, memory ────────────────────────────────────────
     logic [31:0] rx_data = '0, tx_data;
-    logic        rx_valid = 0, rx_last = 0, rx_ready, tx_valid, tx_ready = 0, tx_last;
+    logic        rx_valid = 0, rx_last = 0, rx_abort = 0, rx_ready, tx_valid, tx_ready = 0, tx_last;
     logic        e_a_valid, e_a_ready, e_d_valid, e_d_ready;
     wa_t         e_a;
     wd_t         e_d;
@@ -207,7 +208,7 @@ module tb_eth_tsi;
 
     eth_tsi #(.REPLY_WORDS(RW)) dut (
         .clk, .rst(dut_rst),
-        .rx_data, .rx_valid, .rx_ready, .rx_last, .tx_data, .tx_valid, .tx_ready, .tx_last,
+        .rx_data, .rx_valid, .rx_ready, .rx_last, .rx_abort, .tx_data, .tx_valid, .tx_ready, .tx_last,
         .a_valid(e_a_valid), .a_ready(e_a_ready), .a(e_a),
         .d_valid(e_d_valid), .d_ready(e_d_ready), .d(e_d),
         .synced, .n_exec, .n_dup, .n_drop, .done);
@@ -322,6 +323,8 @@ module tb_eth_tsi;
     logic [255:0] ref_mem [logic [26:0]];
     bit           m_synced = 0, m_den, m_reply;
     logic [31:0]  m_expect = 0, m_exec = 0, m_dup = 0, m_drop = 0, m_status;
+    logic [31:0]  m_sip, m_sseq = 0;  // the session: peer and SYNC seq
+    logic [15:0]  m_sport;
     logic [3:0]   m_flags;
     int           m_ndata;
     logic [31:0]  expw [$];  // expected reply words
@@ -330,8 +333,10 @@ module tb_eth_tsi;
     logic [31:0]  hist [$];  // the datagrams of the expected replies
     int           histn [$];
     int           n_replies = 0, n_sent = 0;
-    int           st_kind [6] = '{0, 0, 0, 0, 0, 0};  // runs, SYNC, DUP, DROP, NOSYNC, malformed
+    // runs, SYNC, DUP, DROP, NOSYNC, malformed, cut in the head, SYNC copy, NOSYNC (other peer)
+    int           st_kind [9] = '{0, 0, 0, 0, 0, 0, 0, 0, 0};
     int           st_bit [4] = '{0, 0, 0, 0};         // runs with CUT, BADCMD, OVERFLOW, DENIED
+    int           st_end [3] = '{0, 0, 0};            // rx_abort, early rx_last, words past the length
     longint       st_cmds = 0, st_rd = 0;
 
     function automatic logic [255:0] ref_line(logic [26:0] l);
@@ -367,24 +372,38 @@ module tb_eth_tsi;
         expl.push_back(l);
     endfunction
 
-    // Runs dg through the model and queues the expected reply.
-    function automatic void model();
-        int          n, i;
+    // Runs dg through the model and queues the expected reply. abort: rx_abort on the last word.
+    function automatic void model(bit abort);
+        int          n, w, i;
         logic [31:0] seq, cmd, st, len_port;
         logic [63:0] ad, ln, k;
         logic [31:0] data [$];
-        bit          cut, bad, ovf;
+        bit          short, same, cut, bad, ovf;
         logic [15:0] ncmd;
         data.delete();  // local queues keep their contents between calls in Verilator 5.020
         n = dg.size();
         m_reply = 0;
         len_port = n > 1 ? dg[1] : '0;
-        if (n < 4 || len_port[31:16] < 16'd8 || len_port[17:16] != 2'd0) begin
+        if (n < 2 || len_port[31:16] < 16'd8 || len_port[17:16] != 2'd0) begin
             m_drop++;
             st_kind[5]++;
             return;
         end
+        // Cut short (rx_abort, or rx_last before the length): the last word is not used.
+        // Words past the length are ignored.
+        w = int'(len_port[31:18]);
+        short = n - 2 <= w && (abort || n - 2 < w);
+        if (abort) st_end[0]++;
+        else if (n - 2 < w) st_end[1]++;
+        if (n - 2 > w) st_end[2]++;
+        n = short ? n - 1 : 2 + w;
+        if (n < 4) begin
+            m_drop++;
+            st_kind[6]++;
+            return;
+        end
         seq = dg[2];
+        same = m_synced && dg[0] == m_sip && len_port[15:0] == m_sport;
         m_reply = 1;
         m_den = 0;
         cut = 0;
@@ -393,14 +412,21 @@ module tb_eth_tsi;
         ncmd = 0;
         st = '0;
         if (dg[3][0]) begin
-            m_synced = 1;
-            m_expect = seq + 1;
+            if (!same || seq != m_sseq) begin
+                m_synced = 1;
+                m_expect = seq + 1;
+                m_sip    = dg[0];
+                m_sport  = len_port[15:0];
+                m_sseq   = seq;
+                st_kind[1]++;
+            end else begin
+                st_kind[7]++;
+            end
             m_flags = 4'h1;
-            st_kind[1]++;
-        end else if (!m_synced) begin
+        end else if (!same) begin
             m_flags = 4'h4;
             m_drop++;
-            st_kind[4]++;
+            st_kind[m_synced ? 8 : 4]++;
         end else if (seq == m_expect) begin
             m_flags = 4'h0;
             i = 4;
@@ -444,7 +470,7 @@ module tb_eth_tsi;
                 end
                 if (!cut) ncmd++;
             end
-            st = {12'd0, m_den, ovf, bad, cut, ncmd};
+            st = {12'd0, m_den, ovf, bad, cut || short, ncmd};
             m_expect++;
             m_exec++;
             st_kind[0]++;
@@ -480,12 +506,17 @@ module tb_eth_tsi;
 
     // ── Datagram builder ────────────────────────────────────────────────────
     logic [31:0] rxq [$];
-    bit          rxl [$];
+    bit          rxl [$], rxa [$];
 
-    function automatic void dg_head(logic [31:0] seq, logic [31:0] flags);
+    // Peers: 1 has the IP of 0 and another port, 2 the port of 0 and another IP
+    logic [31:0] p_ip [4];
+    logic [15:0] p_port [4];
+
+    // p < 0: the session's peer
+    function automatic void dg_head(logic [31:0] seq, logic [31:0] flags, int p = -1);
         dg.delete();
-        dg.push_back($urandom);                    // peer IP
-        dg.push_back({16'd0, 16'($urandom)});      // peer port
+        dg.push_back(p < 0 ? m_sip : p_ip[p]);
+        dg.push_back({16'd0, p < 0 ? m_sport : p_port[p]});
         dg.push_back(seq);
         dg.push_back(flags);
     endfunction
@@ -508,19 +539,58 @@ module tb_eth_tsi;
     endfunction
 
     // Sets the length field (plen < 0: the words of dg), runs the model, queues the datagram.
-    function automatic void dg_send(int plen = -1);
+    // abort: rx_abort on the last word.
+    function automatic void dg_send(int plen = -1, bit abort = 0);
         logic [31:0] w;
         if (dg.size() > 1) begin
             w = dg[1];
             w[31:16] = plen < 0 ? 16'(4 * (dg.size() - 2)) : 16'(plen);
             dg[1] = w;
         end
-        model();
+        model(abort);
         foreach (dg[k]) begin
             rxq.push_back(dg[k]);
             rxl.push_back(k == dg.size() - 1);
+            rxa.push_back(abort && k == dg.size() - 1);
         end
         n_sent++;
+    endfunction
+
+    // Sends the first n words of dg, the length field still counting all of them.
+    function automatic void dg_cut(int n, bit abort);
+        int plen;
+        plen = 4 * (dg.size() - 2);
+        while (dg.size() > n) void'(dg.pop_back());
+        dg_send(plen, abort);
+    endfunction
+
+    // Sends dg; sometimes cut short (rx_abort on a stale last word, or an early rx_last) or
+    // followed by words past its length.
+    function automatic void dg_send_rand();
+        int          r, n, plen;
+        logic [31:0] w;
+        r = $urandom % 100;
+        plen = 4 * (dg.size() - 2);
+        if (r < 3) begin                         // rx_abort on the last word
+            if ($urandom % 2) dg[dg.size() - 1] = $urandom;
+            dg_send(plen, 1);
+        end else if (r < 6) begin                // cut after n words
+            n = 1 + $urandom % (dg.size() - 1);
+            w = ($urandom % 2) ? dg[n] : $urandom;
+            while (dg.size() > n) void'(dg.pop_back());
+            if ($urandom % 2) begin
+                dg.push_back(w);                 // the stale word, with rx_abort
+                dg_send(plen, 1);
+            end else begin
+                dg_send(plen);
+            end
+        end else if (r < 9) begin                // words past the length
+            if ($urandom % 2) dg_write(rand_addr(), 1 + $urandom % 4);
+            else repeat (1 + $urandom % 4) dg.push_back($urandom);
+            dg_send(plen, $urandom % 4 == 0);
+        end else begin
+            dg_send();
+        end
     endfunction
 
     // ── rx driver, tx monitor ───────────────────────────────────────────────
@@ -534,14 +604,18 @@ module tb_eth_tsi;
             in_dg <= !rx_last;
             void'(rxq.pop_front());
             void'(rxl.pop_front());
+            void'(rxa.pop_front());
         end
         if (!rx_valid || rx_ready) begin
             if (rxq.size() > 0 && ($urandom % 100) >= p_gap) begin
                 rx_valid <= 1;
                 rx_data  <= rxq[0];
                 rx_last  <= rxl[0];
+                rx_abort <= rxa[0];
             end else begin
                 rx_valid <= 0;
+                rx_last  <= $urandom;  // don't care without rx_valid
+                rx_abort <= $urandom;
             end
         end
     end
@@ -628,6 +702,17 @@ module tb_eth_tsi;
         if (!m_reply || m_flags != flags || m_status != st || (ndata >= 0 && m_ndata != ndata))
             fail($sformatf("%s: model gives reply %0d flags %h status %h data %0d", what,
                            m_reply, m_flags, m_status, m_ndata));
+    endfunction
+
+    function automatic void want_drop(string what);
+        if (m_reply) fail($sformatf("%s: model gives a reply", what));
+    endfunction
+
+    // After drain(): the counters the replies do not show (a datagram dropped last)
+    function automatic void check_counters(string what);
+        if (n_exec != m_exec || n_dup != m_dup || n_drop != m_drop || synced != m_synced)
+            fail($sformatf("%s: counters exec %0d dup %0d drop %0d synced %0d, want %0d %0d %0d %0d",
+                           what, n_exec, n_dup, n_drop, synced, m_exec, m_dup, m_drop, m_synced));
     endfunction
 
     localparam logic [31:0] CUT = 32'h1_0000, BAD = 32'h2_0000, OVF = 32'h4_0000, DEN = 32'h8_0000;
@@ -796,6 +881,139 @@ module tb_eth_tsi;
         drain();
     endtask
 
+    // Sessions: a copy of the SYNC does not reopen the session, other peers get NOSYNC, a SYNC
+    // from another peer or at another seq opens a new session.
+    task automatic sessions();
+        logic [31:0] s, t;
+        s = 32'hA5A5_0000;
+        log_clear();
+        dg_head(s, 1, 0); dg_send();
+        want("open", 4'h1, 0);
+        dg_head(s + 1, 0, 0); dg_write(64'h8000_4000, 4); dg_send();
+        want("run", 4'h0, 1);
+        // The reply to s + 1 is lost, a late copy of the SYNC arrives, s + 1 is sent again
+        dg_head(s, 1, 0); dg_send();
+        want("SYNC copy", 4'h1, 0);
+        if (m_expect != s + 2) fail("SYNC copy: model");
+        dg_head(s + 1, 0, 0); dg_write(64'h8000_4000, 4); dg_send();
+        want("resend after the SYNC copy", 4'h2, 0);
+        dg_head(s, 32'h0000_0F01, 0); dg_write(64'h8000_4000, 4); dg_send();
+        want("SYNC copy with words", 4'h1, 0);
+        drain(); log_size(1);
+
+        // Other peers (another port, another IP, both): NOSYNC, nothing changes
+        log_clear();
+        for (int p = 1; p < 4; p++) begin
+            dg_head(m_expect, 0, p); dg_write(64'h8000_4040, 2); dg_send();
+            want("other peer", 4'h4, 0);
+            dg_head(m_expect - 1, 0, p); dg_send();
+            want("other peer, old seq", 4'h4, 0);
+        end
+        dg_head(m_expect, 0, 0); dg_write(64'h8000_4040, 2); dg_send();
+        want("session peer", 4'h0, 1);
+        drain(); log_size(1); check_counters("other peers");
+
+        // Peer 2 opens a session at a new seq: peer 0 gets NOSYNC
+        t = 32'h0BAD_F00D;
+        dg_head(t, 1, 2); dg_send();
+        want("takeover", 4'h1, 0);
+        dg_head(s + 3, 0, 0); dg_write(64'h8000_4080, 2); dg_send();
+        want("old peer", 4'h4, 0);
+        dg_head(t + 1, 0, 0); dg_write(64'h8000_4080, 2); dg_send();
+        want("old peer, new seq", 4'h4, 0);
+        dg_head(t + 1, 0, 2); dg_read(64'h8000_4000, 4); dg_send();
+        want("new peer", 4'h0, 1, 4);
+        // A SYNC from peer 0 at the seq of peer 2's SYNC is not a copy
+        dg_head(t, 1, 0); dg_send();
+        want("SYNC at that seq from peer 0", 4'h1, 0);
+        if (m_expect != t + 1) fail("SYNC from peer 0: model");
+        dg_head(t + 2, 0, 2); dg_send();
+        want("peer 2 after peer 0's SYNC", 4'h4, 0);
+        // A host restart: SYNC from the same peer at a new seq
+        dg_head(s + 1000, 1, 0); dg_send();
+        want("restart", 4'h1, 0);
+        dg_head(s + 1001, 0, 0); dg_write(64'h8000_4080, 2); dg_send();
+        want("restart runs", 4'h0, 1);
+        drain(); check_counters("sessions");
+    endtask
+
+    // Datagrams cut short (rx_abort, or rx_last before the length) and words past the length
+    task automatic cuts();
+        logic [31:0] e;
+        int          p;
+        // In the prefix, seq or flags: dropped, nothing changes. A stale flags word that says
+        // SYNC does not open a session.
+        e = m_expect;
+        log_clear();
+        for (int k = 1; k <= 4; k++) begin
+            dg_head(e, 0); dg_write(64'h8000_3000, 4); dg_cut(k, 1);
+            want_drop($sformatf("rx_abort on word %0d", k - 1));
+            dg_head(e, 0); dg_write(64'h8000_3000, 4); dg_cut(k, 0);
+            want_drop($sformatf("rx_last on word %0d", k - 1));
+        end
+        dg_head(32'h7777_0000, 1); dg_write(64'h8000_3000, 4); dg_cut(4, 1);
+        want_drop("rx_abort on SYNC flags");
+        dg_head(32'h7777_0000, 1); dg_send(-1, 1);
+        want_drop("rx_abort on SYNC flags, length 8");
+        if (m_expect != e || !m_synced) fail("cut head: model");
+        drain(); log_size(0); check_counters("cut head");
+
+        // In the commands: CUT, the words before the cut were used, expect advances.
+        // On the last word by the length (it would complete the write): 7 of 8 words written.
+        dg_head(m_expect, 0); dg_write(64'h8000_3100, 8); dg_send(-1, 1);
+        want("rx_abort on the last word", 4'h0, CUT);
+        drain(); log_size(1); log_is(0, A_PUT_FULL, 32'h8000_3100, 32'h0FFF_FFFF);
+        dg_head(m_expect - 1, 0); dg_write(64'h8000_3100, 8); dg_send();
+        want("resend after the cut", 4'h2, 0);
+        // On the word path: 2 of 3 words written
+        log_clear();
+        dg_head(m_expect, 0); dg_write(64'h0000_0020, 3); dg_send(-1, 1);
+        want("rx_abort on the word path", 4'h0, CUT);
+        drain(); log_size(2);
+        // At a command boundary: CUT, although no command was cut
+        log_clear();
+        dg_head(m_expect, 0); dg_write(64'h8000_3200, 2); dg_read(64'h8000_3200, 2);
+        dg_write(64'h8000_3300, 1); dg_cut(17, 1);
+        want("rx_abort at a command boundary", 4'h0, CUT | 2, 2);
+        drain(); log_size(2);
+        // On each header word of a command: the command does not run
+        log_clear();
+        for (int k = 0; k < 5; k++) begin
+            dg_head(m_expect, 0); dg_write(64'h8000_3400, 2); dg_read(64'h8000_3400, 3);
+            dg_cut(12 + k, 1);
+            want($sformatf("rx_abort on header word %0d", k), 4'h0, CUT | 1, 0);
+        end
+        drain(); log_size(5);
+        // rx_last early in the data, without rx_abort: 5 of 8 words written
+        log_clear();
+        dg_head(m_expect, 0); dg_write(64'h8000_3500, 8); dg_cut(15, 0);
+        want("early rx_last", 4'h0, CUT);
+        drain(); log_size(1); log_is(0, A_PUT_FULL, 32'h8000_3500, 32'h000F_FFFF);
+        // A read before the cut returns its data
+        dg_head(m_expect, 0); dg_read(64'h8000_3100, 8); dg_write(64'h8000_3600, 4); dg_cut(17, 1);
+        want("read, then cut", 4'h0, CUT | 1, 8);
+
+        // Words past the length are ignored, also a valid write, also with rx_abort
+        drain(); log_clear();
+        dg_head(m_expect, 0); dg_write(64'h8000_3700, 2); p = 4 * (dg.size() - 2);
+        dg_write(64'h8000_3800, 4); dg_send(p);
+        want("past the length", 4'h0, 1);
+        dg_head(m_expect, 0); dg_write(64'h8000_3700, 2); p = 4 * (dg.size() - 2);
+        dg_write(64'h8000_3800, 4); dg_send(p, 1);
+        want("rx_abort past the length", 4'h0, 1);
+        dg_head(m_expect, 0); dg_write(64'h8000_3800, 4); dg_send(8);
+        want("length 8, words past it", 4'h0, 0);
+        dg_head(m_expect, 0); dg_write(64'h8000_3900, 8); dg_send(44);
+        want("length inside a command", 4'h0, CUT);
+        dg_head(m_expect + 5, 0); dg_write(64'h8000_3800, 4); dg_send(8);
+        want("DROP, words past the length", 4'h8, 0);
+        dg_head(m_sseq, 1); dg_write(64'h8000_3800, 4); dg_send(8, 1);
+        want("SYNC copy, rx_abort past the length", 4'h1, 0);
+        drain(); log_size(3);
+        log_is(2, A_PUT_FULL, 32'h8000_3900, 32'h0000_FFFF);
+        check_counters("cuts");
+    endtask
+
     // ── Random datagrams ────────────────────────────────────────────────────
     function automatic logic [63:0] rand_addr();
         int          r;
@@ -856,11 +1074,16 @@ module tb_eth_tsi;
     function automatic void rand_dg();
         int r;
         r = $urandom % 1000;
-        if (r < 40) begin                                  // SYNC
-            dg_head($urandom, 1 | ($urandom % 4 == 0 ? $urandom & 32'hFFFF_FFFE : 0));
+        if (r < 40) begin                                  // SYNC, sometimes from another peer
+            dg_head($urandom, 1 | ($urandom % 4 == 0 ? $urandom & 32'hFFFF_FFFE : 0),
+                    $urandom % 4 == 0 ? int'($urandom % 4) : -1);
             if ($urandom % 4 == 0) add_cmds();
-            dg_send();
-        end else if (r < 70) begin                         // malformed
+            dg_send_rand();
+        end else if (r < 50) begin                         // a copy of the session's SYNC
+            dg_head(m_sseq, 1);
+            if ($urandom % 4 == 0) add_cmds();
+            dg_send_rand();
+        end else if (r < 80) begin                         // malformed
             dg_head(m_expect, 0);
             case ($urandom % 4)
                 0: begin void'(dg.pop_back()); dg_send(4); end
@@ -868,18 +1091,22 @@ module tb_eth_tsi;
                 2: begin add_cmds(); dg_send(4 * (dg.size() - 2) - 1 - $urandom % 3); end
                 default: begin while (dg.size() > 2) void'(dg.pop_back()); dg_send(0); end
             endcase
-        end else if (r < 130) begin                        // DUP
+        end else if (r < 140) begin                        // DUP
             dg_head(m_expect - 1 - $urandom % 20, 0);
             add_cmds();
-            dg_send();
-        end else if (r < 180) begin                        // DROP
+            dg_send_rand();
+        end else if (r < 190) begin                        // DROP
             dg_head(m_expect + 1 + $urandom % 20, 0);
             add_cmds();
-            dg_send();
+            dg_send_rand();
+        end else if (r < 220) begin                        // another peer
+            dg_head(m_expect + $urandom % 3 - 1, 0, $urandom % 4);
+            add_cmds();
+            dg_send_rand();
         end else begin
             dg_head(m_expect, 0);
             add_cmds();
-            dg_send();
+            dg_send_rand();
         end
     endfunction
 
@@ -932,12 +1159,24 @@ module tb_eth_tsi;
         n = 3000;
         void'($value$plusargs("n=%d", n));
         if ($value$plusargs("seed=%d", seed)) void'($urandom(seed));
+        for (int p = 0; p < 4; p++) begin
+            p_ip[p]   = $urandom;
+            p_port[p] = 16'($urandom);
+        end
+        p_ip[1]   = p_ip[0];
+        p_port[1] = p_port[0] ^ 16'(1 << ($urandom % 16));
+        p_ip[2]   = p_ip[0] ^ 32'(1 << ($urandom % 32));
+        p_port[2] = p_port[0];
+        m_sip     = p_ip[0];
+        m_sport   = p_port[0];
         repeat (5) @(negedge clk);
         rst = 0;
         dut_rst = 0;
         repeat (5) @(negedge clk);
 
         directed();
+        sessions();
+        cuts();
         $display("directed: %0d datagrams, %0d replies, %0d errors", n_sent, n_replies, errors);
         p_gap = 0; p_stall = 0;
         for (int i = 0; i < 20; i++) begin                // back to back, no gaps
@@ -947,9 +1186,10 @@ module tb_eth_tsi;
         end
         drain();
         random_phase(n);
-        $display("random: %0d datagrams: %0d run (%0d commands, %0d read words; CUT %0d BADCMD %0d OVERFLOW %0d DENIED %0d), SYNC %0d, DUP %0d, DROP %0d, NOSYNC %0d, malformed %0d; %0d errors",
+        $display("random: %0d datagrams: %0d run (%0d commands, %0d read words; CUT %0d BADCMD %0d OVERFLOW %0d DENIED %0d), SYNC %0d (copies %0d), DUP %0d, DROP %0d, NOSYNC %0d (other peer %0d), malformed %0d, cut in the head %0d; rx_abort %0d, early rx_last %0d, past the length %0d; %0d errors",
                  n_sent, st_kind[0], st_cmds, st_rd, st_bit[0], st_bit[1], st_bit[2], st_bit[3],
-                 st_kind[1], st_kind[2], st_kind[3], st_kind[4], st_kind[5], errors);
+                 st_kind[1], st_kind[7], st_kind[2], st_kind[3], st_kind[4], st_kind[8], st_kind[5],
+                 st_kind[6], st_end[0], st_end[1], st_end[2], errors);
         perf(1);
         perf(8);
         perf(40);
@@ -975,6 +1215,7 @@ module tb_eth_tsi;
                 fail($sformatf("memory line %h written, model did not", {l, 5'd0}));
             end
         end
+        check_counters("end");
         if (n_done != n_replies) fail($sformatf("done pulsed %0d times, %0d replies", n_done, n_replies));
         if (expw.size() != 0) fail($sformatf("%0d reply words missing", expw.size()));
         if (h_err != 0 || h_req != h_resp) fail($sformatf("host 0: %0d errors, %0d requests, %0d responses", h_err, h_req, h_resp));

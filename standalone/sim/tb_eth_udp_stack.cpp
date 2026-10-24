@@ -1,19 +1,24 @@
 // eth_udp_stack self-test. Raw Ethernet frames (preamble, SFD, FCS) go in on GMII rx at 125 MHz;
-// the core side runs at 48-52 MHz (period and phase from the seed). Checks: ARP replies, the
-// core-side words (prefix + payload), replies on GMII tx (ARP for the peer, Ethernet/IPv4/UDP
+// the core side runs within 4% of CLK_HZ (period and phase from the seed). Checks: ARP replies,
+// the core-side words (prefix + payload), replies on GMII tx (ARP for the peer, Ethernet/IPv4/UDP
 // headers, IPv4 header checksum, UDP length and checksum, FCS), filtering and counters, the tx
-// length guards, line rate, ARP while the core does not take datagrams or is in reset, a GMII
-// reset, and a change of local_ip.
-// Build and run: standalone/sim/tb_eth_udp_stack.sh [out_dir] [seed]
+// length guards, line rate, ARP while the core does not take datagrams or is in reset, GMII
+// resets of 1 to 50 cycles (rx_abort, no splice, no stall), and a change of local_ip.
+// Build and run: standalone/sim/tb_eth_udp_stack.sh [out_dir] [seed] [clk_hz]
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <map>
 #include <random>
 #include <vector>
 
 #include "Veth_udp_stack.h"
 #include "verilated.h"
+
+#ifndef CLK_HZ
+#define CLK_HZ 50000000  // the stack's CLK_HZ parameter
+#endif
 
 using Bytes = std::vector<uint8_t>;
 using Words = std::vector<uint32_t>;
@@ -21,7 +26,7 @@ using Words = std::vector<uint32_t>;
 static const uint64_t LOCAL_MAC = 0x020041544C53ull;
 static const uint16_t PORT = 0x5453;
 static const uint64_t GH = 4000;  // GMII half period in ps (125 MHz)
-static uint64_t CH = 10137;       // core half period, 48-52 MHz, set from the seed
+static uint64_t CH = 10000;       // core half period in ps, CLK_HZ +-4%, set from the seed
 
 static VerilatedContext* ctx;
 static Veth_udp_stack* top;
@@ -181,42 +186,59 @@ struct GmiiDriver {  // frames into gmii_rxd
 
 struct GmiiMonitor {  // frames out of gmii_txd, FCS checked and stripped
     Bytes cur;
-    uint64_t start = 0;
+    uint64_t start = 0, rst_at = 0;
+    int cut = 0;  // frames a GMII reset ended on the wire
     std::deque<Bytes> frames;
     std::deque<uint64_t> starts;
     void sample() {
         CHECK(!top->gmii_tx_er, "gmii_tx_er");
+        if (top->gmii_rst) rst_at = gcyc;
         if (top->gmii_tx_en) {
             if (cur.empty()) start = gcyc;
             cur.push_back(top->gmii_txd);
         } else if (!cur.empty()) {
             bool pre = cur.size() >= 8 + 64;
             for (int i = 0; pre && i < 7; i++) pre = cur[i] == 0x55;
-            CHECK(pre && cur[7] == 0xD5, "bad preamble/SFD or short frame (%zu bytes)", cur.size());
-            if (pre) {
-                Bytes f(cur.begin() + 8, cur.end());
+            bool ok = pre && cur[7] == 0xD5, fcs_ok = false;
+            Bytes f;
+            if (ok) {
+                f.assign(cur.begin() + 8, cur.end());
                 uint32_t fcs = uint32_t(f[f.size() - 4]) | uint32_t(f[f.size() - 3]) << 8 |
                                uint32_t(f[f.size() - 2]) << 16 | uint32_t(f[f.size() - 1]) << 24;
                 f.resize(f.size() - 4);
-                CHECK(crc32(f.data(), f.size()) == fcs, "bad FCS on tx frame");
+                fcs_ok = crc32(f.data(), f.size()) == fcs;
+            }
+            if (ok && fcs_ok) {
                 frames.push_back(f);
                 starts.push_back(start);
+            } else if (rst_at >= start && gcyc <= rst_at + 3) {
+                cut++;
+            } else {
+                CHECK(ok, "bad preamble/SFD or short frame (%zu bytes)", cur.size());
+                CHECK(fcs_ok, "bad FCS on tx frame");
             }
             cur.clear();
         }
     }
 } mon;
 
+struct Dgram {
+    Words w;
+    bool abort;  // ended by a word with rx_abort, which is not in w
+};
+
 struct CoreRx {  // rx_* words, one datagram per rx_last
     Words cur;
-    std::deque<Words> dgrams;
+    std::deque<Dgram> dgrams;
     int ready_pct = 70;
-    bool hold = false;
+    bool hold = false, abort_ok = false;
     void pre() {
+        CHECK(!top->rx_abort || (top->rx_valid && top->rx_last), "rx_abort without rx_valid and rx_last");
         if (top->rx_valid && top->rx_ready) {
-            cur.push_back(top->rx_data);
+            CHECK(abort_ok || !top->rx_abort, "rx_abort without a GMII reset");
+            if (!top->rx_abort) cur.push_back(top->rx_data);
             if (top->rx_last) {
-                dgrams.push_back(cur);
+                dgrams.push_back({cur, bool(top->rx_abort)});
                 cur.clear();
             }
         }
@@ -312,7 +334,7 @@ static Words next_rx(uint64_t max_g = 20000) {
         CHECK(false, "no datagram on the core side within %llu cycles", (unsigned long long)max_g);
         return {};
     }
-    Words w = core_rx.dgrams.front();
+    Words w = core_rx.dgrams.front().w;
     core_rx.dgrams.pop_front();
     return w;
 }
@@ -370,16 +392,22 @@ static void check_udp(const Bytes& f, uint64_t dmac, uint32_t dip, uint16_t dpor
     CHECK(get(f, 34, 2) == PORT && get(f, 36, 2) == dport, "UDP ports %llu -> %llu",
           (unsigned long long)get(f, 34, 2), (unsigned long long)get(f, 36, 2));
     CHECK(get(f, 38, 2) == 8 + data.size(), "UDP length %llu", (unsigned long long)get(f, 38, 2));
-    CHECK(get(f, 40, 2) != 0 && sum16(f, 34, 8 + data.size(), pseudo(local_ip, dip, 8 + data.size())) == 0xFFFF,
+    // A computed checksum of 0 goes out as 0 ("none"; udp_checksum_gen does not send 0xFFFF).
+    CHECK(sum16(f, 34, 8 + data.size(), pseudo(local_ip, dip, 8 + data.size())) == 0xFFFF,
           "UDP checksum %04llx", (unsigned long long)get(f, 40, 2));
     CHECK(Bytes(f.begin() + 42, f.begin() + n) == data, "UDP payload differs");
 }
 
 // A datagram on the core side: prefix (peer IP, {length, peer port}), then the payload.
-static void check_dgram(const Words& w, uint32_t sip, uint16_t sport, const Bytes& data) {
-    Words want = {sip, uint32_t(data.size()) << 16 | sport};
+static Words dgram_words(uint32_t sip, uint16_t sport, const Bytes& data) {
+    Words w = {sip, uint32_t(data.size()) << 16 | sport};
     Words p = le_words(data);
-    want.insert(want.end(), p.begin(), p.end());
+    w.insert(w.end(), p.begin(), p.end());
+    return w;
+}
+
+static void check_dgram(const Words& w, uint32_t sip, uint16_t sport, const Bytes& data) {
+    Words want = dgram_words(sip, sport, data);
     CHECK(w.size() == want.size(), "datagram %zu words, want %zu", w.size(), want.size());
     if (w.size() != want.size()) return;
     CHECK(w[0] == want[0] && w[1] == want[1], "prefix %08x %08x, want %08x %08x", w[0], w[1], want[0], want[1]);
@@ -533,12 +561,13 @@ static void test_backpressure() {
     unsigned dropped = unsigned(top->rx_dropped - drop0);
     CHECK(core_rx.dgrams.empty(), "datagram delivered while rx_ready is low");
     core_rx.hold = false;
-    run(80000);
+    wait_for([&] { return core_rx.dgrams.size() + dropped >= size_t(N); }, 400000);
+    run(2000);
     size_t got = core_rx.dgrams.size();
     CHECK(got + dropped == N && got >= 20, "kept %zu, dropped %u, sent %d", got, dropped, N);
     uint32_t prev = 0;
     for (size_t k = 0; k < got; k++) {
-        Words w = core_rx.dgrams.front();
+        Words w = core_rx.dgrams.front().w;
         core_rx.dgrams.pop_front();
         uint32_t tag = w.size() > 2 ? w[2] : 0;
         CHECK(tag >= 1000 && tag < 1000 + N && (k == 0 || tag > prev), "order: tag %u after %u", tag, prev);
@@ -565,7 +594,7 @@ static void test_core_reset() {
     run(20000);
     int late = 0;
     while (!core_rx.dgrams.empty()) {
-        Words w = core_rx.dgrams.front();
+        Words w = core_rx.dgrams.front().w;
         core_rx.dgrams.pop_front();
         uint32_t tag = w.size() > 2 ? w[2] : 0;
         CHECK(tag >= 2000 && tag < 2018, "tag %u", tag);
@@ -581,51 +610,118 @@ static void test_core_reset() {
     printf("core reset: ok\n");
 }
 
-// A GMII reset while the core is slow and datagrams are queued or half delivered: nothing old
-// comes back afterwards; a datagram being delivered may end early (its prefix length then says
-// more than arrived). Then ARP, receive and transmit work again.
-static void test_gmii_reset() {
-    core_rx.ready_pct = 5;
-    for (int i = 0; i < 6; i++) send_udp(MAC_A, IP_A, 7002, local_ip, PORT, pattern(3000 + i, 1000));
-    run(6 * 1100);
-    top->gmii_rst = 1;
-    run(50);
-    top->gmii_rst = 0;
-    core_rx.ready_pct = 70;
-    run(20000);
-    int whole = 0, cut = 0;
-    while (!core_rx.dgrams.empty()) {
-        Words w = core_rx.dgrams.front();
-        core_rx.dgrams.pop_front();
-        uint32_t tag = w.size() > 2 ? w[2] : 0;
-        CHECK(w.size() >= 3 && w[0] == IP_A && w[1] == (1000u << 16 | 7002) && tag >= 3000 && tag < 3006,
-              "datagram after GMII reset: %zu words, prefix %08x %08x, tag %u", w.size(),
-              w.size() > 0 ? w[0] : 0, w.size() > 1 ? w[1] : 0, tag);
-        if (w.size() < 3 || tag < 3000 || tag >= 3006) continue;
-        Words want = le_words(pattern(tag, 1000));
-        bool ok = w.size() == 2 + want.size();
-        for (size_t i = 2; i + 1 < w.size() && i - 2 < want.size(); i++) {
-            CHECK(w[i] == want[i - 2], "datagram %u word %zu", tag, i);
+// GMII resets of 1 to 50 cycles at random points while datagrams cross to the core (slow or fast)
+// and replies cross to GMII. Every datagram the core gets is whole, or the start of one ended by
+// a word with rx_abort (never spliced, nothing old again); rx_abort comes only there. GMII tx
+// carries only whole replies the core sent, in order, and ARP for the peer (answered here). A
+// datagram and a reply sent after each reset get through.
+static void test_gmii_resets(int trials) {
+    std::map<uint32_t, size_t> sent;  // datagram tag -> payload bytes
+    std::map<uint32_t, Bytes> replies;  // reply tag -> payload
+    uint32_t tag = 0x30000, rtag = 0x50000, last = 0, rlast = 0, want_rx = 0, want_tx = 0;
+    bool got_rx = false, got_tx = false;
+    int whole = 0, cut = 0, out = 0;
+    auto new_dgram = [&](size_t len) {
+        sent[tag] = len;
+        send_udp(MAC_A, IP_A, 7004, local_ip, PORT, pattern(tag, len));
+        return tag++;
+    };
+    auto new_reply = [&](size_t len) {
+        replies[rtag] = pattern(rtag, len);
+        core_tx.send(reply_words(IP_A, 7104, replies[rtag]));
+        return rtag++;
+    };
+    auto drain = [&] {
+        while (!mon.frames.empty()) {
+            Bytes f = mon.frames.front();
+            mon.frames.pop_front();
+            mon.starts.pop_front();
+            if (f.size() >= 42 && get(f, 12, 2) == 0x0806 && get(f, 20, 2) == 1) {
+                check_arp(f, 0xFFFFFFFFFFFFull, 1, 0, IP_A);
+                drv.frame(eth(LOCAL_MAC, MAC_A, 0x0806, arp(2, MAC_A, IP_A, LOCAL_MAC, local_ip)));
+            } else if (f.size() >= 42 && get(f, 12, 2) == 0x0806) {
+                check_arp(f, MAC_A, 2, MAC_A, IP_A);
+            } else {
+                uint32_t t = f.size() >= 46 ? le_words(Bytes(f.begin() + 42, f.begin() + 46))[0] : 0;
+                auto it = replies.find(t);
+                CHECK(it != replies.end() && t > rlast, "tx frame (%zu bytes) is not a new reply: tag %x after %x",
+                      f.size(), t, rlast);
+                if (it == replies.end()) continue;
+                check_udp(f, MAC_A, IP_A, 7104, it->second);
+                rlast = t;
+                got_tx |= t == want_tx;
+                out++;
+            }
         }
-        if (ok) ok = w.back() == want.back();
-        CHECK(w.size() <= 3 + want.size(), "datagram %u: %zu words", tag, w.size());
-        (ok ? whole : cut)++;
+        while (!core_rx.dgrams.empty()) {
+            Dgram d = core_rx.dgrams.front();
+            core_rx.dgrams.pop_front();
+            const Words& w = d.w;
+            if (d.abort && w.size() < 3) {  // cut inside the prefix
+                CHECK(w.empty() || (w[0] == IP_A && (w.size() < 2 || (w[1] & 0xFFFF) == 7004)),
+                      "cut datagram: prefix %08x %08x", w.size() > 0 ? w[0] : 0, w.size() > 1 ? w[1] : 0);
+                cut++;
+                continue;
+            }
+            uint32_t t = w.size() > 2 ? w[2] : 0;
+            auto it = sent.find(t);
+            CHECK(it != sent.end() && t > last, "%s datagram (%zu words) is not a new one: tag %u after %u",
+                  d.abort ? "cut" : "whole", w.size(), t, last);
+            if (it == sent.end()) continue;
+            last = t;
+            if (!d.abort) {
+                check_dgram(w, IP_A, 7004, pattern(t, it->second));
+                got_rx |= t == want_rx;
+                whole++;
+                continue;
+            }
+            Words want = dgram_words(IP_A, 7004, pattern(t, it->second));
+            CHECK(w.size() < want.size(), "datagram %u: rx_abort after all %zu words", t, w.size());
+            for (size_t i = 0; i < w.size() && i < want.size(); i++)
+                CHECK(w[i] == want[i], "cut datagram %u word %zu: %08x, want %08x", t, i, w[i], want[i]);
+            cut++;
+        }
+    };
+    static const int ready[] = {2, 10, 30, 70, 100};
+    core_rx.abort_ok = true;
+    for (int k = 0; k < trials; k++) {
+        core_rx.ready_pct = ready[rnd(5)];
+        for (int i = rnd(4); i > 0; i--) new_dgram(rnd(4) ? size_t(4 + rnd(400)) : 1472);
+        for (int i = rnd(3); i > 0; i--) new_reply(4 * size_t(1 + rnd(120)));
+        run(rnd(3000));
+        drain();
+        int pulse = 1 + rnd(50);
+        top->gmii_rst = 1;
+        run(pulse);
+        top->gmii_rst = 0;
+        core_rx.ready_pct = 70;
+        run(1000);  // arp_cache clears its 512 entries after reset and ignores writes meanwhile
+        drain();
+        send_arp_request(MAC_A, IP_A, local_ip);
+        want_rx = new_dgram(4 + rnd(200));
+        want_tx = new_reply(4 * size_t(1 + rnd(30)));
+        got_rx = got_tx = false;
+        bool ok = wait_for([&] {
+            drain();
+            return got_rx && got_tx;
+        }, 100000);
+        CHECK(ok, "reset %d (%d cycles): the datagram after it %s, the reply after it %s (tx_ready %d)", k, pulse,
+              got_rx ? "arrived" : "did not arrive", got_tx ? "went out" : "did not go out", top->tx_ready);
+        if (!ok) break;
     }
-    CHECK(cut <= 1, "%d datagrams cut by the GMII reset", cut);
-    run(1000);  // arp_cache clears its 512 entries after reset and ignores writes meanwhile
-    send_arp_request(MAC_A, IP_A, local_ip);
-    check_arp(next_tx(), MAC_A, 2, MAC_A, IP_A);
-    Bytes d = pattern(9, 32);
-    send_udp(MAC_A, IP_A, 40000, local_ip, PORT, d);
-    check_dgram(next_rx(), IP_A, 40000, d);
-    Bytes r = pattern(10, 8);
-    core_tx.send(reply_words(IP_A, 40000, r));
-    check_udp(next_tx(), MAC_A, IP_A, 40000, r);  // cache refilled by the ARP request
-    printf("GMII reset: ok (%d whole and %d cut datagrams delivered from before the reset)\n", whole, cut);
+    core_rx.abort_ok = false;
+    printf("GMII resets: ok (%d resets of 1-50 cycles; datagrams: %d whole, %d cut with rx_abort, %zu lost; "
+           "%d of %zu replies out, %d cut on the wire)\n", trials, whole, cut,
+           sent.size() - whole - cut, out, replies.size(), mon.cut);
 }
 
 // Back-to-back full-size datagrams at line rate, the core taking 70% of cycles: none dropped.
 static void test_line_rate() {
+    double core_mbs = 0.7 * 4 * 5e5 / double(CH);  // what the core takes, MB/s
+    if (core_mbs < 125 * 1472 / 1538.0) {
+        printf("line rate: skipped (the core takes %.0f MB/s)\n", core_mbs);
+        return;
+    }
     settle();
     unsigned drop0 = top->rx_dropped;
     const int N = 100;
@@ -634,7 +730,7 @@ static void test_line_rate() {
     wait_for([] { return core_rx.dgrams.size() == N; }, 400000);
     uint64_t t = gcyc - t0;
     for (int i = 0; !core_rx.dgrams.empty(); i++) {
-        check_dgram(core_rx.dgrams.front(), IP_A, 7003, pattern(4000 + i, 1472));
+        check_dgram(core_rx.dgrams.front().w, IP_A, 7003, pattern(4000 + i, 1472));
         core_rx.dgrams.pop_front();
     }
     settle();
@@ -670,7 +766,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (argv[i][0] != '+') seed = unsigned(strtoul(argv[i], nullptr, 0));
     rng.seed(seed);
-    CH = 9615 + uint64_t(rnd(800));
+    CH = uint64_t(5e11 / CLK_HZ * (9615 + rnd(800)) / 10000);
     tc = uint64_t(rnd(int(CH)));
     top = new Veth_udp_stack{ctx};
     top->gmii_clk_en = 1;
@@ -691,7 +787,7 @@ int main(int argc, char** argv) {
     test_line_rate();
     test_backpressure();
     test_core_reset();
-    test_gmii_reset();
+    test_gmii_resets(200);
     test_ip_change();
 
     top->final();

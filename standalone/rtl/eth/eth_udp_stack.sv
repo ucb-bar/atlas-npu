@@ -8,6 +8,8 @@
 // The stack runs in the GMII clock; axis_async_fifo_adapter crosses to the core clock both ways.
 // A datagram on the core side is the prefix (peer IP, {payload bytes, peer port}), then the UDP
 // payload, little-endian; a reply is the prefix (peer IP, {16'h0, peer port}), then the payload.
+// rx_abort (only with rx_valid and rx_last) marks a datagram cut short by a GMII-side reset: that
+// last word is not part of the datagram.
 //
 // Receive never waits on the core: the datagram FIFO takes whole datagrams and drops one that does
 // not fit, so ARP and other traffic keep flowing while eth_tsi is busy or the core is in reset.
@@ -20,7 +22,8 @@ module eth_udp_stack #(
     parameter logic [47:0] LOCAL_MAC = 48'h02_00_41_54_4C_53,
     parameter logic [15:0] PORT      = 16'h5453,
     parameter int RX_FIFO_DEPTH = 32768,  // datagram FIFO bytes (whole datagrams; drops when full)
-    parameter int TX_FIFO_DEPTH = 4096    // tx FIFO from the core and MAC tx FIFO bytes
+    parameter int TX_FIFO_DEPTH = 4096,   // tx FIFO from the core and MAC tx FIFO bytes
+    parameter int CLK_HZ = 50_000_000     // core clock (sizes the GMII reset stretch)
 ) (
     input  logic        gmii_clk,
     input  logic        gmii_rst,
@@ -39,6 +42,7 @@ module eth_udp_stack #(
     output logic        rx_valid,
     input  logic        rx_ready,
     output logic        rx_last,
+    output logic        rx_abort,
     input  logic [31:0] tx_data,
     input  logic        tx_valid,
     output logic        tx_ready,
@@ -52,10 +56,15 @@ module eth_udp_stack #(
     localparam int ARP_TIMEOUT  = 125_000_000;  // 1 s after the last retry
 
     // ── Reset and local IP in the GMII clock ────────────────────────────────
+    // Each crossing FIFO passes a reset of one side to the other through a two-flop synchronizer.
+    // A GMII-side reset that ends before the core side has seen it leaves the two sides out of
+    // step (stale words read, pointers apart), so grst lasts at least 8 core cycles at CLK_HZ.
+    localparam int GRST_N = 1 + (8 * 125_000_000 + CLK_HZ - 1) / CLK_HZ;
+
     logic        grst;
     logic [31:0] ip;
 
-    sync_reset #(.N(4)) u_grst (.clk(gmii_clk), .rst(gmii_rst), .out(grst));
+    sync_reset #(.N(GRST_N)) u_grst (.clk(gmii_clk), .rst(gmii_rst), .out(grst));
 
     eth_cdc_word #(.W(32)) u_ip (
         .sclk(clk), .sdata(local_ip), .dclk(gmii_clk), .ddata(ip));
@@ -195,9 +204,9 @@ module eth_udp_stack #(
     // ── Receive: filter, prefix, datagram FIFO, clock crossing ──────────────
     // The datagram FIFO keeps whole frames and is always ready: a datagram that does not fit, or
     // is marked bad (payload shorter than the UDP length), is dropped there, so nothing upstream
-    // ever waits on the core. A small streaming FIFO (8 -> 32 bits) crosses to the core clock; it
-    // resets cleanly from either side, and a datagram cut by a reset is dropped (core reset) or
-    // ends early (GMII reset).
+    // ever waits on the core. A small streaming FIFO (8 -> 32 bits) crosses to the core clock. A
+    // core reset drops the datagram it cuts. A GMII reset ends the datagram being delivered with
+    // an extra word of stale data marked rx_abort (the FIFO's bad-frame tuser).
     typedef enum logic [1:0] {R_IDLE, R_PREFIX, R_DATA, R_SKIP} rstate_t;
     rstate_t     rs;
     logic [2:0]  rcnt;
@@ -263,7 +272,8 @@ module eth_udp_stack #(
         .M_DATA_WIDTH(32),
         .ID_ENABLE(0),
         .DEST_ENABLE(0),
-        .USER_ENABLE(0),
+        .USER_ENABLE(1),
+        .USER_WIDTH(1),
         .FRAME_FIFO(0)
     ) u_rxx (
         .s_clk(gmii_clk), .s_rst(grst),
@@ -273,7 +283,7 @@ module eth_udp_stack #(
         .m_clk(clk), .m_rst(rst),
         .m_axis_tdata(rx_data), .m_axis_tkeep(), .m_axis_tvalid(rx_valid),
         .m_axis_tready(rx_ready), .m_axis_tlast(rx_last), .m_axis_tid(), .m_axis_tdest(),
-        .m_axis_tuser(),
+        .m_axis_tuser(rx_abort),
         .s_pause_req(1'b0), .s_pause_ack(), .m_pause_req(1'b0), .m_pause_ack(),
         .s_status_depth(), .s_status_depth_commit(), .s_status_overflow(x_overflow),
         .s_status_bad_frame(), .s_status_good_frame(),
@@ -377,6 +387,9 @@ endmodule
 // ack (two-flop synchronizers both ways), so the copy is stable whenever the destination takes it.
 // It runs continuously: the output follows the input a few cycles of both clocks late. No reset:
 // it starts from the initial values.
+// hold -> dreg is not timed (build.tcl makes the clocks asynchronous groups). The destination
+// takes hold two dclk cycles after the synchronized req edge (req_q), so that path may be up to
+// about two dclk periods slower than req -> req_d[0] before old and new bits can mix.
 module eth_cdc_word #(
     parameter int W = 32
 ) (
@@ -389,6 +402,7 @@ module eth_cdc_word #(
     logic req = 1'b0, ack = 1'b0;
     (* ASYNC_REG = "TRUE" *) logic [1:0] ack_s = '0;  // ack in the source clock
     (* ASYNC_REG = "TRUE" *) logic [1:0] req_d = '0;  // req in the destination clock
+    logic req_q = 1'b0;                                // req_d[1] one dclk later
 
     assign ddata = dreg;
 
@@ -402,9 +416,10 @@ module eth_cdc_word #(
 
     always_ff @(posedge dclk) begin
         req_d <= {req_d[0], req};
-        if (req_d[1] != ack) begin
+        req_q <= req_d[1];
+        if (req_q != ack) begin
             dreg  <= hold;
-            ack   <= req_d[1];
+            ack   <= req_q;
         end
     end
 endmodule

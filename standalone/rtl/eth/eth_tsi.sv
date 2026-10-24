@@ -4,10 +4,17 @@
 //   rx  peer IP, {length, peer port}, seq, flags, TSI commands
 //   tx  peer IP, {16'h0, peer port}, seq, flags, expect, status, read data
 //
-// Datagrams run in sequence order, each once. SYNC opens a session: the next seq to run
-// (expect) is seq + 1. seq == expect runs; an older seq gets DUP and does not run again (its
-// reply was lost); a newer seq gets DROP (an earlier datagram was lost). Datagrams shorter than
-// seq and flags, or not whole words, are dropped without a reply.
+// Datagrams run in sequence order, each once. SYNC opens a session for its peer (IP and port):
+// the next seq to run (expect) is seq + 1. A copy of that SYNC (same peer and seq) gets SYNC with
+// the current expect and does not reopen the session; any other SYNC opens a new one. In the
+// session, seq == expect runs; an older seq gets DUP and does not run again (its reply was lost);
+// a newer seq gets DROP (an earlier datagram was lost). Other peers get NOSYNC. Datagrams shorter
+// than seq and flags, or not whole words, are dropped without a reply.
+//
+// A datagram that ends before its length says (rx_abort: eth_udp_stack cut it; or an early
+// rx_last) never uses its last word. Cut in seq or flags, it is dropped without a reply. Cut in
+// the commands, it replies CUT: the words before the cut were used. Words past the length are
+// ignored.
 //
 // The reply goes out after every command completed, so it also acknowledges the writes. Until
 // then the read data waits in a block RAM of REPLY_WORDS words. Reads past it set OVERFLOW and the
@@ -30,6 +37,7 @@ module eth_tsi
     input  logic        rx_valid,
     output logic        rx_ready,
     input  logic        rx_last,
+    input  logic        rx_abort,   // with rx_last: the datagram was cut short
 
     output logic [31:0] tx_data,
     output logic        tx_valid,
@@ -64,7 +72,11 @@ module eth_tsi
     frame_e      fs;
     logic [31:0] peer_ip, seq, next_seq;
     logic [15:0] peer_port;
+    logic [31:0] s_ip, s_seq;  // the session: peer and SYNC seq
+    logic [15:0] s_port;
     logic [3:0]  rflags;
+    logic [13:0] rx_left;    // words of the datagram from this one on, by its length
+    logic        rx_more;    // the datagram has words after the last one taken
     logic        reply;      // F_SKIP: send a reply after the last word
     logic        frame_end;  // F_EXEC: the last word has been taken
     logic [15:0] n_cmds;
@@ -117,9 +129,12 @@ module eth_tsi
         endcase
     end
 
-    wire rx_fire = rx_valid && rx_ready;
-    wire start   = fs == F_FLAGS && rx_fire;
-    wire take    = fs == F_EXEC && rx_fire;
+    wire rx_fire  = rx_valid && rx_ready;
+    wire len_last = rx_left == 14'd1;
+    wire cut_end  = rx_last && (rx_abort || !len_last);  // the word is not used
+    wire start    = fs == F_FLAGS && rx_fire;
+    wire beat     = fs == F_EXEC && rx_fire;
+    wire take     = beat && !cut_end;
 
     // The datagram is over: its last word is taken and no read is running.
     wire ending  = fs == F_EXEC && frame_end &&
@@ -204,9 +219,10 @@ module eth_tsi
         end else begin
             if (d_fire && d.denied) denied <= 1'b1;
             if (push) n_rd <= n_rd + 1'b1;
+            if (beat && cut_end) cut <= 1'b1;
             if (finish) begin
-                cut <= !(ds inside {D_CMD, D_BAD});
-                ds  <= D_CMD;
+                if (!(ds inside {D_CMD, D_BAD})) cut <= 1'b1;
+                ds <= D_CMD;
             end else begin
                 case (ds)
                     D_CMD: if (take) begin
@@ -266,10 +282,15 @@ module eth_tsi
 
     // ── Frame ───────────────────────────────────────────────────────────────
     wire [31:0] diff    = next_seq - seq;
+    wire        peer_ok = synced && peer_ip == s_ip && peer_port == s_port;
     wire        tx_fire = tx_valid && tx_ready;
 
     always_ff @(posedge clk) begin
         done <= 1'b0;
+        if (rx_fire) begin
+            rx_left <= fs == F_LEN ? rx_data[31:18] : rx_left - 1'b1;
+            rx_more <= !rx_last;
+        end
         if (rst) begin
             fs       <= F_IP;
             synced   <= 1'b0;
@@ -308,14 +329,22 @@ module eth_tsi
                     end
                 end
                 F_FLAGS: if (rx_fire) begin
-                    frame_end <= rx_last;
+                    frame_end <= len_last;
                     reply     <= 1'b1;
                     fs        <= rx_last ? F_REPLY : F_SKIP;
-                    if (rx_data[0]) begin
-                        synced   <= 1'b1;
-                        next_seq <= seq + 1'b1;
-                        rflags   <= SYNC;
-                    end else if (!synced) begin
+                    if (cut_end) begin
+                        n_drop <= n_drop + 1'b1;
+                        fs     <= F_IP;
+                    end else if (rx_data[0]) begin
+                        rflags <= SYNC;
+                        if (!peer_ok || seq != s_seq) begin
+                            synced   <= 1'b1;
+                            next_seq <= seq + 1'b1;
+                            s_ip     <= peer_ip;
+                            s_port   <= peer_port;
+                            s_seq    <= seq;
+                        end
+                    end else if (!peer_ok) begin
                         rflags <= NOSYNC;
                         n_drop <= n_drop + 1'b1;
                     end else if (diff == '0) begin
@@ -331,11 +360,11 @@ module eth_tsi
                 end
                 F_SKIP: if (rx_fire && rx_last) fs <= reply ? F_REPLY : F_IP;
                 F_EXEC: begin
-                    if (take && rx_last) frame_end <= 1'b1;
+                    if (beat && (rx_last || len_last)) frame_end <= 1'b1;
                     if (finish) begin
                         next_seq <= next_seq + 1'b1;
                         n_exec   <= n_exec + 1'b1;
-                        fs       <= F_REPLY;
+                        fs       <= rx_more ? F_SKIP : F_REPLY;
                     end
                 end
                 F_REPLY: if (tx_fire) begin
