@@ -6,13 +6,17 @@ and Chipyard's UART-TSI). It loads the kernel into IMEM and the data into DRAM, 
 scalar core, waits for completion and reads the results. The structure follows the NVFP4 SoC
 (`ucb-bar/nvfp4@0c611e1`), whose UART TSI target and TL-UL fabric are reused here.
 
+On the board, the host can also send the same TSI commands over UDP on the 1000BASE-T port
+(TSI over UDP, docs/tsi-over-udp.md). `tl_arbiter` lets the two links share the fabric.
+
 ```text
-host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs          0x0000_0000
-                                                 ├─ Atlas IMEM        0x0002_0000  (128 KiB)
-                                                 ├─ Atlas CSR         0x0004_0000
-                                                 ├─ Atlas VMEM        0x2000_0000  (1.5 MiB)
-                                                 └─ DRAM, port A      0x8000_0000 ─┐
-                                    AtlasCore DMA ── DRAM, port B ─────────────────┴─ DDR4 bridge ─ MIG ─ 2 GiB DDR4
+host ─ UART TSI ─ uart_tsi ─ tl_widen ──────┐
+host ─ UDP ─ PHY ─ eth_udp_stack ─ eth_tsi ─┴─ tl_arbiter ─ tl_xbar ─┬─ sys_regs          0x0000_0000
+                                                                     ├─ Atlas IMEM        0x0002_0000  (128 KiB)
+                                                                     ├─ Atlas CSR         0x0004_0000
+                                                                     ├─ Atlas VMEM        0x2000_0000  (1.5 MiB)
+                                                                     └─ DRAM, port A      0x8000_0000 ─┐
+                                                        AtlasCore DMA ── DRAM, port B ─────────────────┴─ DDR4 bridge ─ MIG ─ 2 GiB DDR4
 ```
 
 - `chisel/`: `EmitAtlasCore` writes AtlasCore's SystemVerilog with fixed TL-UL ports, and
@@ -23,10 +27,18 @@ host ─ UART TSI ─ uart_tsi ─ tl_widen ─ tl_xbar ─┬─ sys_regs      
   `atlas_dram.sv` is the Verilator model's DRAM, aliased over `0x8000_0000` up (DMA's 64-bit
   addresses fold onto it the same way); the baremetal tests use 465 KiB at `0x9000_0000`.
   (Until 2026-10-22 the board build could also use 4 MiB of UltraRAM; that option is gone.)
+  `eth/` is TSI over UDP: `eth_tsi.sv` (the protocol), `eth_udp_stack.sv` (MAC, ARP, IPv4, UDP)
+  and `vcu118_sgmii.sv` (the board's PHY). `eth/vendor/` is verilog-ethernet
+  (`alexforencich/verilog-ethernet@77320a9`, MIT), unmodified.
 - `sim/`: a Verilator model of `atlas_soc` with a word-level host port (no UART), and its driver.
-- `host/`: `atlas_host.py` (the host: `SimLink` for the model, `TsiLink` for the board),
-  `make_bundle.py` (assembles the baremetal tests into JSON bundles), `run_tests.py`.
-- `fpga/`: VCU118 constraints, the Vivado build and the JTAG programming script.
+  `MODEL=tsi` builds a model with the UART pins, `MODEL=eth` one with the Ethernet stack behind a
+  UDP socket. `tb_eth_tsi.sh` and `tb_eth_udp_stack.sh` test the Ethernet modules alone.
+- `host/`: `atlas_host.py` (the host: `SimLink` for the model, `TsiLink` for UART TSI, `EthLink`
+  for TSI over UDP), `make_bundle.py` (assembles the baremetal tests into JSON bundles),
+  `run_tests.py`, `link_bench.py` (throughput and latency of the links), `test_ethlink.py`
+  (EthLink against a model of the board).
+- `fpga/`: VCU118 constraints, the Vivado build (with the DDR4 MIG and the SGMII PCS/PMA IP) and
+  the JTAG programming script.
 
 ## Configurations
 
@@ -56,6 +68,18 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim --config ipt-n
 `--no-delay` removes every `DELAY` from the kernels (one in a branch delay slot would become a
 `NOP`). The model keeps all RTL assertions, so a hazard that got past the interlock fails the test.
 
+The Ethernet model runs the same tests over UDP on 127.0.0.1, through `eth_udp_stack` and
+`eth_tsi`. Each test gets its own model and UDP port:
+
+```bash
+MODEL=eth standalone/sim/build.sh build/rtl-sim build/vl_eth   # build/vl_eth/atlas_eth_sim
+python3 standalone/host/run_tests.py --eth-sim build/vl_eth/atlas_eth_sim --config ipt-nvfp4 -j 16 \
+    --out build/sim-eth build/bundle/nodelay/*.json
+standalone/sim/tb_eth_tsi.sh                  # eth_tsi and tl_arbiter alone
+standalone/sim/tb_eth_udp_stack.sh            # eth_udp_stack alone, on GMII frames
+python3 standalone/host/test_ethlink.py       # EthLink against a model of the board
+```
+
 Bitstream (Vivado 2024.1 or later with a VU9P license on `PATH`; about 2.5 hours):
 
 ```bash
@@ -68,6 +92,19 @@ Board: program over the VCU118's JTAG USB port, then run over the CP2105 UART (i
 ```bash
 vivado -mode batch -source standalone/fpga/program.tcl -tclargs build/vcu118/atlas_standalone_vcu118_ipt-nvfp4_ddr4_50mhz.bit
 python3 standalone/host/run_tests.py --board --config ipt-nvfp4 --out build/board-nodelay build/bundle/nodelay/*.json
+```
+
+Over Ethernet (docs/tsi-over-udp.md, "Board setup"), connect the board's RJ45 port to a 1 Gb/s
+NIC of the host. Give the NIC an address on 172.20.0.0/16. The FPGA is 172.20.1.18 (sys_regs
+ETH_IP). After programming and after CPU_RESET, the PHY needs about 3 s to negotiate the copper
+link. `EthLink` sends its first datagram (SYNC) again for at least 6 s. `arping` gets an answer,
+`ping` does not (no ICMP). `EthLink` needs only the Python standard library.
+
+```bash
+sudo ip addr add 172.20.0.1/16 dev <nic>
+sudo ip link set <nic> up
+python3 standalone/host/run_tests.py --eth --config ipt-nvfp4 --out build/board-eth build/bundle/nodelay/*.json
+python3 standalone/host/link_bench.py --eth --uart     # MB/s and latency of both links
 ```
 
 `run_tests.py` writes each run's performance counters (docs/perf-counters.md) to `OUT/perf.csv`.
@@ -174,10 +211,19 @@ the 4 MiB of the old on-chip build), and its `B <addr> <file>` command (used by 
 through a backdoor in no simulated time. A 3.4 MiB image used to cost 35 minutes of simulated
 bus writes.
 
+## TSI over UDP
+
+The first board build with Ethernet (default config, 50 MHz) met timing with WNS +0.108 ns.
+`eth_udp_stack`, `vcu118_sgmii` and `eth_tsi` together take 4,171 LUTs, 6,082 FFs, 14 RAMB36
+and 5 RAMB18 (docs/tsi-over-udp.md, "Resources and timing").
+
+Board results: pending.
+
 ## Driving it from Python
 
 `run_tests.py` is one client of `host/atlas_host.py`. A kernel can also be run by hand; the
-link is the same for the board (`TsiLink()`) and the model (`SimLink(binary)`):
+link is the same for the board (`TsiLink()` over UART, `EthLink()` over Ethernet) and the model
+(`SimLink(binary)`):
 
 ```python
 from atlas_host import Atlas, TsiLink, IMEM_BASE, CSR_EXEC_CONTROL, CSR_DBG0
@@ -196,9 +242,13 @@ outputs = link.read_words(0x9000_0800, 256)
 ## Board
 
 - Clock: the 250 MHz system clock (E12/D12) through an MMCM to 50 MHz.
-- Reset: CPU_RESET (L19); the SoC also resets when the MMCM loses lock.
-- LEDs: `led[0]` heartbeat, `led[1]` TSI activity, `led[2]` link error or denied access,
-  `led[3]` MMCM locked, `led[4]` Atlas halted, `led[7:5]` the sys_regs LEDS register.
+- Reset: CPU_RESET (L19); the SoC also resets when the MMCM loses lock. CPU_RESET also resets
+  the Ethernet PHY and sets ETH_IP back to its default.
+- LEDs: `led[0]` heartbeat, `led[1]` TSI activity (toggles when a UART command or an Ethernet
+  datagram completes), `led[2]` link error or denied access, `led[3]` MMCM locked and DDR4
+  calibrated, `led[4]` Atlas halted, `led[7:5]` the sys_regs LEDS register.
+- Ethernet: the DP83867 PHY on the RJ45 port, over SGMII (bank 64). IPv4 172.20.1.18, UDP port
+  21587, MAC `02:00:41:54:4c:53`. Protocol, setup, link checks and limits: docs/tsi-over-udp.md.
 
 ## System registers (`0x0000_0000`)
 
@@ -206,8 +256,8 @@ outputs = link.read_words(0x9000_0800, 256)
 |---|---|---|
 | `0x000` | ID | `0x4154_4C53` ("ATLS") |
 | `0x004` | SCRATCH | read/write |
-| `0x008` | FLAGS | [0] TSI receive overflow, [1] bad TSI command, [2] denied access seen, [3] DRAM ready (DDR4 calibrated; 1 in the Verilator model) |
-| `0x00C` | DENIED | denied (unmapped) accesses |
+| `0x008` | FLAGS | [0] UART TSI receive overflow, [1] bad UART TSI command, [2] denied access seen, [3] DRAM ready (DDR4 calibrated; 1 in the Verilator model) |
+| `0x00C` | DENIED | denied accesses of both links (see below) |
 | `0x010` | CYCLES | free-running cycle counter |
 | `0x014` | CLK_HZ | |
 | `0x018` | BAUD | |
@@ -216,8 +266,24 @@ outputs = link.read_words(0x9000_0800, 256)
 | `0x024` | FEATURES | [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 | `0x028` | LEDS | [2:0] |
 | `0x02C` | RUN_CYCLES | cycles the scalar core has run (not halted); a write clears it |
+| `0x030` | ETH_IP | the FPGA's IPv4 address, read/write; 172.20.1.18 (`0xAC14_0112`) after reset |
+| `0x034` | ETH_STATUS | [15:0] PCS/PMA status (0 while the GMII clock is stopped), [16] PHY bring-up done, [17] Ethernet session open, [18] Ethernet present, [19] PHY ID matched, [20] GMII clock running |
+| `0x038` | ETH_RUN | datagrams run |
+| `0x03C` | ETH_DUP | datagrams answered DUP (not run again) |
+| `0x040` | ETH_DROP | datagrams dropped or not run |
+| `0x044` | ETH_PORT | UDP port, 21587 (`0x5453`) |
+| `0x048` | ETH_MAC_LO | MAC address [31:0] |
+| `0x04C` | ETH_MAC_HI | MAC address [47:32] |
+| `0x050` | ETH_RXERR | [15:0] frames dropped before the TSI target, [31:16] frames with a bad FCS or a GMII error |
 
-Reads of IMEM stall while the scalar core runs (IMEM serves the fetch); stop the core first.
+In a build without Ethernet (the word-level Verilator model), ETH_STATUS and the Ethernet
+counters read 0. docs/tsi-over-udp.md has the bit details.
+
+The SoC answers an access that a device cannot serve now at once, with a denied response. Such
+a request thus never holds the fabric, and the other link keeps working. IMEM reads while the
+scalar core runs are denied and return 0, because IMEM serves the fetch: stop the core first.
+IMEM writes work while the core runs. On the board, DRAM accesses before the DDR4 is calibrated
+(FLAGS bit 3 is 0) are denied too.
 
 ## Performance counters
 
