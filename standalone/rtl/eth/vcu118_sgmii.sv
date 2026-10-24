@@ -4,16 +4,20 @@
 //
 // Bring-up in the core clock, after rst:
 //   1. phy_reset_n low for 1 ms, then 2 ms for the PHY to leave reset (MDIO needs 195 us).
-//   2. MDIO writes to PHY address 3; extended registers through REGCR (0x0D) and ADDAR (0x0E):
+//   2. MDIO reads of PHYIDR1 (0x02) and PHYIDR2 (0x03) at PHY address 3: phy_id_ok = 1 when they
+//      return 0x2000 and 0xA23x (DP83867; x is the silicon revision). Step 3 runs in either case.
+//   3. MDIO writes to PHY address 3; extended registers through REGCR (0x0D) and ADDAR (0x0E):
 //        CFG4          (0x031) = 0x0070  SGMII autonegotiation timer 11 ms
 //        SGMIICTL1     (0x0D3) = 0x4000  6-wire SGMII: the PHY drives the 625 MHz clock
 //        10M_SGMII_CFG (0x16F) = 0x0015  10 Mb/s over SGMII
-//   3. 1 ms after the last write the PCS/PMA core leaves reset; phy_ready = 1.
+//   4. 1 ms after the last write the PCS/PMA core leaves reset; phy_ready = 1.
 // The core's clocks (clk125_out = gmii_clk) run only once the PHY drives the 625 MHz clock.
+// gmii_alive = 1 while the core is out of reset and gmii_clk has toggled in the last 4 us.
 //
 // gmii_* and status_vector are in the gmii_clk domain (gmii_rst). gmii_clk_en is 1 at 1 Gb/s and
 // pulses at 10/100 Mb/s. status_vector is the core's (bit 0 link status, 1 link sync, 11:10 speed,
-// 12 duplex). phy_ready is in the clk domain.
+// 12 duplex); it holds its last value when gmii_clk stops. phy_ready, phy_id_ok and gmii_alive are
+// in the clk domain.
 module vcu118_sgmii #(
     parameter int CLK_HZ = 50_000_000
 ) (
@@ -41,35 +45,48 @@ module vcu118_sgmii #(
     input  logic        gmii_tx_er,
 
     output logic [15:0] status_vector,
-    output logic        phy_ready
+    output logic        phy_ready,
+    output logic        phy_id_ok,
+    output logic        gmii_alive
 );
     localparam int MS       = CLK_HZ / 1000;
     localparam int PRESCALE = (CLK_HZ + 4_999_999) / 5_000_000 - 1;  // MDC <= 2.5 MHz
+    localparam int NR       = 2;                                      // MDIO reads
     localparam int NW       = 12;                                     // MDIO writes
+    localparam int TIMEOUT  = CLK_HZ / 250_000;                       // 4 us
 
     // ── Bring-up sequence ───────────────────────────────────────────────────
     typedef enum logic [2:0] {S_RESET, S_WAIT, S_MDIO, S_SETTLE, S_RUN} state_t;
     state_t                      state;
     logic [$clog2(2*MS+1)-1:0]   timer;
-    logic [3:0]                  idx;
-    logic                        cmd_valid, cmd_ready, mdio_busy;
+    logic [3:0]                  idx, w;
+    logic                        cmd_valid, cmd_ready, mdio_busy, rd_valid;
     logic                        pcs_reset = 1'b1;  // also from configuration until rst
+    logic [1:0]                  cmd_op;
     logic [4:0]                  cmd_reg;
-    logic [15:0]                 cmd_data, ext_reg, ext_val;
+    logic [15:0]                 cmd_data, ext_reg, ext_val, rd_data;
+    logic [31:0]                 phy_id;            // {PHYIDR1, PHYIDR2}
 
-    // Write idx: REGCR = 0x001F, ADDAR = register, REGCR = 0x401F, ADDAR = value.
+    // idx < NR: read PHYIDR1 + idx. Then write w = idx - NR: REGCR = 0x001F, ADDAR = register,
+    // REGCR = 0x401F, ADDAR = value, for each extended register in turn.
     always_comb begin
-        case (idx[3:2])
+        w = idx - 4'(NR);
+        case (w[3:2])
             2'd0:    {ext_reg, ext_val} = {16'h0031, 16'h0070};
             2'd1:    {ext_reg, ext_val} = {16'h00D3, 16'h4000};
             default: {ext_reg, ext_val} = {16'h016F, 16'h0015};
         endcase
-        case (idx[1:0])
+        case (w[1:0])
             2'd0:    {cmd_reg, cmd_data} = {5'h0D, 16'h001F};
             2'd1:    {cmd_reg, cmd_data} = {5'h0E, ext_reg};
             2'd2:    {cmd_reg, cmd_data} = {5'h0D, 16'h401F};
             default: {cmd_reg, cmd_data} = {5'h0E, ext_val};
         endcase
+        cmd_op = 2'b01;
+        if (idx < 4'(NR)) begin
+            {cmd_reg, cmd_data} = {5'h02 + 5'(idx), 16'h0000};
+            cmd_op              = 2'b10;
+        end
     end
 
     always_ff @(posedge clk) begin
@@ -80,8 +97,10 @@ module vcu118_sgmii #(
             cmd_valid   <= 1'b0;
             phy_reset_n <= 1'b0;
             pcs_reset   <= 1'b1;
+            phy_id      <= '0;
         end else begin
             timer <= timer + 1'b1;
+            if (rd_valid) phy_id <= {phy_id[15:0], rd_data};
             case (state)
                 S_RESET: if (timer == MS) begin
                     phy_reset_n <= 1'b1;
@@ -94,7 +113,7 @@ module vcu118_sgmii #(
                 end
                 S_MDIO: if (cmd_ready) begin
                     idx <= idx + 1'b1;
-                    if (idx == NW - 1) begin
+                    if (idx == NR + NW - 1) begin
                         cmd_valid <= 1'b0;
                         state     <= S_SETTLE;
                     end
@@ -111,19 +130,38 @@ module vcu118_sgmii #(
         end
     end
     assign phy_ready = state == S_RUN;
+    assign phy_id_ok = phy_id[31:16] == 16'h2000 && phy_id[15:4] == 12'hA23;
 
     logic mdio_i, mdio_o, mdio_t;
 
     mdio_master u_mdio (
         .clk, .rst,
-        .cmd_phy_addr(5'h03), .cmd_reg_addr(cmd_reg), .cmd_data, .cmd_opcode(2'b01),
+        .cmd_phy_addr(5'h03), .cmd_reg_addr(cmd_reg), .cmd_data, .cmd_opcode(cmd_op),
         .cmd_valid, .cmd_ready,
-        .data_out(), .data_out_valid(), .data_out_ready(1'b1),
+        .data_out(rd_data), .data_out_valid(rd_valid), .data_out_ready(1'b1),
         .mdc_o(phy_mdc), .mdio_i, .mdio_o, .mdio_t, .busy(mdio_busy),
         .prescale(8'(PRESCALE)));
 
     assign mdio_i   = phy_mdio;
     assign phy_mdio = mdio_t ? 1'bz : mdio_o;
+
+    // ── GMII clock monitor ──────────────────────────────────────────────────
+    // gmii_div[3] toggles every 8 gmii_clk cycles (64 ns at 125 MHz), slow enough to sample in clk.
+    logic [3:0]                   gmii_div = '0;
+    logic                         div_last;
+    logic [$clog2(TIMEOUT+1)-1:0] left;  // clk cycles until gmii_clk counts as stopped
+    (* ASYNC_REG = "TRUE" *) logic [1:0] div_sync;
+
+    always_ff @(posedge gmii_clk) gmii_div <= gmii_div + 1'b1;
+
+    always_ff @(posedge clk) begin
+        div_sync <= {div_sync[0], gmii_div[3]};
+        div_last <= div_sync[1];
+        if (pcs_reset)                    left <= '0;
+        else if (div_sync[1] != div_last) left <= $bits(left)'(TIMEOUT);
+        else if (left != 0)               left <= left - 1'b1;
+    end
+    assign gmii_alive = !pcs_reset && left != 0;
 
     // ── PCS/PMA core ────────────────────────────────────────────────────────
     gig_ethernet_pcs_pma_0 u_pcs (

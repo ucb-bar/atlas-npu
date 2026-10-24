@@ -9,7 +9,8 @@
 // stdout: "PORT <n>", then "READY <n>" when the model is out of reset and the socket listens.
 // "X <cycle>" when an RTL assertion stops the run (exit code 2). The model runs until SIGTERM,
 // EOF on stdin, or "Q" on stdin (prints "Q <cycle>"). "S" on stdin prints
-// "S <cycles> <wall s> <paused s> <datagrams in> <datagrams out>". Statistics go to stderr at exit.
+// "S <cycles> <wall s> <paused s> <datagrams in> <datagrams out> <queue drops>". Statistics go to
+// stderr at exit.
 //
 // Environment:
 //   ETH_SIM_LOSS=p      each datagram, in each direction, is dropped with probability p,
@@ -25,6 +26,9 @@
 // come from the model (local_ip is sys_regs ETH_IP). Frames go out at GMII line rate with a
 // 12-byte gap; checks on frames from the FPGA (FCS, IPv4 header checksum, UDP checksum and
 // lengths, addresses) print "eth_cosim: bad frame" on stderr and count in the statistics.
+// Frames for the FPGA wait in a 64 KiB queue, as in a NIC or switch buffer: the simulated wire is
+// far slower than the host, so a datagram that does not fit is dropped (queue drops); ARP replies
+// always go in.
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -64,7 +68,7 @@ static uint16_t fpga_port = 21587;
 static uint16_t ip_id = 0;
 
 static struct {
-    uint64_t in = 0, in_bytes = 0, out = 0, out_bytes = 0, arp = 0, bad = 0, oversize = 0;
+    uint64_t in = 0, in_bytes = 0, out = 0, out_bytes = 0, arp = 0, bad = 0, oversize = 0, qdrop = 0;
 } st;
 
 // ── Byte helpers, CRC-32, Internet checksum ─────────────────────────────────
@@ -184,7 +188,9 @@ static Bytes arp_reply(const uint8_t* sha, uint32_t spa) {
 
 // ── GMII ────────────────────────────────────────────────────────────────────
 struct RxDriver {  // frames -> gmii_rxd, one byte per GMII cycle, 12 idle bytes between frames
+    static constexpr size_t MAX_BYTES = 64 << 10;
     std::deque<Bytes> q;
+    size_t bytes = 0;  // in q
     size_t pos = 0;
     int gap = 0;
     void step() {  // while gmii_clk is low: the inputs for the next rising edge
@@ -198,12 +204,22 @@ struct RxDriver {  // frames -> gmii_rxd, one byte per GMII cycle, 12 idle bytes
         top->gmii_rx_dv = 1;
         top->gmii_rxd = q.front()[pos];
         if (++pos == q.front().size()) {
+            bytes -= q.front().size();
             q.pop_front();
             pos = 0;
             gap = 12;
         }
     }
-    void push_urgent(Bytes f) { q.insert(q.begin() + (pos ? 1 : 0), std::move(f)); }  // next frame out
+    bool push(Bytes f) {  // false: dropped, the queue is full
+        if (bytes + f.size() > MAX_BYTES) return false;
+        bytes += f.size();
+        q.push_back(std::move(f));
+        return true;
+    }
+    void push_urgent(Bytes f) {  // next frame out
+        bytes += f.size();
+        q.insert(q.begin() + (pos ? 1 : 0), std::move(f));
+    }
     bool busy() const { return !q.empty() || gap > 0; }
 } rx;
 
@@ -273,7 +289,9 @@ struct Lossy {  // drop / duplicate / hold back behind the next datagram, each w
     }
 };
 
-static Lossy to_fpga{"to FPGA", [](const Datagram& d) { rx.q.push_back(udp_to_fpga(d.port, d.data)); }};
+static Lossy to_fpga{"to FPGA", [](const Datagram& d) {
+                         if (!rx.push(udp_to_fpga(d.port, d.data))) ++st.qdrop;
+                     }};
 static Lossy to_host{"to host", [](const Datagram& d) {
                          auto it = peers.find(d.port);
                          if (it == peers.end()) {
@@ -407,10 +425,11 @@ static void print_stats() {
     double w = wall_s(), run = w - paused_s;
     fprintf(stderr,
             "eth_cosim: %llu cycles in %.1f s, %.1f s of it paused (%.0f cycles/s running); datagrams in %llu "
-            "(%llu B), out %llu (%llu B); ARP replies %llu; bad frames %llu, oversize %llu\n",
+            "(%llu B), out %llu (%llu B); queue drops %llu; ARP replies %llu; bad frames %llu, oversize %llu\n",
             (unsigned long long)cycle, w, paused_s, run > 0 ? cycle / run : 0.0, (unsigned long long)st.in,
             (unsigned long long)st.in_bytes, (unsigned long long)st.out, (unsigned long long)st.out_bytes,
-            (unsigned long long)st.arp, (unsigned long long)st.bad, (unsigned long long)st.oversize);
+            (unsigned long long)st.qdrop, (unsigned long long)st.arp, (unsigned long long)st.bad,
+            (unsigned long long)st.oversize);
     for (Lossy* l : {&to_fpga, &to_host})
         if (l->p > 0)
             fprintf(stderr, "eth_cosim: injected %s: %llu dropped, %llu duplicated, %llu reordered\n", l->name,
@@ -446,8 +465,8 @@ static bool service_stdin() {
         if (line.empty()) continue;
         if (line[0] == 'Q') return false;
         if (line[0] == 'S') {
-            printf("S %llu %.3f %.3f %llu %llu\n", (unsigned long long)cycle, wall_s(), paused_s,
-                   (unsigned long long)st.in, (unsigned long long)st.out);
+            printf("S %llu %.3f %.3f %llu %llu %llu\n", (unsigned long long)cycle, wall_s(), paused_s,
+                   (unsigned long long)st.in, (unsigned long long)st.out, (unsigned long long)st.qdrop);
             fflush(stdout);
         }
     }

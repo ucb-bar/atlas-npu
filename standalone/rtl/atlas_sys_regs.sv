@@ -17,8 +17,9 @@
 //   0x02C  RUN_CYCLES  RW  cycles the Atlas scalar core has spent running (not halted); any write clears it
 //   0x030  ETH_IP      RW  the FPGA's IPv4 address (TSI over UDP)
 //   0x034  ETH_STATUS  RO  [15:0] PCS/PMA status_vector (0 link status, 1 link sync, 11:10 speed,
-//                          12 duplex), [16] PHY configured over MDIO, [17] Ethernet TSI session open,
-//                          [18] Ethernet present in this build
+//                          12 duplex; 0 while the GMII clock is stopped), [16] PHY bring-up done
+//                          (MDIO writes sent), [17] Ethernet TSI session open, [18] Ethernet present
+//                          in this build, [19] PHY ID matched (DP83867), [20] GMII clock running
 //   0x038  ETH_RUN     RO  datagrams run
 //   0x03C  ETH_DUP     RO  datagrams acknowledged DUP (not run again)
 //   0x040  ETH_DROP    RO  datagrams dropped or not run
@@ -60,6 +61,8 @@ module atlas_sys_regs
 
     input  logic [15:0] eth_pcs_status,
     input  logic        eth_phy_ready,
+    input  logic        eth_phy_id_ok,
+    input  logic        eth_gmii_alive,
     input  logic        eth_synced,
     input  logic [31:0] eth_n_exec,
     input  logic [31:0] eth_n_dup,
@@ -90,7 +93,8 @@ module atlas_sys_regs
             10'h0A:  rdata = {29'd0, user_leds};
             10'h0B:  rdata = run_cycles;
             10'h0C:  rdata = eth_ip;
-            10'h0D:  rdata = {13'd0, ETH, eth_synced, eth_phy_ready, eth_pcs_status};
+            10'h0D:  rdata = {11'd0, eth_gmii_alive, eth_phy_id_ok, ETH, eth_synced, eth_phy_ready,
+                              eth_gmii_alive ? eth_pcs_status : 16'd0};
             10'h0E:  rdata = eth_n_exec;
             10'h0F:  rdata = eth_n_dup;
             10'h10:  rdata = eth_n_drop;

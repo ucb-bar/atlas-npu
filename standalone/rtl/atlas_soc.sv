@@ -5,7 +5,7 @@
 // shares the fabric with the first through tl_arbiter; tie it off (e_a_valid 0) when unused.
 //
 //   0x0000_0000 - 0x0000_0FFF  sys_regs    link identification, status, Atlas busy bits
-//   0x0002_0000 - 0x0003_FFFF  Atlas IMEM  128 KiB (reads stall while the core runs)
+//   0x0002_0000 - 0x0003_FFFF  Atlas IMEM  128 KiB (reads while the core runs are denied)
 //   0x0004_0000 - 0x0004_0FFF  Atlas CSR   CYCLE, INSTCNT, STATUS, ILLEGAL_PC, DBG0, DBG1, EXEC_CONTROL
 //   0x2000_0000 - 0x2017_FFFF  Atlas VMEM  1.5 MiB (0x2018_0000 - 0x201F_FFFF is denied)
 //   0x8000_0000 - 0xFFFF_FFFF  DRAM        EXT_DRAM (the VCU118): the ext_* ports, 2 GiB of DDR4;
@@ -14,7 +14,8 @@
 //
 // The DMA engine reaches the same DRAM through the second memory port. With EXT_DRAM both DRAM
 // ports leave the SoC (atlas_ddr4_dram in vcu118_atlas_top). Unmapped accesses get a denied
-// response.
+// response, and so do accesses a device cannot serve now (an IMEM read while the core runs, a
+// DRAM access before the DDR4 is calibrated), so that no request holds the fabric.
 module atlas_soc
     import tl_pkg::*;
 #(
@@ -56,6 +57,8 @@ module atlas_soc
     // Ethernet status (core clock), reported in sys_regs
     input  logic [15:0] eth_pcs_status,
     input  logic        eth_phy_ready,
+    input  logic        eth_phy_id_ok,
+    input  logic        eth_gmii_alive,
     input  logic        eth_synced,
     input  logic [31:0] eth_n_exec,
     input  logic [31:0] eth_n_dup,
@@ -122,16 +125,49 @@ module atlas_soc
         .a_valid(wa_valid), .a_ready(wa_ready), .a(wa),
         .d_valid(wd_valid), .d_ready(wd_ready), .d(wd));
 
-    logic [N-1:0] dev_a_valid, dev_a_ready, dev_d_valid, dev_d_ready;
+    logic [N-1:0] x_a_valid, x_a_ready, x_d_valid, x_d_ready;
     wa_t          dev_a;
-    wd_t          dev_d [N];
+    wd_t          x_d [N];
 
     tl_xbar #(.N(N), .BASE(BASE), .MASK(MASK)) u_xbar (
         .clk, .rst,
         .a_valid(wa_valid), .a_ready(wa_ready), .a(wa),
         .d_valid(wd_valid), .d_ready(wd_ready), .d(wd),
-        .dev_a_valid, .dev_a_ready, .dev_a, .dev_d_valid, .dev_d_ready, .dev_d,
+        .dev_a_valid(x_a_valid), .dev_a_ready(x_a_ready), .dev_a,
+        .dev_d_valid(x_d_valid), .dev_d_ready(x_d_ready), .dev_d(x_d),
         .denied);
+
+    // A request a device cannot serve now is answered here, denied (reads return 0), instead of
+    // waiting at the device with the fabric held for both hosts: an IMEM Get while the core runs
+    // (InstrMem accepts a Get only while the core is halted; the core starts only through a CSR
+    // write, which cannot pass while a request holds the fabric) and, with EXT_DRAM, a DRAM
+    // access before the DDR4 is calibrated.
+    logic [N-1:0] dev_a_valid, dev_a_ready, dev_d_valid, dev_d_ready, closed, refused;
+    wd_t          dev_d [N];
+    d_op_e        refused_op;
+
+    always_comb begin
+        closed       = '0;
+        closed[IMEM] = !halted && dev_a.opcode == A_GET;
+        closed[DRAM] = EXT_DRAM && !ext_dram_ready;
+    end
+
+    for (genvar k = 0; k < N; k++) begin : g_gate
+        assign dev_a_valid[k] = x_a_valid[k] && !closed[k];
+        assign x_a_ready[k]   = closed[k] || dev_a_ready[k];
+        assign x_d_valid[k]   = refused[k] || dev_d_valid[k];
+        assign dev_d_ready[k] = x_d_ready[k] && !refused[k];
+        assign x_d[k]         = refused[k] ? '{opcode: refused_op, denied: 1'b1, data: '0} : dev_d[k];
+    end
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            refused <= '0;
+        end else begin
+            refused <= (refused & ~x_d_ready) | (x_a_valid & closed);
+            if (|(x_a_valid & closed)) refused_op <= dev_a.opcode == A_GET ? D_ACK_DATA : D_ACK;
+        end
+    end
 
     // Word devices sit behind tl_narrow.
     logic       n_a_valid [3], n_a_ready [3], n_d_valid [3], n_d_ready [3];
@@ -329,8 +365,8 @@ module atlas_soc
         .atlas_status({dbg_dma, 1'b0, dbg_lsu, dbg_xlu, dbg_mxu1_comp, dbg_mxu1_data,
                        dbg_mxu0_comp, dbg_mxu0_data, halted}),
         .user_leds,
-        .eth_pcs_status, .eth_phy_ready, .eth_synced, .eth_n_exec, .eth_n_dup, .eth_n_drop,
-        .eth_rx_dropped, .eth_rx_bad, .eth_ip(local_ip));
+        .eth_pcs_status, .eth_phy_ready, .eth_phy_id_ok, .eth_gmii_alive, .eth_synced,
+        .eth_n_exec, .eth_n_dup, .eth_n_drop, .eth_rx_dropped, .eth_rx_bad, .eth_ip(local_ip));
 
     // ── DRAM ────────────────────────────────────────────────────────────────
     if (EXT_DRAM) begin : g_ext

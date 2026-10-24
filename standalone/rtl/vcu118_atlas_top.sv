@@ -84,7 +84,7 @@ module vcu118_atlas_top
 
     // Reset: held until the MMCM locks and for 256 cycles after, and while CPU_RESET is pressed.
     // CPU_RESET does not reset the MIG (that would recalibrate and disturb DRAM contents). It does
-    // restart the Ethernet PHY bring-up (the link goes down and renegotiates).
+    // restart the Ethernet PHY bring-up (the link goes down and renegotiates, about 3 s).
     (* ASYNC_REG = "TRUE" *) logic [1:0] btn_sync;
     logic [8:0] por;
     logic       rst;
@@ -107,9 +107,10 @@ module vcu118_atlas_top
     logic        gmii_clk, gmii_rst, gmii_clk_en, gmii_rx_dv, gmii_rx_er, gmii_tx_en, gmii_tx_er;
     logic [7:0]  gmii_rxd, gmii_txd;
     logic [15:0] pcs_status, rx_dropped, rx_bad;
-    logic        phy_ready;
+    logic        phy_ready, phy_id_ok, gmii_alive;
     logic [31:0] local_ip, eth_rx_data, eth_tx_data;
-    logic        eth_rx_valid, eth_rx_ready, eth_rx_last, eth_tx_valid, eth_tx_ready, eth_tx_last;
+    logic        eth_rx_valid, eth_rx_ready, eth_rx_last, eth_rx_abort;
+    logic        eth_tx_valid, eth_tx_ready, eth_tx_last;
 
     vcu118_sgmii #(.CLK_HZ(CLK_MHZ * 1_000_000)) u_sgmii (
         .clk, .rst,
@@ -117,14 +118,14 @@ module vcu118_atlas_top
         .phy_sgmii_clk_p, .phy_sgmii_clk_n, .phy_reset_n, .phy_mdio, .phy_mdc,
         .gmii_clk, .gmii_rst, .gmii_clk_en, .gmii_rxd, .gmii_rx_dv, .gmii_rx_er,
         .gmii_txd, .gmii_tx_en, .gmii_tx_er,
-        .status_vector(pcs_status), .phy_ready);
+        .status_vector(pcs_status), .phy_ready, .phy_id_ok, .gmii_alive);
 
-    eth_udp_stack #(.LOCAL_MAC(ETH_MAC), .PORT(ETH_PORT)) u_eth (
+    eth_udp_stack #(.LOCAL_MAC(ETH_MAC), .PORT(ETH_PORT), .CLK_HZ(CLK_MHZ * 1_000_000)) u_eth (
         .gmii_clk, .gmii_rst, .gmii_clk_en, .gmii_rxd, .gmii_rx_dv, .gmii_rx_er,
         .gmii_txd, .gmii_tx_en, .gmii_tx_er,
         .clk, .rst, .local_ip,
         .rx_data(eth_rx_data), .rx_valid(eth_rx_valid), .rx_ready(eth_rx_ready),
-        .rx_last(eth_rx_last),
+        .rx_last(eth_rx_last), .rx_abort(eth_rx_abort),
         .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
         .tx_last(eth_tx_last),
         .rx_dropped, .rx_bad);
@@ -147,10 +148,10 @@ module vcu118_atlas_top
         .clk, .rst, .rxd(uart_rxd), .txd(uart_txd),
         .activity, .error, .halted, .user_leds,
         .rx_data(eth_rx_data), .rx_valid(eth_rx_valid), .rx_ready(eth_rx_ready),
-        .rx_last(eth_rx_last),
+        .rx_last(eth_rx_last), .rx_abort(eth_rx_abort),
         .tx_data(eth_tx_data), .tx_valid(eth_tx_valid), .tx_ready(eth_tx_ready),
         .tx_last(eth_tx_last),
-        .pcs_status, .phy_ready, .rx_dropped, .rx_bad, .local_ip,
+        .pcs_status, .phy_ready, .phy_id_ok, .gmii_alive, .rx_dropped, .rx_bad, .local_ip,
         .ext_a_valid, .ext_a_ready, .ext_a, .ext_d_valid, .ext_d_ready, .ext_d,
         .ext_dma_a_valid(dma_a_valid), .ext_dma_a_ready(dma_a_ready),
         .ext_dma_a_opcode(dma_a_opcode), .ext_dma_a_source(dma_a_source),
