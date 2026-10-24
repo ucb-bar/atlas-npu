@@ -442,15 +442,16 @@ then takes less than line rate.
 
 ## Resources and timing
 
-Vivado 2024.1, 50 MHz, all three configurations meet timing (`bitstreams/AtlasStandaloneEth`).
+Vivado 2024.1, 50 MHz, all three configurations meet timing (`bitstreams/AtlasStandaloneEth`, with
+ETH_RXFRAMES).
 `ipt-nvfp4` uses `SSI_SpreadLogic_high` placement and `Explore` routing (build_bitstream.sh
 arguments 5 and 6); the others use the defaults.
 
 | Config | WNS / WHS (ns) | PCS/PMA 312.5 MHz WNS (ns) | LUTs |
 |---|---|---|---|
-| `default` | +0.144 / +0.011 | +0.287 | 624K (52.8%) |
-| `ipt` | +0.150 / +0.017 | +0.043 | 362K (30.6%) |
-| `ipt-nvfp4` | +0.184 / +0.011 | +0.341 | 543K (46.0%) |
+| `default` | +0.223 / +0.010 | +0.384 | 624K (52.8%) |
+| `ipt` | +0.101 / +0.010 | +0.101 | 362K (30.6%) |
+| `ipt-nvfp4` | +0.130 / +0.010 | +0.664 | 543K (46.0%) |
 
 | Module | LUTs | FFs | Block RAM |
 |---|---|---|---|
@@ -482,13 +483,16 @@ The test results over Ethernet equal those over UART TSI in status, instret, DBG
 264,384 checked words. Only the cycle counts differ, by DDR4 timing (median 0.4%). The policy is
 bit-exact with its golden in both runs.
 
-A lone frame that the board receives sometimes waits until the next frame arrives: 13% of
-single-word requests waited up to 1 s, the period of a broadcast on that network. A datagram sent
-right after the request removes all of the wait, so the frame waits at or before the UDP port
-filter. In simulation no frame waits. ETH_RXFRAMES (`0x054`) tells whether the frame waits before or
-after the GMII interface. EthLink's nudge (above) sends the newest datagram again after 1 ms without
-a reply. With it, a 16 MiB `link_bench` run has 0 timeouts (435 nudges, answered DUP); without it,
-548 timeouts of 50 ms each.
+A frame that arrives at the board right after the board sent a reply sometimes waits until the next
+frame arrives: up to 1 s, the period of a broadcast on the test network. With requests sent less
+than 20 us after the previous reply, 25 to 30% of them waited; with 50 us or more, none of 1,200
+did. A lone datagram to another port never waited. ETH_RXFRAMES shows that the frame waits before
+the GMII interface: in 98 of 100 held requests, the GMII count did not include the held frame (in
+the other 2, a broadcast was counted in its place). So the frame waits in the switch, the DP83867
+PHY or the PCS/PMA IP, not in the MAC, the UDP stack or eth_tsi. A direct cable from the host NIC to
+the board, without the switch, would tell the switch from the PHY. EthLink's nudge (above) sends the
+newest datagram again after 1 ms without a reply. With it, a 16 MiB `link_bench` run has 0 timeouts
+(about 500 nudges, answered DUP); without it, 548 timeouts of 50 ms each.
 
 ## Limits
 
@@ -503,5 +507,6 @@ a reply. With it, a 16 MiB `link_bench` run has 0 timeouts (435 nudges, answered
 - ETH_IP returns to the build's value after CPU_RESET.
 - IMEM reads while the scalar core runs are denied and return 0. Stop the core first.
 - On the board, DRAM accesses before the DDR4 is calibrated are denied.
-- A lone received frame can wait until the next frame (see Results). EthLink works around it; a
-  host that does not use EthLink sees replies late, up to the time to the next frame.
+- A frame that arrives right after the board sent a reply can wait until the next frame, before the
+  FPGA (see Results). EthLink works around it; a host that does not use EthLink sees some replies
+  late, up to the time to the next frame.
