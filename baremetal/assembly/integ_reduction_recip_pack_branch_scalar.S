@@ -112,12 +112,10 @@
     lw x23, 0(x19)
     DELAY 2
     BEQ   x23, x0, fail
-    NOP
 
     # Branch coverage with a not-taken path determined by the loaded result.
     ADDI  x24, x0, 1
     BEQ   x23, x24, scalar_marker
-    NOP
 
 after_scalar_branch:
     # Drain BF16 outputs to DRAM.
@@ -131,14 +129,12 @@ after_scalar_branch:
     dma.wait ch5
 
     JAL   x0, pass
-    NOP
 
 scalar_marker:
     # Write a disjoint scalar scratch marker, then fall through to common storeback.
     LI    x25, 0x3000
     sw x24, 0(x25)
     JAL   x0, after_scalar_branch
-    NOP
 
 pass:
     ADDI  x1, x0, 1

@@ -2,7 +2,7 @@
 # @TIMEOUT 200
 # @EXPECT_ILLEGAL
 #
-# The core stops at the CSRRS (word 1) with an illegal instruction; DBG0 stays 0.
+# The core stops at the CSRRS (pc 4) with an illegal instruction; DBG0 stays 0.
 
     ADDI  x1, x0, 1
     CSRRS x2, 0xC20, x0

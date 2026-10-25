@@ -34,7 +34,6 @@
 
 loop:
     BEQ   x2, x3, done
-    NOP
 
     ADDI  x6, x0, 0
     dma.load x6, x16, x12, ch0
@@ -60,13 +59,12 @@ loop:
     lw x21, 0(x20)
     DELAY 1
 
-    BLT   x21, x0, use_mov
     ADDI  x29, x0, 3
+    BLT   x21, x0, use_mov
 
     vrelu.bf16 m4, m2
     DELAY 64
     JAL   x0, store_iter
-    NOP
 
 use_mov:
     vmov m4, m2
@@ -87,7 +85,6 @@ store_iter:
     ADD   x17, x17, x18
     ADDI  x2, x2, 1
     JAL   x0, loop
-    NOP
 
 done:
 pass:

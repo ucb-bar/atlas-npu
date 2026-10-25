@@ -46,8 +46,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4380
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 2: VREDMIN.BF16  8, 0  (col-wise min: min(4.0) = 4.0 -> 0x4080)
@@ -65,8 +65,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 3: VREDMAX.BF16  8, 0  (col-wise max: max(4.0) = 4.0 -> 0x4080)
@@ -84,8 +84,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 4: VREDSUM.ROW.BF16  8, 0  (row-wise sum: 32 x 4.0 = 128.0 -> 0x4300)
@@ -103,8 +103,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4300
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 5: VREDMIN.ROW.BF16  8, 0  (row-wise min: min(4.0) = 4.0 -> 0x4080)
@@ -122,8 +122,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 6: VREDMAX.ROW.BF16  8, 0  (row-wise max: max(4.0) = 4.0 -> 0x4080)
@@ -141,8 +141,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
 pass:
     CSRRW x0, 0x801, x26       # write cumulative timed cycles to CSR_DBG1

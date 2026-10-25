@@ -3,9 +3,9 @@
 # @DRAM_BASE 0x90000000
 #
 # Coverage intent:
-#   - Taken BEQ with VLOAD side effect in a delay slot.
-#   - Not-taken BEQ with VLOAD side effect in a delay slot.
-#   - JAL delay-slot side effects launching XLU transpose and MXU1 push/matmul/pop.
+#   - Taken BEQ with a VLOAD side effect just before it (no delay slot).
+#   - Not-taken BEQ with a VLOAD side effect just before it.
+#   - JALs just after XLU transpose and MXU1 push/matmul/pop launches.
 #   - End-to-end DMA -> VMEM -> VLOAD -> XLU -> MXU1 -> VSTORE -> DMA path.
 #   - Cold upper-bank activity in m53, m54, m55, m56, and m57.
 #
@@ -54,48 +54,47 @@
     dma.load x21, x11, x12, ch1
     dma.wait ch1
 
-    # Taken branch: the single delay-slot VLOAD must execute before redirect.
-    BEQ   x0, x0, act_loaded
+    # Taken branch: the VLOAD before it must execute; the next instruction is dropped.
     vload m53, 0(x20)
+    BEQ   x0, x0, act_loaded
     ADDI  x27, x27, 1      # must be skipped
 act_loaded:
     DELAY 32
 
-    # Not-taken branch: delay-slot VLOAD must still execute, and fallthrough must occur.
-    BEQ   x0, x29, weight_taken
+    # Not-taken branch: the VLOAD before it must execute, and fallthrough must occur.
     vload m54, 0(x21)
+    BEQ   x0, x29, weight_taken
     ADDI  x26, x26, 1      # must execute exactly once
     JAL   x0, weight_done
-    NOP
 weight_taken:
     ADDI  x25, x25, 1      # must stay zero
 weight_done:
     DELAY 32
 
-    # JAL delay-slot XLU transpose into another cold upper bank.
-    JAL   x1, xlu_done
+    # XLU transpose into another cold upper bank, then a JAL.
     vtrpose.xlu m55, m54
+    JAL   x1, xlu_done
     ADDI  x24, x24, 1      # must be skipped
 xlu_done:
     DELAY 64
 
-    # JAL delay-slot MXU1 weight push from the transposed bank.
-    JAL   x1, push_done
+    # MXU1 weight push from the transposed bank, then a JAL.
     vmatpush.weight.mxu1 w0, m55
+    JAL   x1, push_done
     ADDI  x24, x24, 1      # must be skipped
 push_done:
     DELAY 31
 
-    # JAL delay-slot MXU1 compute launch.
-    JAL   x1, compute_done
+    # MXU1 compute launch, then a JAL.
     vmatmul.mxu1 acc0, m53, w0
+    JAL   x1, compute_done
     ADDI  x24, x24, 1      # must be skipped
 compute_done:
     DELAY 34
 
-    # JAL delay-slot MXU1 BF16 pop into m56/m57.
-    JAL   x1, pop_done
+    # MXU1 BF16 pop into m56/m57, then a JAL.
     vmatpop.bf16.acc.mxu1 m56, acc0
+    JAL   x1, pop_done
     ADDI  x24, x24, 1      # must be skipped
 pop_done:
     DELAY 31
@@ -112,20 +111,16 @@ pop_done:
     # Scalar control-path checks for taken / not-taken / JAL redirect behavior.
     ADDI  x28, x0, 2
     BNE   x27, x0, fail
-    NOP
 
     ADDI  x28, x0, 3
     ADDI  x30, x0, 1
     BNE   x26, x30, fail
-    NOP
 
     ADDI  x28, x0, 4
     BNE   x25, x0, fail
-    NOP
 
     ADDI  x28, x0, 5
     BNE   x24, x0, fail
-    NOP
 
 pass:
     ADDI  x1, x0, 1

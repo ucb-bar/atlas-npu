@@ -160,7 +160,6 @@ round_loop:
     # Outer round loop counter.
     ADDI  x28, x28, 1
     BLT   x28, x29, round_loop
-    NOP
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
 # (host expects dbg0 == 1 for PASS; intermediate phase markers above

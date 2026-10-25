@@ -397,7 +397,7 @@ int main(void)
     if expect_illegal:
         return out + f"""
     if (dbg0 == 0 && (status >> 1 & 3) == 1) {{
-        printf("*** PASSED *** ({test_name}: illegal instruction at word %u, as expected)\\n",
+        printf("*** PASSED *** ({test_name}: illegal instruction at pc 0x%x, as expected)\\n",
                mmio_read32(CSR_ILLEGAL_PC));
         return 0;
     }}

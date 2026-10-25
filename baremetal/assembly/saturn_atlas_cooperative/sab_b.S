@@ -16,7 +16,6 @@ _start:
 
     LI    x5, 0xAAAAAAAA             # expected marker
     BNE   x4, x5, b_fail
-    NOP
 
     ADDI  x1, x0, 2
     csrrw x0, 0x800, x1                 # dbg0 = 2 PASS

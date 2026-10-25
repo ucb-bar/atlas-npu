@@ -46,8 +46,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x40C0
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 2: vsub.bf16  8, 0, 2  (4.0 - 2.0 = 2.0 -> 0x4000)
@@ -65,8 +65,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4000
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 3: vmul.bf16  8, 0, 2  (4.0 * 2.0 = 8.0 -> 0x4100)
@@ -84,8 +84,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4100
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 4: vmin.bf16  8, 0, 2  (min(4.0, 2.0) = 2.0 -> 0x4000)
@@ -103,8 +103,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4000
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
     # ================================================================
     # Test 5: vmax.bf16  8, 0, 2  (max(4.0, 2.0) = 4.0 -> 0x4080)
@@ -122,8 +122,8 @@
     lhu x10, 0(x8)
     DELAY 2
     LI    x11, 0x4080
-    BNE   x10, x11, fail
     ADDI  x28, x28, 1
+    BNE   x10, x11, fail
 
 pass:
     CSRRW x0, 0x801, x26       # write cumulative timed cycles to CSR_DBG1

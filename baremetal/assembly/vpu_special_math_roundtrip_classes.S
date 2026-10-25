@@ -98,7 +98,6 @@
     lw x21, 4(x20)
     DELAY 4
     BEQ   x21, x0, fail
-    NOP
     ADDI  x28, x28, 1
 
     # Drain all outputs to DRAM.

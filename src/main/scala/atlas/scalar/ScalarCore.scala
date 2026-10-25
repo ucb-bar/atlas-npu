@@ -226,7 +226,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val dma_wait_stall = s1_valid && (dec.dma_cmd === DMA_WAIT) && io.dma_busy(dec.funct3)
 
   // ==============================================================
-  // Halt logic
+  // Illegal instructions
   // ==============================================================
 
   // Instructions of a unit this configuration does not have are illegal.
@@ -241,22 +241,16 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // A CSR instruction is illegal on an unmapped CSR, or when it writes a read-only one.
   val csrIllegal = dec.is_csr && io.csrPort.illegal
   val is_illegal = s1_valid && (dec.illegal || unitAbsent || vpuSourceBankClash || csrIllegal)
-  val branch_in_delay_slot =
-    pc_ctrl.io.in_delay_slot && (dec.br_type =/= BR_NONE || dec.is_jal || dec.is_jalr)
-  val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
-  val ecall_ebreak     = s1_valid && (dec.is_ecall || dec.is_ebreak)
-  val hostStart        = io.execRunWrite && io.execRun
-  val hostStop         = io.execRunWrite && !io.execRun
-
-  val halt_now = halted || hostStop || illegal_detected || ecall_ebreak
-  when((hostStop || illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
 
   // ==============================================================
   // ALU + Branch
   // ==============================================================
 
+  // s1_pc is the IMEM word index; the architectural PC (auipc, links, illegal PC) is in bytes.
+  val s1_pc_byte = s1_pc(29, 0) ## 0.U(2.W)
+
   val alu_a = MuxLookup(dec.op1_sel, rs1_data)(Seq(
-    OP1_RS1 -> rs1_data, OP1_PC -> s1_pc, OP1_ZERO -> 0.U))
+    OP1_RS1 -> rs1_data, OP1_PC -> s1_pc_byte, OP1_ZERO -> 0.U))
   val alu_b = MuxLookup(dec.op2_sel, rs2_data)(Seq(
     OP2_RS2 -> rs2_data, OP2_IMM -> dec.imm.asUInt, OP2_ONE -> 1.U, OP2_ZERO -> 0.U))
 
@@ -269,9 +263,11 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   branch.io.rs1 := rs1_data
   branch.io.rs2 := rs2_data
 
-  val branch_target = (s1_pc.asSInt + (dec.imm >> 1)).asUInt
-  val jal_target    = (s1_pc.asSInt + (dec.imm >> 1)).asUInt
-  val jalr_target   = (rs1_data.asSInt + dec.imm).asUInt
+  // Branch and jal offsets and the jalr target are in bytes; the targets are IMEM word indices.
+  val branch_target = (s1_pc.asSInt + (dec.imm >> 2)).asUInt
+  val jal_target    = (s1_pc.asSInt + (dec.imm >> 2)).asUInt
+  val jalr_byte     = (rs1_data.asSInt + dec.imm).asUInt
+  val jalr_target   = jalr_byte >> 2
 
   val is_branch_taken = s1_valid && (dec.br_type =/= BR_NONE) && branch.io.taken
   val is_jal  = s1_valid && dec.is_jal
@@ -279,7 +275,10 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
 
   val redirect = is_branch_taken || is_jal || is_jalr
   val redirect_target = Mux(is_jalr, jalr_target, Mux(is_jal, jal_target, branch_target))
-  val link_value = s1_pc + 1.U
+  val link_value = s1_pc_byte + 4.U
+  // A taken branch or jump to a target with bit 1 set is illegal (RV32I without C). Bit 0 of a
+  // jalr target is cleared; a branch or jal offset has bit 0 = 0.
+  val target_bit1 = Mux(is_jalr, jalr_byte(1), dec.imm(1))
 
   // ==============================================================
   // Interlock
@@ -410,6 +409,16 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // ==============================================================
 
   val stall   = delay_stall || dma_wait_stall || interlock
+
+  // A misaligned target is checked in the cycle the jump would issue, when its sources are current.
+  val illegal_detected = is_illegal || (redirect && !stall && target_bit1)
+  val ecall_ebreak     = s1_valid && (dec.is_ecall || dec.is_ebreak)
+  val hostStart        = io.execRunWrite && io.execRun
+  val hostStop         = io.execRunWrite && !io.execRun
+
+  val halt_now = halted || hostStop || illegal_detected || ecall_ebreak
+  when((hostStop || illegal_detected || ecall_ebreak) && !halted) { halted := true.B }
+
   val s1_fire = s1_valid && !stall && !halt_now
 
   // Performance events: one cause per stalled cycle, in this order.
@@ -605,7 +614,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   io.csrPort.set_illegal := illegal_detected && !halted
   io.csrPort.set_ecall   := s1_valid && dec.is_ecall && !halted
   io.csrPort.set_ebreak  := s1_valid && dec.is_ebreak && !halted
-  io.csrPort.illegal_pc  := s1_pc
+  io.csrPort.illegal_pc  := s1_pc_byte
   io.csrPort.inst_retire := s1_fire
 
   val s1WritesScalarRd = s1_fire && dec.rd_wen && dec.rd =/= 0.U

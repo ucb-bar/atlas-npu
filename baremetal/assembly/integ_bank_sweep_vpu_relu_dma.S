@@ -84,19 +84,16 @@
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
-    NOP
 
     lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
-    NOP
 
     lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
 
     LI    x11, 0x90002000  # output DRAM byte offset
     dma.store x11, x7, x12, ch1
@@ -128,19 +125,16 @@
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
-    NOP
 
     lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
-    NOP
 
     lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
 
     LI    x11, 0x90002800
     dma.store x11, x7, x12, ch3
@@ -172,19 +166,16 @@
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
-    NOP
 
     lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
-    NOP
 
     lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
 
     LI    x11, 0x90003000
     dma.store x11, x7, x12, ch5
@@ -216,19 +207,16 @@
     DELAY 2
     ADDI  x21, x0, 0x5A
     BNE   x20, x21, fail
-    NOP
 
     lhu x20, 2(x29)
     DELAY 2
     LI    x21, 0x3412
     BNE   x20, x21, fail
-    NOP
 
     lw x20, 4(x29)
     DELAY 2
     LI    x21, 0x13579BDF
     BNE   x20, x21, fail
-    NOP
 
     LI    x11, 0x90003800
     dma.store x11, x7, x12, ch7

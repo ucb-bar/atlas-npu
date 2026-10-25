@@ -71,8 +71,8 @@
     lw x21, 0(x20)
     DELAY 4
 
-    BEQ   x21, x0, fail
     ADDI  x29, x0, 7
+    BEQ   x21, x0, fail
 
     # Use the same transposed bank as MXU1 weight.
     vmatpush.weight.mxu1 w0, m8

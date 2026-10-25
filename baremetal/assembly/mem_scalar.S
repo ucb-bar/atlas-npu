@@ -39,7 +39,6 @@
     DELAY 2
     LI    x30, 0xFF84A201
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 3
 
 # ── Test 3: LB byte 0 = sign_ext(0x01) = 1 ──────────────
@@ -47,7 +46,6 @@
     DELAY 2
     ADDI  x30, x0, 1
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 4
 
 # ── Test 4: LB byte 2 = sign_ext(0x84) = 0xFFFFFF84 ─────
@@ -55,7 +53,6 @@
     DELAY 2
     LI    x30, 0xFFFFFF84
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 5
 
 # ── Test 5: LBU byte 2 = 0x84 ───────────────────────────
@@ -63,7 +60,6 @@
     DELAY 2
     ADDI  x30, x0, 0x84
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 6
 
 # ── Test 6: LH byte 0 = sign_ext(0xA201) = 0xFFFFA201 ───
@@ -71,7 +67,6 @@
     DELAY 2
     LI    x30, 0xFFFFA201
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 7
 
 # ── Test 7: LHU byte 0 = 0xA201 ─────────────────────────
@@ -79,7 +74,6 @@
     DELAY 2
     LI    x30, 0xA201
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 8
 
 # ── Test 8: SELD byte 0 -> e[3] (no crash) ──────────────
@@ -94,7 +88,6 @@
     DELAY 2
     LI    x30, 0xAABBCCDD
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 10
 
 # ── Test 10: SB then LBU at same byte ───────────────────
@@ -104,7 +97,6 @@
     DELAY 2
     ADDI  x30, x0, 0x42
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 11
 
 # ── Test 11: SH then LHU at byte 2 ──────────────────────
@@ -114,7 +106,6 @@
     DELAY 2
     LI    x30, 0x1234
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1       # x28 = 12
 
 # ── Step 12: DMA store final VMEM -> DRAM word 32 ───────

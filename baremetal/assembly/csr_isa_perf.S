@@ -22,34 +22,27 @@
     SRLI  x2, x1, 16
     LI    x3, 0x0200
     BNE   x2, x3, fail
-    NOP
     ANDI  x2, x1, 7
     ADDI  x3, x0, 5
     BNE   x2, x3, fail
-    NOP
     LI    x3, 0xFFF0
     AND   x2, x1, x3
     BNE   x2, x0, fail
-    NOP
 
 # ── 3: the other read forms ──
     ADDI   x28, x28, 1
     CSRRC  x2, 0xCC0, x0
     BNE    x2, x1, fail
-    NOP
     CSRRSI x2, 0xCC0, 0
     BNE    x2, x1, fail
-    NOP
     CSRRCI x2, 0xCC0, 0
     BNE    x2, x1, fail
-    NOP
 
 # ── 4: PERF_NUM ──
     ADDI  x28, x28, 1
     CSRRS x2, 0xCC1, x0
     ADDI  x3, x0, 27
     BNE   x2, x3, fail
-    NOP
 
 # ── 5: cycle, csrrs with x0 ──
     ADDI  x28, x28, 1
@@ -58,7 +51,6 @@
     CSRRS x3, 0xC00, x0
     SUB   x4, x3, x2
     BNE   x4, x5, fail
-    NOP
 
 # ── 6: cycle, csrrsi / csrrci with 0 ──
     ADDI   x28, x28, 1
@@ -66,7 +58,6 @@
     CSRRCI x3, 0xC00, 0
     SUB    x4, x3, x2
     BNE    x4, x5, fail
-    NOP
 
 # ── 7: instret ──
     ADDI  x28, x28, 1
@@ -74,7 +65,6 @@
     CSRRS x3, 0xC02, x0
     SUB   x4, x3, x2
     BNE   x4, x5, fail
-    NOP
 
 # ── 8: counters cycles and instret ──
     ADDI  x28, x28, 1
@@ -82,10 +72,8 @@
     CSRRS x3, 0xCC2, x0
     SUB   x4, x3, x2
     BNE   x4, x5, fail
-    NOP
     CSRRS x2, 0xCC3, x0
     BNE   x2, x0, fail
-    NOP
     CSRRS x2, 0xCC4, x0
     NOP
     NOP
@@ -93,7 +81,6 @@
     SUB   x4, x3, x2
     ADDI  x6, x0, 3
     BNE   x4, x6, fail
-    NOP
 
 # ── 9: unit stall on the XLU ──
     ADDI  x28, x28, 1
@@ -106,9 +93,7 @@
     SUB   x14, x12, x10
     SUB   x15, x13, x11
     BEQ   x14, x0, fail
-    NOP
     BNE   x14, x15, fail
-    NOP
 
 # ── 10: data stall on a scalar load ──
     ADDI  x28, x28, 1
@@ -121,9 +106,7 @@
     SUB   x14, x12, x10
     SUB   x15, x13, x11
     BEQ   x14, x0, fail
-    NOP
     BNE   x14, x15, fail
-    NOP
 
 pass:
     CSRRW x0, 0x801, x1

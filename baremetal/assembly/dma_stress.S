@@ -17,7 +17,6 @@
 
 loop:
     BEQ   x2, x3, done
-    NOP
 
     # DRAM[base+x16] → VMEM[0]
     dma.load x6, x16, x11, ch0
@@ -31,7 +30,6 @@ loop:
     ADD   x17, x17, x11
     ADDI  x2, x2, 1
     JAL   x0, loop
-    NOP
 
 done:
     ADDI  x30, x0, 1

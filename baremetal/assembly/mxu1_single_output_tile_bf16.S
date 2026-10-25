@@ -93,10 +93,8 @@
 
 tile_loop:
     BEQ   x10, x11, epilogue
-    NOP
 
     BEQ   x29, x0, preload_for_buf1
-    NOP
 
 preload_for_buf0:
     ADDI  x6, x0, 0
@@ -108,7 +106,6 @@ preload_for_buf0:
     vtrpose.xlu m5, m4
     DELAY 64
     BEQ   x0, x0, do_matmul
-    NOP
 
 preload_for_buf1:
     ADDI  x6, x0, 0
@@ -133,14 +130,12 @@ do_matmul:
     ADD   x16, x16, x12
 
     BEQ   x29, x0, matmul_buf0
-    NOP
 
 matmul_buf1:
     vmatmul.acc.mxu1 acc0, m0, w1
     vmatpush.weight.mxu1 w0, m5
     DELAY 33
     BEQ   x0, x0, advance
-    NOP
 
 matmul_buf0:
     vmatmul.acc.mxu1 acc0, m0, w0
@@ -150,7 +145,6 @@ matmul_buf0:
 advance:
     XOR   x29, x29, x30
     BEQ   x0, x0, tile_loop
-    NOP
 
 epilogue:
     LI    x7, 256
@@ -161,12 +155,10 @@ epilogue:
     DELAY 33
 
     BEQ   x29, x0, last_buf0
-    NOP
 
 last_buf1:
     vmatmul.acc.mxu1 acc0, m0, w1
     BEQ   x0, x0, do_pop
-    NOP
 
 last_buf0:
     vmatmul.acc.mxu1 acc0, m0, w0

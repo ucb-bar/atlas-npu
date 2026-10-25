@@ -40,13 +40,12 @@
     LI    x2, 1024            # common 1 KiB DMA size
     LI    x3, 2048            # common 2 KiB DMA size
 
-    # Conservative branch-delay-slot sanity case with accelerator-independent work.
+    # Taken-branch sanity case with accelerator-independent work: the code after the branch is skipped.
     ADDI  x20, x0, 0
-    BEQ   x0, x0, setup_done
     ADDI  x20, x20, 3
+    BEQ   x0, x0, setup_done
     ADDI  x21, x0, 3
     BNE   x20, x21, fail
-    NOP
     ADDI  x28, x28, 1
 
 setup_done:

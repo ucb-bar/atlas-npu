@@ -3,12 +3,12 @@
 #
 # Identical body to smolvla_elementwise_add.S through the final DMA.STORE +
 # DMA.WAIT, then replaces the pass: {ADDI x1,x0,1 ; CSRRW x0,0x800,x1 ; ECALL}
-# block with a word-indexed JALR to byte 0x10000 (word 0x4000) so the next
-# kernel staged into the upper IMEM half runs without halting.
+# block with a JALR to IMEM byte 0x10000 so the next kernel staged into the
+# upper IMEM half runs without halting.
 #
-# Used by tests/saturn_atlas_quad_phase_large.c. Atlas has 1 delay slot
-# after JAL/JALR; the NOP after JALR absorbs it. The fail: ECALL block
-# is dead code, retained for safety.
+# Used by tests/saturn_atlas_quad_phase_large.c. The JALR drops the
+# instruction after it (no delay slot). The fail: ECALL block is dead code,
+# retained for safety.
 #
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
@@ -80,11 +80,9 @@
     dma.wait ch1
 
 to_high:
-    # Hop to the kernel staged at byte 0x10000 (word 0x4000) without halting.
-    # One NOP delay slot covers Atlas's JAL/JALR latency.
-    LI    x1, 0x4000
+    # Hop to the kernel staged at byte 0x10000 without halting.
+    LI    x1, 0x10000
     JALR  x0, x1, 0
-    NOP
 
 fail:
     CSRRW x0, 0x800, x28

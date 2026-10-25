@@ -118,7 +118,6 @@ round_loop:
 
     ADDI  x28, x28, 1
     BLT   x28, x29, round_loop
-    NOP
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
     LI    x30, 1

@@ -832,7 +832,7 @@ class Atlas:
         if dbg0 == 0:
             reason = (core_status >> 1) & 3
             if reason == 1:
-                r.status, r.detail = "ILLEGAL", f"illegal instruction at word {illegal_pc}"
+                r.status, r.detail = "ILLEGAL", f"illegal instruction at pc {illegal_pc:#x}"
             elif reason:
                 r.status, r.detail = "HALTED", f"halted (reason {reason}) without setting DBG0"
             else:

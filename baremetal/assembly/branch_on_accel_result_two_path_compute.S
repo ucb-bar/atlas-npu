@@ -7,7 +7,7 @@
 #   - Accelerator result influences scalar control path.
 #   - VREDSUM.ROW.BF16 result is stored, scalar-read, and branched on.
 #   - Taken path launches a dependent VRELU; untaken path is present but not selected.
-#   - Includes architecturally visible delay-slot side effects that are target-independent.
+#   - Includes a target-independent marker write just before the branch.
 #
 # DRAM byte layout:
 #   [0x0000 .. 0x07FF]  input BF16 tensor pair              (2048 B)
@@ -64,14 +64,13 @@
     DELAY 4
 
     # Generator makes row 0 sum positive, so branch to relu_path is deterministic.
+    ADDI  x29, x0, 1         # marker only, on both paths
     BLT   x21, x0, neg_path
-    ADDI  x29, x0, 1         # delay-slot marker only
 
 relu_path:
     vrelu.bf16 m4, m2
     DELAY 64
     JAL   x0, store_final
-    NOP
 
 neg_path:
     vmov m4, m2

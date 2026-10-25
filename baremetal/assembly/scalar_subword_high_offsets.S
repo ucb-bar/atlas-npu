@@ -28,12 +28,10 @@
     DELAY 2
     LI    x30, 0x81
     BNE   x9, x30, fail
-    NOP
     lb x9, 31(x8)
     DELAY 2
     LI    x30, 0xFFFFFF81
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # Halfword at byte 28: positive sign bit.
@@ -43,7 +41,6 @@
     DELAY 2
     LI    x30, 0x7F80
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # Halfword at byte 26: negative sign bit.
@@ -53,12 +50,10 @@
     DELAY 2
     LI    x30, 0xFFFF8001
     BNE   x9, x30, fail
-    NOP
     lhu x9, 26(x8)
     DELAY 2
     LI    x30, 0x8001
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # Word at byte 20: upper-half word lane.
@@ -68,7 +63,6 @@
     DELAY 2
     LI    x30, 0xA1B2C3D4
     BNE   x9, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
     ADDI  x6, x0, 0

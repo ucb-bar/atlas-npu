@@ -111,11 +111,9 @@ inner:
 
     ADDI  x11, x11, 1
     BLT   x11, x13, inner
-    NOP
 
     ADDI  x26, x26, 1
     BLT   x26, x27, outer
-    NOP
 
 # ── Done: dbg0 = 1, ECALL ─────────────────────────────────────────────
     LI    x30, 1

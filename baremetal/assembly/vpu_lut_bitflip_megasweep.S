@@ -102,49 +102,41 @@
     DELAY 64
     LI    x10, 0x90002000
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VLOG2       -> 0x2800 ----
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90002800
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VRECIP.BF16 -> 0x3000 ----
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003000
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VEXP        -> 0x3800 ----
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003800
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VEXP2       -> 0x4000 ----
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004000
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VTANH       -> 0x4800 ----
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004800
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VSQUARE.BF16 -> 0x5000 ----
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005000
     JAL   x1, store_pair
-    NOP
     # ---- Tile A / VCUBE.BF16   -> 0x5800 ----
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005800
     JAL   x1, store_pair
-    NOP
 
 # ======================================================================
 # Tile B (walk_signed) at DRAM 0x0800
@@ -164,49 +156,41 @@
     DELAY 64
     LI    x10, 0x90006000
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VLOG2       -> 0x6800 ----
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006800
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VRECIP.BF16 -> 0x7000 ----
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007000
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VEXP        -> 0x7800 ----
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007800
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VEXP2       -> 0x8000 ----
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008000
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VTANH       -> 0x8800 ----
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008800
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VSQUARE.BF16 -> 0x9000 ----
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009000
     JAL   x1, store_pair
-    NOP
     # ---- Tile B / VCUBE.BF16   -> 0x9800 ----
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009800
     JAL   x1, store_pair
-    NOP
 
 # ======================================================================
 # Tile C (class_lattice) at DRAM 0x1000
@@ -226,49 +210,41 @@
     DELAY 64
     LI    x10, 0x9000A000
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VLOG2       -> 0xA800 ----
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A800
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VRECIP.BF16 -> 0xB000 ----
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B000
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VEXP        -> 0xB800 ----
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B800
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VEXP2       -> 0xC000 ----
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C000
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VTANH       -> 0xC800 ----
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C800
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VSQUARE.BF16 -> 0xD000 ----
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D000
     JAL   x1, store_pair
-    NOP
     # ---- Tile C / VCUBE.BF16   -> 0xD800 ----
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D800
     JAL   x1, store_pair
-    NOP
 
 # ======================================================================
 # Tile D (magnitude_alt) at DRAM 0x1800
@@ -288,49 +264,41 @@
     DELAY 64
     LI    x10, 0x9000E000
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VLOG2       -> 0xE800 ----
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E800
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VRECIP.BF16 -> 0xF000 ----
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F000
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VEXP        -> 0xF800 ----
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F800
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VEXP2       -> 0x10000 ----
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010000
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VTANH       -> 0x10800 ----
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010800
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VSQUARE.BF16 -> 0x11000 ----
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011000
     JAL   x1, store_pair
-    NOP
     # ---- Tile D / VCUBE.BF16   -> 0x11800 ----
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011800
     JAL   x1, store_pair
-    NOP
 
 # ======================================================================
 # Chain phase
@@ -485,4 +453,3 @@ store_pair:
     dma.store x10, x9, x3, ch1
     dma.wait ch1
     JALR  x0, x1, 0
-    NOP

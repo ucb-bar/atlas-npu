@@ -108,7 +108,6 @@ tile_loop:
     # ── Advance ──
     ADDI  x10, x10, 1
     BNE   x10, x11, tile_loop
-    NOP                        # delay slot (always executes)
 
 pass:
     ADDI  x1, x0, 1

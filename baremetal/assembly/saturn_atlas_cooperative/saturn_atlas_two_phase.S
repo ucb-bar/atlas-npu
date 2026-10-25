@@ -23,9 +23,7 @@
 _start:
     csrrs x1, 0x801, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
-    NOP
     JAL   x0, phase_1
-    NOP
 
 phase_0:
     LI    x2, 0xA0000000         # seed base
@@ -40,7 +38,6 @@ p0_loop:
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p0_loop
-    NOP
 
     ADDI  x1, x0, 1
     csrrw x0, 0x800, x1              # dbg0 = 1 (phase 0 done)
@@ -57,11 +54,9 @@ p1_loop:
     DELAY 2
     OR    x7, x2, x4             # expected = base | i
     BNE   x6, x7, p1_fail
-    NOP
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p1_loop
-    NOP
 
     ADDI  x1, x0, 2
     csrrw x0, 0x800, x1              # dbg0 = 2 (PASS)

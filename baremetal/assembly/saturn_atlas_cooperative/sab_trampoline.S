@@ -7,6 +7,5 @@
 # Used by the lower-first and optB-restart variants prior to staging B.
 
 _start:
-    LI    x1, 0x4000                # word index of IMEM byte 0x10000
+    LI    x1, 0x10000               # IMEM byte 0x10000
     JALR  x0, x1, 0
-    NOP

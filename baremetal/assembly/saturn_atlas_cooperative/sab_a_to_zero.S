@@ -13,7 +13,6 @@ _start:
 a_busy:
     ADDI  x11, x11, 1
     BLT   x11, x10, a_busy
-    NOP
 
     LI    x2, 0xAAAAAAAA
     ADDI  x3, x0, 0
@@ -22,4 +21,3 @@ a_busy:
 
     ADDI  x1, x0, 0                 # target = IMEM byte 0
     JALR  x0, x1, 0
-    NOP

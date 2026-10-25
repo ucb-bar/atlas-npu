@@ -7,8 +7,8 @@
 A bundle is one JSON file per test: the program words, the DRAM preload and check words (from
 the test's generator, else its inline @DRAM / @CHECK_DRAM lines), and its @PERF directives.
 This is the data the Chipyard C harness embeds. --no-delay assembles each test with every
-DELAY removed, which the interlocked core must not need: a DELAY in a branch delay slot becomes
-a NOP so the branch semantics stay the same. Generators run with --gen-python (they need torch).
+DELAY removed, which the interlocked core must not need. Generators run with --gen-python (they
+need torch).
 """
 import argparse
 import json
@@ -24,33 +24,21 @@ sys.path.insert(0, str(BAREMETAL))
 import atlas_asm  # noqa: E402
 from npu_model.isa import ISA_VERSION  # noqa: E402
 
-BRANCHES = {"beq", "bne", "blt", "bge", "bltu", "bgeu", "jal", "jalr", "j", "jr", "beqz", "bnez", "ret"}
 LABELS = re.compile(r"^(\s*(?:[A-Za-z_.$][\w.$]*:\s*)*)(.*)$")
 
 
 def strip_delays(source):
-    """Remove every DELAY; one in a branch delay slot becomes a NOP. Returns (source, removed, kept_as_nop)."""
-    out, removed, nops, after_branch = [], 0, 0, False
+    """Remove every DELAY. Returns (source, removed)."""
+    out, removed = [], 0
     for line in source.splitlines():
         code = line.split("#", 1)[0]
         labels, rest = LABELS.match(code).groups()
-        rest = rest.strip()
-        if not rest or rest.startswith("."):
-            out.append(line)
-            continue
-        mnemonic = rest.split()[0].lower()
-        if mnemonic == "delay":
-            if after_branch:
-                out.append(f"{labels}NOP  # was {rest} (branch delay slot)")
-                nops += 1
-                after_branch = False
-            else:
-                out.append(labels.rstrip())
-                removed += 1
+        if rest.strip().lower().split()[:1] == ["delay"]:
+            out.append(labels.rstrip())
+            removed += 1
             continue
         out.append(line)
-        after_branch = mnemonic in BRANCHES
-    return "\n".join(out) + "\n", removed, nops
+    return "\n".join(out) + "\n", removed
 
 
 def generator_for(test):
@@ -105,11 +93,11 @@ def main():
     failed = []
     for t in tests:
         source = (BAREMETAL / "assembly" / f"{t}.S").read_text()
-        removed = nops = 0
+        removed = 0
         try:
             golden = golden_for(t, source, a.gen_python, cache)
             if a.no_delay:
-                source, removed, nops = strip_delays(source)
+                source, removed = strip_delays(source)
             program = [w & 0xFFFF_FFFF for w in atlas_asm.assemble(source)]
         except Exception as e:  # report and continue with the other tests
             failed.append(t)
@@ -121,7 +109,6 @@ def main():
             "isa": list(ISA_VERSION),
             "variant": "no-delay" if a.no_delay else "orig",
             "delays_removed": removed,
-            "delays_as_nop": nops,
             "program": program,
             "preload": pairs(golden[0], golden[1]) if golden else [],
             "check": pairs(golden[2], golden[3]) if golden else [],
@@ -133,7 +120,7 @@ def main():
         (out / f"{t}.json").write_text(json.dumps(bundle))
         print(f"  {t}: {len(program)} words, {sum(len(w) for _, w in bundle['preload'])} preload, "
               f"{sum(len(w) for _, w in bundle['check'])} check"
-              + (f", {removed} DELAY removed, {nops} kept as NOP" if a.no_delay else ""))
+              + (f", {removed} DELAY removed" if a.no_delay else ""))
     print(f"{len(tests) - len(failed)}/{len(tests)} bundled into {out}")
     if failed:
         print("failed: " + " ".join(failed))

@@ -114,7 +114,6 @@ lsu_stall_loop:
 
     ADDI  x18, x18, -1
     BNE   x18, x0, lsu_stall_loop
-    NOP
 
     dma.wait ch0
     dma.wait ch1

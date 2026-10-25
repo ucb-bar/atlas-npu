@@ -230,22 +230,22 @@
 # ================================================================
 #  3. AUIPC TEST
 # ================================================================
-# auipc rd, imm  →  x[rd] = pc + (imm << 12)
-# Two consecutive AUIPCs with imm=0 must differ by exactly 1.
+# auipc rd, imm  →  x[rd] = pc + (imm << 12), pc in bytes
+# Two consecutive AUIPCs with imm=0 must differ by exactly 4.
 
     AUIPC   x3, 0                   # x3 = pc_A
-    AUIPC   x4, 0                   # x4 = pc_A + 1
-    SUB     x5, x4, x3              # x5 = 1
-    ADDI    x29, x0, 1
+    AUIPC   x4, 0                   # x4 = pc_A + 4
+    SUB     x5, x4, x3              # x5 = 4
+    ADDI    x29, x0, 4
     XOR     x5, x5, x29
     OR      x30, x30, x5
 
     # Non-zero immediate
     AUIPC   x3, 1                   # x3 = P + 0x1000
-    AUIPC   x4, 0                   # x4 = P + 1
-    SUB     x5, x3, x4              # x5 = 0xFFF = 4095
+    AUIPC   x4, 0                   # x4 = P + 4
+    SUB     x5, x3, x4              # x5 = 0xFFC = 4092
     LUI     x29, 1                  # x29 = 0x1000 = 4096
-    ADDI    x29, x29, -1            # x29 = 4095
+    ADDI    x29, x29, -4            # x29 = 4092
     XOR     x5, x5, x29
     OR      x30, x30, x5
 
@@ -330,17 +330,15 @@
 # ================================================================
 #  7. BRANCH TESTS
 # ================================================================
-# Architecture has 1 delay slot.
+# No delay slot: a taken branch drops the instruction after it.
 #
 # Taken test pattern (branch skips the fail marker):
-#   BXX  x1, x2, target       # +4 words to target
-#   NOP                       # delay slot
-#   ORI  x3, x3, 1            # fail marker (skipped if taken)
+#   BXX  x1, x2, target       # +8 bytes to target
+#   ORI  x3, x3, 1            # fail marker (dropped if taken)
 #   target:  OR x30, x30, x3  # x3 must be 0
 #
 # Not-taken test pattern:
-#   BXX  x1, x2, target       # +4 words to target
-#   NOP                       # delay slot
+#   BXX  x1, x2, target       # +8 bytes to target
 #   ORI  x3, x3, 1            # expected (x3 = 1)
 #   target:  (check x3 == 1)
 
@@ -349,7 +347,6 @@
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BLT     x1, x2, blt_t
-    NOP
     ORI     x3, x3, 1
 blt_t:
     OR      x30, x30, x3
@@ -359,7 +356,6 @@ blt_t:
     ADDI    x2, x0, -5
     ADDI    x3, x0, 0
     BLT     x1, x2, blt_n
-    NOP
     ORI     x3, x3, 1
 blt_n:
     ADDI    x29, x0, 1
@@ -371,7 +367,6 @@ blt_n:
     ADDI    x2, x0, -5
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_t
-    NOP
     ORI     x3, x3, 1
 bge_t:
     OR      x30, x30, x3
@@ -381,7 +376,6 @@ bge_t:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_eq
-    NOP
     ORI     x3, x3, 1
 bge_eq:
     OR      x30, x30, x3
@@ -391,7 +385,6 @@ bge_eq:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BGE     x1, x2, bge_n
-    NOP
     ORI     x3, x3, 1
 bge_n:
     ADDI    x29, x0, 1
@@ -403,7 +396,6 @@ bge_n:
     ADDI    x2, x0, 10
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_t
-    NOP
     ORI     x3, x3, 1
 bltu_t:
     OR      x30, x30, x3
@@ -413,7 +405,6 @@ bltu_t:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_n
-    NOP
     ORI     x3, x3, 1
 bltu_n:
     ADDI    x29, x0, 1
@@ -425,7 +416,6 @@ bltu_n:
     ADDI    x2, x0, -1
     ADDI    x3, x0, 0
     BLTU    x1, x2, bltu_e
-    NOP
     ORI     x3, x3, 1
 bltu_e:
     OR      x30, x30, x3
@@ -435,7 +425,6 @@ bltu_e:
     ADDI    x2, x0, 5
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_t
-    NOP
     ORI     x3, x3, 1
 bgeu_t:
     OR      x30, x30, x3
@@ -445,7 +434,6 @@ bgeu_t:
     ADDI    x2, x0, 7
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_eq
-    NOP
     ORI     x3, x3, 1
 bgeu_eq:
     OR      x30, x30, x3
@@ -455,7 +443,6 @@ bgeu_eq:
     ADDI    x2, x0, 10
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_n
-    NOP
     ORI     x3, x3, 1
 bgeu_n:
     ADDI    x29, x0, 1
@@ -467,7 +454,6 @@ bgeu_n:
     ADDI    x2, x0, 1
     ADDI    x3, x0, 0
     BGEU    x1, x2, bgeu_e
-    NOP
     ORI     x3, x3, 1
 bgeu_e:
     OR      x30, x30, x3
@@ -486,13 +472,11 @@ bgeu_e:
     # Verify ECALL encoding: the assembler must not reject it.
     # We branch over it so it never executes in the main flow.
     BEQ     x0, x0, ecall_skip      # always taken (0 == 0)
-    NOP
     ECALL                            # never reached; proves encoding accepted
 ecall_skip:
 
     # Verify EBREAK encoding similarly.
     BEQ     x0, x0, ebreak_skip     # always taken
-    NOP
     EBREAK                           # never reached; proves encoding accepted
 ebreak_skip:
 
@@ -503,7 +487,6 @@ ebreak_skip:
 # x30 != 0 → some test failed → write x30 to DBG0 (nonzero, != 1)
 
     BEQ     x30, x0, all_pass
-    NOP
     # ── FAIL path ──
     csrrw x0, 0x800, x30              # DBG0 = fail flags (nonzero != 1)
     ECALL

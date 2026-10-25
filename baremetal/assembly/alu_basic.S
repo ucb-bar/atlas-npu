@@ -10,7 +10,6 @@
     ADDI  x31, x0, 42
     ADDI  x30, x0, 42
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 2: ADD ──────────────────────────────────────────
@@ -19,14 +18,12 @@
     ADD   x31, x1, x2
     ADDI  x30, x0, 100
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 3: SUB ──────────────────────────────────────────
     SUB   x31, x2, x1      # 70 - 30 = 40
     ADDI  x30, x0, 40
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 4: AND ──────────────────────────────────────────
@@ -35,7 +32,6 @@
     AND   x31, x1, x2
     ADDI  x30, x0, 0x0F
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 5: OR ───────────────────────────────────────────
@@ -44,7 +40,6 @@
     OR    x31, x1, x2
     ADDI  x30, x0, 0xA5
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 6: XOR ──────────────────────────────────────────
@@ -53,7 +48,6 @@
     XOR   x31, x1, x2
     ADDI  x30, x0, 0xF0
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 7: SLL ──────────────────────────────────────────
@@ -62,7 +56,6 @@
     SLL   x31, x1, x2      # 1 << 4 = 16
     ADDI  x30, x0, 16
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 8: SRL ──────────────────────────────────────────
@@ -71,7 +64,6 @@
     SRL   x31, x1, x2      # 256 >> 4 = 16
     ADDI  x30, x0, 16
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 9: SLT ─────────────────────────────────────────
@@ -80,14 +72,12 @@
     SLT   x31, x1, x2      # -5 < 10 → 1
     ADDI  x30, x0, 1
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 10: LUI ────────────────────────────────────────
     LUI   x31, 0x12345
     LUI   x30, 0x12345
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 11: LUI + ADDI (32-bit construction) ──────────
@@ -96,7 +86,6 @@
     LUI   x30, 0xABCDE
     ADDI  x30, x30, 0x123
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 12: ADDI negative ──────────────────────────────
@@ -104,13 +93,11 @@
     ADDI  x31, x1, -30     # 100 - 30 = 70
     ADDI  x30, x0, 70
     BNE   x31, x30, fail
-    NOP
     ADDI  x28, x28, 1
 
 # ── Test 13: x0 hardwired to zero ───────────────────────
     ADDI  x0, x0, 999      # should have no effect
     BNE   x0, x0, fail     # x0 must still be 0
-    NOP
 
 pass:
     ADDI  x1, x0, 1

@@ -2,7 +2,7 @@
 #
 # Identical to smolvla_reduction_sum.S through the final DMA.STORE + DMA.WAIT,
 # then replaces the pass: {ADDI x1,x0,1 ; CSRRW x0,0x800,x1 ; ECALL} block
-# with a word-indexed JALR to byte 0x10000 (word 0x4000) so the next kernel
+# with a JALR to IMEM byte 0x10000 so the next kernel
 # staged into the upper IMEM half runs without halting.
 #
 # Used by tests/saturn_atlas_tri_phase.c: the pass-path caller loads a stock
@@ -11,8 +11,8 @@
 #
 # The fail: ECALL block is dead code in this kernel — nothing in the pre-JAL
 # body branches to it, so it is effectively unreachable. It is retained
-# (past the JALR + NOP delay slot) only as a safety net in case someone
-# later adds an explicit jump to `fail:` from the reduce body.
+# (past the JALR) only as a safety net in case someone later adds an
+# explicit jump to `fail:` from the reduce body.
 #
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
@@ -66,17 +66,11 @@
     dma.wait ch1
 
 to_high:
-    # Hop to the kernel staged at byte 0x10000 (word 0x4000) without halting.
-    # Atlas PC is a word index; JALR uses rs1+imm as-is (no byte-to-word shift).
-    # Atlas has 1 delay slot after JAL/JALR: the instruction
-    # immediately following the JALR are fetched and executed before the
-    # redirect takes effect. They MUST be harmless NOPs; otherwise the
-    # `fail:` CSRRW+ECALL below would fire in the delay slot, halting
-    # the core with dbg0=1 / halt_reason=ECALL BEFORE the redirect to
-    # kernel_add lands. (See sab_a_to_high.S:26-28 for the same pattern.)
-    LI    x1, 0x4000
+    # Hop to the kernel staged at byte 0x10000 without halting. The Atlas PC
+    # is a byte address, and the JALR drops the `fail:` CSRRW after it (no
+    # delay slot).
+    LI    x1, 0x10000
     JALR  x0, x1, 0
-    NOP
 
 fail:
     CSRRW x0, 0x800, x28

@@ -14,13 +14,11 @@ _start:
 a_busy:
     ADDI  x11, x11, 1
     BLT   x11, x10, a_busy
-    NOP
 
     LI    x2, 0xAAAAAAAA            # marker
     ADDI  x3, x0, 0                 # VMEM byte 0
     sw x2, 0(x3)
     DELAY 1
 
-    LI    x1, 0x4000                # word index of IMEM byte 0x10000
+    LI    x1, 0x10000               # IMEM byte 0x10000
     JALR  x0, x1, 0
-    NOP

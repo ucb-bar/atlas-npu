@@ -25,9 +25,7 @@
 _start:
     csrrs x1, 0x801, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
-    NOP
     JAL   x0, phase_1
-    NOP
 
 # ── Phase 0: seed Q[i] = (i+1)*113, K[i] = (i+1)*97 ────────────────────────
 phase_0:
@@ -44,7 +42,6 @@ p0_q_loop:
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p0_q_loop
-    NOP
 
     ADDI  x2, x0, 97             # K stride
     ADDI  x3, x0, 128            # K byte addr = 128
@@ -58,7 +55,6 @@ p0_k_loop:
     ADDI  x3, x3, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p0_k_loop
-    NOP
 
     ADDI  x1, x0, 1
     csrrw x0, 0x800, x1              # dbg0 = 1 (phase 0 done)
@@ -87,7 +83,6 @@ p1_loop:
     ADDI  x8, x8, 4
     ADDI  x4, x4, 1
     BLT   x4, x5, p1_loop
-    NOP
 
     sw x9, 0(x8)              # VMEM[384] = checksum
     DELAY 1

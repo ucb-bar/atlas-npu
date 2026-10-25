@@ -41,42 +41,34 @@
     DELAY 64
     LI    x10, 0x90003000
     JAL   x1, store_pair
-    NOP
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90003800
     JAL   x1, store_pair
-    NOP
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004000
     JAL   x1, store_pair
-    NOP
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90004800
     JAL   x1, store_pair
-    NOP
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005000
     JAL   x1, store_pair
-    NOP
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90005800
     JAL   x1, store_pair
-    NOP
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006000
     JAL   x1, store_pair
-    NOP
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90006800
     JAL   x1, store_pair
-    NOP
 
 # ----------------------------------------------------------------------
 # Tile 1: exponent ladder with scrambled mantissas and alternating signs
@@ -95,42 +87,34 @@
     DELAY 64
     LI    x10, 0x90007000
     JAL   x1, store_pair
-    NOP
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90007800
     JAL   x1, store_pair
-    NOP
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008000
     JAL   x1, store_pair
-    NOP
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90008800
     JAL   x1, store_pair
-    NOP
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009000
     JAL   x1, store_pair
-    NOP
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90009800
     JAL   x1, store_pair
-    NOP
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A000
     JAL   x1, store_pair
-    NOP
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000A800
     JAL   x1, store_pair
-    NOP
 
 # ----------------------------------------------------------------------
 # Tile 2: explicit zeros, subnormals, min/max normal, inf, NaN, sq/cube edges
@@ -149,42 +133,34 @@
     DELAY 64
     LI    x10, 0x9000B000
     JAL   x1, store_pair
-    NOP
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000B800
     JAL   x1, store_pair
-    NOP
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C000
     JAL   x1, store_pair
-    NOP
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000C800
     JAL   x1, store_pair
-    NOP
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D000
     JAL   x1, store_pair
-    NOP
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000D800
     JAL   x1, store_pair
-    NOP
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E000
     JAL   x1, store_pair
-    NOP
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000E800
     JAL   x1, store_pair
-    NOP
 
 # ----------------------------------------------------------------------
 # Tile 3: tanh address bins plus saturation and tiny-value behavior
@@ -203,42 +179,34 @@
     DELAY 64
     LI    x10, 0x9000F000
     JAL   x1, store_pair
-    NOP
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x9000F800
     JAL   x1, store_pair
-    NOP
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010000
     JAL   x1, store_pair
-    NOP
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90010800
     JAL   x1, store_pair
-    NOP
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011000
     JAL   x1, store_pair
-    NOP
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90011800
     JAL   x1, store_pair
-    NOP
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90012000
     JAL   x1, store_pair
-    NOP
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90012800
     JAL   x1, store_pair
-    NOP
 
 # ----------------------------------------------------------------------
 # Tile 4: exp thresholds and square/cube normalization carry edges
@@ -257,42 +225,34 @@
     DELAY 64
     LI    x10, 0x90013000
     JAL   x1, store_pair
-    NOP
     vlog2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90013800
     JAL   x1, store_pair
-    NOP
     vrecip.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90014000
     JAL   x1, store_pair
-    NOP
     vexp.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90014800
     JAL   x1, store_pair
-    NOP
     vexp2.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90015000
     JAL   x1, store_pair
-    NOP
     vtanh.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90015800
     JAL   x1, store_pair
-    NOP
     vsquare.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90016000
     JAL   x1, store_pair
-    NOP
     vcube.bf16 m4, m0
     DELAY 64
     LI    x10, 0x90016800
     JAL   x1, store_pair
-    NOP
 
 pass:
     ADDI  x1, x0, 1
@@ -313,4 +273,3 @@ store_pair:
     dma.store x10, x9, x3, ch1
     dma.wait ch1
     JALR  x0, x1, 0
-    NOP
