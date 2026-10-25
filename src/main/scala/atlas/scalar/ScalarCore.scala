@@ -1,5 +1,5 @@
 /*
-ScalarCore.scala — 2-stage pipeline scalar controller (software-scheduled).
+ScalarCore.scala — 2-stage pipeline scalar controller (interlocked).
 
 All VMEM access goes through the LSU:
   - Scalar loads/stores: via scalarMemCmd/scalarMemResp
@@ -27,8 +27,8 @@ Interlocked hazard model:
 Scalar stores are pipelined masked writes (no RMW).
 Scalar loads have fixed 3-cycle latency.
 VLOAD/VSTORE have fixed mregRows+2 cycle latency.
-Scalar, VLOAD, and VSTORE LSU paths operate concurrently; software must
-ensure no same-bank VMEM conflicts (asserted in Vmem).
+Scalar, VLOAD, and VSTORE LSU paths operate concurrently; the interlock keeps
+them off each other's VMEM banks (asserted in Vmem).
 */
 
 package atlas.scalar
@@ -219,7 +219,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   io.csrPort.addr := dec.csr_addr
 
   // ==============================================================
-  // Stall conditions (only DELAY and DMA.WAIT)
+  // Stall conditions: DELAY and DMA.WAIT (the interlock is below)
   // ==============================================================
 
   val delay_stall    = delayCounter =/= 0.U
