@@ -123,9 +123,12 @@ The Chipyard C harness of `atlas_asm.py --out-c` checks the ISA CSR before it lo
 for another version: the status is ERROR. A bundle without `"isa"` counts as ISA 1.0, and so does a
 bitstream without the ISA CSR (it reads 0).
 
-The baremetal tests `csr_isa_perf`, `csr_illegal_unmapped` and `csr_illegal_ro_write` check
-these rules. The two `csr_illegal_*` tests have `# @EXPECT_ILLEGAL`: `run_tests.py --config`
-expects them to stop with an illegal instruction in every configuration.
+The baremetal tests `csr_isa_perf` and `csr_illegal_*` check these rules: an unmapped CSR
+(`csr_illegal_unmapped`), the ISA 1.0 numbers `0xC01`, `0xC03`, `0xC10` and `0xC11`
+(`csr_illegal_v1_*`), and writes to the read-only ISA CSR, cycle and instret
+(`csr_illegal_ro_write`, `csr_illegal_cycle_write`, `csr_illegal_instret_write`). The
+`csr_illegal_*` tests have `# @EXPECT_ILLEGAL`: `run_tests.py --config` expects them to stop with
+an illegal instruction in every configuration.
 
 ## Host side
 
