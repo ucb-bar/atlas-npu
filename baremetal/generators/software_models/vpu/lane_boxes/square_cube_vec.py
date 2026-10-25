@@ -4,25 +4,12 @@ Two ops on one port:
   - `square` (`isCube=False`): per-lane `aVec[i]² → BF16`
   - `cube`   (`isCube=True`):  per-lane `aVec[i]³ → BF16`
 
-The Scala wraps a `squareCube(sign, exp, fra, isCube)` helper from the
-`VectorParam` trait (`laneBoxes/VectorParam.scala:6-96`). That helper
-does NOT route through HardFloat — it builds the explicit 8-bit
-mantissa, multiplies it as an integer, recovers the leading-1 position
-to renormalize, adjusts the exponent by hand, then assembles a BF16
-word. The funct model mirrors that integer dataflow exactly so the
-half-ULP rounding edge cases stay bit-equal with the RTL.
-
-Sign convention:
-  - `square` always returns sign 0 (square is non-negative).
-  - `cube` preserves the input sign.
-
-Special cases (all from `VectorParam.scala:78-92`):
-  - Input zero, subnormal, or NaN → flush to signed zero. NaN is NOT
-    propagated; it is treated as "junk → zero", which matches the
-    Scala `when (... || isInputNaN ...) { result := zero }`.
-  - Input +inf → +inf (square) or signed inf (cube).
-  - Result-exponent underflow (`adjustedExp ≤ 0`) → signed zero.
-  - Result-exponent overflow (`adjustedExp ≥ 255`) → signed inf.
+The Scala wraps a `squareCube(x, isCube)` helper from the `VectorParam`
+trait (`laneBoxes/VectorParam.scala`). It forms x² or x³ exactly and
+rounds once to BF16 with HardFloat, as vmul rounds: nearest even, with
+subnormal inputs and results; a NaN gives 0x7FC0; ±0 and ±inf follow
+the IEEE signs (square ≥ +0, cube keeps the sign of x). x² and x³ of a
+BF16 x are exact in a Python float, so the model rounds that value.
 
 Lane masking (`SquareCubeVec.scala:37-40`):
   - `laneEnable = laneMask & valid`. Disabled lanes return 0x0000.
@@ -33,10 +20,12 @@ Visible latency = 1 (`isValid = RegNext(io.req.valid)` and
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
+from .. import bf16_utils as fp
 from ..vector_params import VectorParams
 
 
@@ -54,64 +43,21 @@ class SquareCubeResp:
 
 
 _BF16_POS_INF = 0x7F80
-_BF16_NEG_INF = 0xFF80
 
 
 def square_cube_bf16(bf16: int, is_cube: bool) -> int:
-    """Pure per-lane `squareCube` mirror of
-    `VectorParam.scala:6-96`. Builds the explicit 8-bit mantissa,
-    multiplies, finds the leading 1, normalizes, fills the exponent
-    by hand, and applies the special-case lattice."""
-    bf16 &= 0xFFFF
-    sign = (bf16 >> 15) & 1
-    exp = (bf16 >> 7) & 0xFF
-    fra = bf16 & 0x7F
-
-    is_input_zero = (exp == 0 and fra == 0)
-    is_input_sub = (exp == 0 and fra != 0)
-    is_input_inf = (exp == 0xFF and fra == 0)
-    is_input_nan = (exp == 0xFF and fra != 0)
-
-    real_exp = exp - 127
-    mant = (1 << 7) | fra  # 8-bit `1.fra`
-
-    if not is_cube:
-        # ---- Square path ----
-        prod = mant * mant                              # in [16384, 65536)
-        extra_exp = 1 if (prod >> 15) & 1 else 0        # bit 15 = squareFracWidth-1
-        adjusted_exp = (real_exp << 1) + extra_exp + 127
-
-        if is_input_zero or is_input_sub or is_input_nan or adjusted_exp <= 0:
-            return 0x0000                               # +0 (square is unsigned)
-        if is_input_inf or adjusted_exp >= 255:
-            return _BF16_POS_INF                        # +inf
-
-        highest = prod.bit_length() - 1                 # always 14 or 15 here
-        shift = highest - 7 if highest > 7 else 0
-        mant_pre = prod >> shift
-        frac = mant_pre & 0x7F
-        return (0 << 15) | ((adjusted_exp & 0xFF) << 7) | frac
-
-    # ---- Cube path ----
-    prod = mant * mant * mant                           # in [2^21, 2^24)
-    if (prod >> 23) & 1:                                # bit 23 = cubeFracWidth-1
-        extra_exp = 2
-    elif (prod >> 22) & 1:                              # bit 22 = cubeFracWidth-2
-        extra_exp = 1
-    else:
-        extra_exp = 0
-    adjusted_exp = real_exp * 3 + extra_exp + 127
-
-    if is_input_zero or is_input_sub or is_input_nan or adjusted_exp <= 0:
-        return (sign << 15) & 0xFFFF                    # signed zero
-    if is_input_inf or adjusted_exp >= 255:
-        return ((sign << 15) | _BF16_POS_INF) & 0xFFFF  # signed inf
-
-    highest = prod.bit_length() - 1                     # always 21, 22, or 23
-    shift = highest - 7 if highest > 7 else 0
-    mant_pre = prod >> shift
-    frac = mant_pre & 0x7F
-    return ((sign << 15) | ((adjusted_exp & 0xFF) << 7) | frac) & 0xFFFF
+    """Pure per-lane `squareCube` mirror: x² or x³ rounded once to BF16."""
+    x = fp.bf16_bits_to_f32(bf16)
+    v = x * x * x if is_cube else x * x
+    if v != v:
+        return 0x7FC0
+    sign = 0x8000 if math.copysign(1.0, v) < 0 else 0
+    a = abs(v)
+    if a == 0.0 or math.isinf(a):
+        return sign | (_BF16_POS_INF if a else 0)
+    e = max(math.frexp(a)[1] - 1, -126)          # leading exponent; the quantum is 2^(e - 7)
+    n = round(math.ldexp(a, 7 - e))               # exact; round() ties to even
+    return sign | min(((e + 126) << 7) + n, _BF16_POS_INF)
 
 
 class SquareCubeVec:

@@ -180,11 +180,10 @@ object VectorTestUtils {
         fpToBf16(yFloat)
     }
 
+    /** x^2 or x^3, exact in a double, rounded once to BF16 as the RTL does (ISA v2, 4.6). */
     def goldenSqureCube(a: Short, isCube: Boolean): Short = {
-        val aFP = bf16ToFp(a)
-        val y  = if (isCube) aFP * aFP * aFP else aFP * aFP 
-        val yFloat = y.toFloat
-        fpToBf16(yFloat)
+        val x = bf16ToFp(a).toDouble
+        bf16Rne(if (isCube) x * x * x else x * x)
     }
 
     /** |x| * 2^(e - 127) rounded to nearest even with mbits fraction bits and emin the
@@ -197,6 +196,12 @@ object VectorTestUtils {
             Math.rint(v / q) * q
         }
     }
+
+    /** BF16 bits of d rounded once to nearest even, with subnormals; NaN gives 0x7FC0. */
+    def bf16Rne(d: Double): Short =
+        if (d.isNaN) 0x7fc0.toShort
+        else (((java.lang.Double.doubleToRawLongBits(d) >>> 48) & 0x8000) |
+              (java.lang.Float.floatToRawIntBits(roundScaled(d, 127, 7, -126).toFloat) >>> 16)).toShort
 
     /** vpack.bf16.fp8: E4M3_RN_SATFINITE(x * 2^(e - 127)) of BF16 bits x (ISA v2, 5.2). */
     def goldenE4m3(bf16: Int, e: Int): Int = {

@@ -119,12 +119,12 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         printBF16Array(dataA, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedSquare1, true)
-                        checkVectorTolerance(actual, expectedSquare1, true)
+                        actual shouldBe expectedSquare1
                     } else if (i == 2) {
                         printBF16Array(dataB, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedSquare2, true)
-                        checkVectorTolerance(actual, expectedSquare2, true)
+                        actual shouldBe expectedSquare2
                     }
                 }
                 // Step to next cycle and turn off input validity
@@ -180,17 +180,17 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         printBF16Array(dataA, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube1, true)
-                        checkVectorTolerance(actual, expectedCube1, true)
+                        actual shouldBe expectedCube1
                     } else if (i == 2) {
                         printBF16Array(dataB, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube2, true)
-                        checkVectorTolerance(actual, expectedCube2, true)
+                        actual shouldBe expectedCube2
                     } else if (i == 3) {
                         printBF16Array(dataC, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube3, true)
-                        checkVectorTolerance(actual, expectedCube3, true)
+                        actual shouldBe expectedCube3
                     }
                 }
                 // Step to next cycle and turn off input validity
