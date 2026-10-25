@@ -161,7 +161,9 @@ with them, bit for bit. The GPU, the driver, the CUDA version and the date are t
   The `bf16x2` mode uses `cvt.rn.bf16x2.f32` (`F2FP.BF16.F32.PACK_AB`). The two SASS forms give
   the same output for all 2^32 FP32 inputs. The scaled BF16 pops round acc * G(e) once. The GPU
   has no instruction for this: FMUL, then `cvt.rn.bf16.f32`, rounds two times when the FP32
-  product is below 2^-126 and not exact. No vectors here check the scaled pops.
+  product is below 2^-126 and not exact. For an accumulator that holds E4M3 values the product
+  is exact, so the `vunpack` vectors give the scaled pop's result: `atlas.ipt.Mxu1TransferTest`
+  checks the `mxu1` scaled pop with them at every e.
 
 The harness forms x * G(e) = x * 2^(e - 127) in FP32 with FMUL (`__fmul_rn`). For e = 255 it
 uses two FMULs (2^127, then 2), because 2^128 is not an FP32 value. The model applies the scale
@@ -207,9 +209,10 @@ inputs: 0 differences for E4M3 and 0 for BF16.
 The RTL equals the GPU too. `atlas.vector.Fp8CvtSiliconTest` runs `FP8Pack`, `FP8Unpack` and
 `atlas.common.Cvt` in Verilator on every vector of `vpack`, `vunpack`, `pop` and `push`, and on
 the first and the last input of each run: 0 differences (`./mill atlas.test.testOnly
-atlas.vector.Fp8CvtSiliconTest`, about one minute). The BF16 runs also check `Cvt.bf16Rne(x)`, the
-one-adder form without a scale that the `mxu1` BF16 pop uses. A separate check, not stored here,
-compared its rule with `cvt.py` on all 2^32 FP32 inputs: 0 differences.
+atlas.vector.Fp8CvtSiliconTest`, about one minute). The BF16 runs also check `Cvt.bf16Rne(x, e)`
+at e = 127, the rounder of the BF16 pops of both MXUs. Two separate checks, not stored here, cover
+all 2^32 FP32 inputs: the one-adder BF16 rounder that the pops used before equals `cvt.py`, and
+`Cvt.bf16Rne(x, 127)` equals that rounder (0 differences each).
 
 ### Format
 
