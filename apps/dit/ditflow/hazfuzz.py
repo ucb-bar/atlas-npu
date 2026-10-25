@@ -254,29 +254,54 @@ class Gen:
                 acc[a] = new
             self.touch(src)
             return True
-        if kind < 0.7:                                           # accumulator push from a BF16 pair
-            src = self.pick(self.bf16_pairs())
-            if src is None:
-                return False
+        if kind < 0.7:                                           # accumulator push: BF16 pair or FP32 quad
             a = rng.randrange(2)
-            self.emit(f"vmatpush.acc.bf16.{u}", f"acc{a}", f"m{src}")
-            acc[a] = self.rbound[src]
-            self.touch(src, src + 1)
+            if rng.random() < 0.6:
+                src = self.pick(self.bf16_pairs())
+                if src is None:
+                    return False
+                self.emit(f"vmatpush.acc.bf16.{u}", f"acc{a}", f"m{src}")
+                acc[a] = self.rbound[src]
+                self.touch(src, src + 1)
+            else:
+                src = self.pick(self.typed(QUADS, "fp32", 4))
+                if src is None:
+                    return False
+                self.emit(f"vmatpush.acc.fp32.{u}", f"acc{a}", f"m{src}")
+                acc[a] = self.rbound[src]
+                self.touch(*range(src, src + 4))
             return True
         a = rng.randrange(2)                                     # pops
         if acc[a] is None:
             return False
-        if rng.random() < 0.5:
-            dst = self.pick(PAIRS)
-            self.emit(f"vmatpop.bf16.acc.{u}", f"m{dst}", f"acc{a}")
-            self.set_regs(dst, 2, "bf16", max(acc[a], 1))
-            self.touch(dst, dst + 1)
-        else:
+        r = rng.random()
+        if r < 0.5:
+            self.pop_bf16(u, a, scaled=r >= 0.3)
+        elif r < 0.75:
             dst = self.pick(REGS)
             self.emit(f"vmatpop.fp8.acc.{u}", f"m{dst}", f"acc{a}", f"e{rng.randrange(4)}")
             self.set_regs(dst, 1, "fp8", FP8_BOUND)
             self.touch(dst)
+        else:
+            self.pop_fp32(u, a)
         return True
+
+    def pop_bf16(self, u, a, scaled):
+        """vmatpop.bf16.acc, or vmatpop.bf16.scaled.acc with e0-e3 (2^-6 .. 2^2)."""
+        dst = self.pick(PAIRS)
+        bound = max(self.acc[u][a] + 2 * scaled, 1)
+        if scaled:
+            self.emit(f"vmatpop.bf16.scaled.acc.{u}", f"m{dst}", f"acc{a}", f"e{self.rng.randrange(4)}")
+        else:
+            self.emit(f"vmatpop.bf16.acc.{u}", f"m{dst}", f"acc{a}")
+        self.set_regs(dst, 2, "bf16", bound)
+        self.touch(dst, dst + 1)
+
+    def pop_fp32(self, u, a):
+        dst = self.pick(QUADS)
+        self.emit(f"vmatpop.fp32.acc.{u}", f"m{dst}", f"acc{a}")
+        self.set_regs(dst, 4, "fp32", max(self.acc[u][a], 1))
+        self.touch(*range(dst, dst + 4))
 
     def op_nv(self):
         """NVFP4 MXU. Any register is valid E2M1 data, and every register's scales stay valid."""
@@ -331,16 +356,11 @@ class Gen:
         a = rng.randrange(2)                                     # pops
         if acc[a] is None:
             return False
-        if rng.random() < 0.5:
-            dst = self.pick(PAIRS)
-            self.emit("vmatpop.bf16.acc.nv", f"m{dst}", f"acc{a}")
-            self.set_regs(dst, 2, "bf16", max(acc[a], 1))
-            self.touch(dst, dst + 1)
+        r = rng.random()
+        if r < 0.5:
+            self.pop_bf16("nv", a, scaled=r >= 0.25)
         else:
-            dst = self.pick(QUADS)
-            self.emit("vmatpop.fp32.acc.nv", f"m{dst}", f"acc{a}")
-            self.set_regs(dst, 4, "fp32", max(acc[a], 1))
-            self.touch(*range(dst, dst + 4))
+            self.pop_fp32("nv", a)
         return True
 
     def op_xlu(self):
