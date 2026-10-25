@@ -22,21 +22,21 @@ CSR instructions use real RISC-V operand order (`rd, csr, rs1`); `csrr` and `csr
 
 ## Atlas scheduling and hardware rules
 
-Atlas scalar control flow follows RV32I: the PC, link values and numeric branch and JAL offsets are byte addresses. Branches and jumps have no delay slot: a taken branch or jump drops the instruction after it, and a taken target with bit 1 set is illegal. The scalar pipeline stalls only for `delay imm` and `dma.wait chN`; accelerator commands otherwise run asynchronously.
+Atlas scalar control flow follows RV32I: the PC, link values and numeric branch and JAL offsets are byte addresses. Branches and jumps have no delay slot: a taken branch or jump drops the instruction after it, and a taken target with bit 1 set is illegal. Accelerator commands run asynchronously after issue. A hardware interlock holds an instruction until it can issue without a structural or data hazard (`docs/interlock.md`): `delay imm` is legal but never required, and `dma.wait chN` is the fence for DMA data in VMEM.
 
 Scalar loads, stores, and `seld` use local VMEM byte addresses. `vload`/`vstore` bases and DMA VMEM operands use local VMEM word addresses. DMA DRAM operands are byte offsets added to the configured DMA base. The DMA beat is 32 bytes, and one MREG bank is 1024 bytes. Do not substitute runtime model memory-window defaults for Atlas harness addresses.
 
 The `vload`/`vstore` immediate is signed and scaled by 32 words: effective VMEM word address is `x[rs1] + imm12 * 32`. Adjacent 1 KiB slots therefore commonly use immediates `0, 8, 16, ...`.
 
-DMA configuration sets a global base; hardware ignores the channel encoded by `dma.config`. Wait on a channel before reusing it. Unless a test intentionally covers DMA concurrency, wait after each DMA request. The LSU is shared: avoid back-to-back LSU operations, including vector loads/stores and scalar VMEM accesses, without enough independent work or delay.
+DMA configuration sets a global base; hardware ignores the channel encoded by `dma.config`. Wait on a channel before reusing it. Unless a test intentionally covers DMA concurrency, wait after each DMA request. The LSU is shared: the interlock holds an LSU operation while its path or VMEM bank is busy.
 
 ## Atlas timing and hazard rules
 
-Only `delay imm` and `dma.wait chN` stall the scalar pipe; other accelerator operations are asynchronous. Treat these minimum delays as floors: scalar load or `seld` 2 cycles; `vload`/`vstore` 33; `vtrpose.xlu` 64; `vmatpush`/`vmatpop` 31; `vmatmul` 34; `vunpack.fp8.bf16` 65; VPU row reductions 32–37, column reductions 128; `vli.all`/`vli.row` 63 and `vli.col`/`vli.one` 31; other VPU operations 64. DMA completion requires `dma.wait`, never a fixed delay. Use more time when operations overlap or contend.
+The handwritten suite still spaces dependent instructions with these delays, which the interlock makes optional: scalar load or `seld` 2 cycles; `vload`/`vstore` 33; `vtrpose.xlu` 64; `vmatpush`/`vmatpop` 31; `vmatmul` 34; `vunpack.fp8.bf16` 65; VPU row reductions 32–37, column reductions 128; `vli.all`/`vli.row` 63 and `vli.col`/`vli.one` 31; other VPU operations 64. DMA completion requires `dma.wait`, never a fixed delay.
 
-A scalar load response cannot coincide with another scalar register writeback; `seld` cannot coincide with `seli`. Separate loads from register-writing work by at least the scalar-load floor. The VMEM LSU is shared: same-bank scalar load plus `vload`, or scalar store plus `vstore`, can assert. Do not issue another `vload` or another `vstore` while that same path is busy. Use 1 KiB-aligned vector bases. DMA shares VMEM ports and can extend LSU progress.
+The interlock also holds an instruction that writes a scalar register in the cycle a scalar load result takes the write port, a `seli` while a `seld` is pending, an LSU access to a VMEM bank that another LSU path holds, and a `vload` or `vstore` while that path is busy. Use 1 KiB-aligned vector bases. DMA shares VMEM ports and can extend LSU progress.
 
-Pair-based BF16 VPU operations require even source and destination banks. Two reads may alias the same bank only when they request the same row. VPU commands must issue when their selected issue-busy bit is clear; do not assume all VPU operations can overlap. MXU compute, push, and pop use independently scheduled slots but assert on busy-slot or accumulator/weight conflicts; wait between commands unless intentionally testing overlap. BF16 pushes read adjacent banks and BF16 pops write adjacent banks. XLU accepts a command only while idle, so wait for a transpose to finish before reusing it or reading its destination bank.
+Pair-based BF16 VPU operations require even source and destination banks. A two-source VPU instruction that names two different pairs in one physical bank (`m4` and `m36`) is illegal; naming the same pair twice is fine. The interlock holds a VPU command while its issue-busy bit is set, an MXU command while the MXU cannot take it (a busy path, accumulator or weight slot), and a transpose while the XLU is busy. BF16 pushes read adjacent banks and BF16 pops write adjacent banks; FP32 pushes and pops use four consecutive banks.
 
 ## Golden data and pass/fail
 

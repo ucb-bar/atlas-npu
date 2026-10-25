@@ -79,7 +79,7 @@
       "strategies": [
         "Bias new tests toward subsystems or subsystem pairings that remain underrepresented after accounting for the current suite and measured coverage report.",
         "Prefer tests that connect isolated unit-style behaviors into stronger end-to-end coverage narratives.",
-        "Reduce blind spots around branch-delay handling, DMA synchronization, VMEM reuse, mixed compute pipelines, and functional-unit handoff behavior.",
+        "Reduce blind spots around branch handling, DMA synchronization, VMEM reuse, mixed compute pipelines, and functional-unit handoff behavior.",
         "If multiple candidate tests are similar, pick the one most likely to complement the suite cleanly, activate a different set of engines, and raise overall confidence."
       ]
     }

@@ -457,7 +457,7 @@ def _load_software_models_reference() -> str:
     """Signature-only surface for the software RTL models used by the checked-in
     MXU and attention generators. These are the source of truth for MXU1
     golden numerics; generators MUST call them instead of re-implementing
-    FP8 matmul, E4M3 quantization, or BF16 accumulation.
+    FP8 matmul, FP32 accumulation, or the BF16 and E4M3 pops.
     """
 
     models_dir = BAREMETAL_DIR / "generators" / "software_models"
@@ -616,8 +616,8 @@ def _generator_examples_block() -> str:
         A_q = quantize_fp8(A).astype(np.float32)
         W_q = quantize_fp8(W).astype(np.float32)
         # Prefer the software RTL model over fp8_matmul_reference when the
-        # hardware path uses FP8 inputs with a BF16 accumulator / output,
-        # because IPTLinearRTLFunction matches the exact MXU1 K-chain rounding:
+        # hardware path uses FP8 inputs, FP32 accumulators and a BF16 pop,
+        # because IPTLinearRTLFunction matches the MXU1 arithmetic bit for bit:
         ipt = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
         C   = ipt(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
         # Preload FP8 tiles at DRAM byte offsets 0x0000 and 0x0400:
@@ -1542,7 +1542,7 @@ tests contribute coverage.
    use the matching helper instead.
 3. **Units are distinct.** DMA-beats (32 B), bytes, VMEM words, and VLOAD/VSTORE `imm`
    steps (32 words = 128 B) are four different quantities. Generator `word_offset` is a
-   beat index. VMEM word addresses are 4 × byte addresses. Scalar LSU uses VMEM bytes.
+   beat index. A VMEM byte address is 4 × the word address. Scalar LSU uses VMEM bytes.
    Conflating them is the single most common source of wrong-offset mismatches.
 4. **Correctness first, then coverage.** A test that fails silently contributes zero
    coverage. Cover more ground by writing fewer, sharper, demonstrably-correct tests
