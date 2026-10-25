@@ -484,6 +484,8 @@ def main(argv=None):
     ap.add_argument("--directed", action="store_true", help="also write the directed hazard tests")
     a = ap.parse_args(argv)
     units = tuple(a.units.split(","))
+    if "mxu1" not in units or not set(units) <= {"mxu1", "nv"}:
+        ap.error(f"--units {a.units}: give mxu1 (default) or mxu1,nv (ipt-nvfp4)")
     a.out.mkdir(parents=True, exist_ok=True)
     if a.directed:
         t = directed_vload_war()
