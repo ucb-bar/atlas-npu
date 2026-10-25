@@ -15,8 +15,8 @@ The dependencies come from OPS, which gives the operands of every instruction di
 - DMA: a transfer writes (load) or reads (store) its VMEM range when it issues, and again at the
   DMA.WAIT of its channel. A DMA.WAIT for transfers from an earlier block may touch any address.
   The instructions of one channel keep their order.
-Labels, branches and their delay slots, CSR accesses, ECALL and instructions that OPS does not
-list stay in place and end a block.
+Labels, branches, CSR accesses, ECALL and instructions that OPS does not list stay in place and
+end a block.
 """
 from bisect import insort
 from collections import defaultdict
@@ -50,7 +50,7 @@ def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False) -> Op:
 # Latencies: npu-model/docs/rtl-timing.md and npu_model/hardware (vpu.py, mxu.py).
 OPS = {
     "LI": Op("alu", "xw i"), "ADDI": Op("alu", "xw xr i"), "ADD": Op("alu", "xw xr xr"),
-    "NOP": Op("alu", ""), "seli": Op("alu", "ew i"), "dma.config": Op("alu", "xr c"),
+    "seli": Op("alu", "ew i"), "dma.config": Op("alu", "xr c"),
     "lh": Op("alu", "xw sr", 3), "sh": Op("alu", "xr sw"),
     "vload": Op("vload", "mw vr", 35), "vstore": Op("vstore", "mr vw", 35),
     "dma.load": Op("dma", "xr xr xr c"), "dma.store": Op("dma", "xr xr xr c"),
@@ -451,7 +451,7 @@ def schedule(source: str, window: int = WINDOW) -> str:
     lines = source.splitlines()
     consts = _constants(lines)
     out, code, notes = [], [], []
-    first, slot = True, False
+    first = True
 
     def flush():
         nonlocal code, first
@@ -468,7 +468,7 @@ def schedule(source: str, window: int = WINDOW) -> str:
             notes.append(line)
             continue
         name, args = parse(s)
-        if s and not s.endswith(":") and name in OPS and not slot:
+        if s and not s.endswith(":") and name in OPS:
             code.append(Ins(line, name, args, OPS[name], notes))
             notes = []
             continue
@@ -476,7 +476,6 @@ def schedule(source: str, window: int = WINDOW) -> str:
         out.extend(notes)
         notes = []
         out.append(line)
-        slot = name in CONTROL
     flush()
     out.extend(notes)
     return "\n".join(out) + "\n"

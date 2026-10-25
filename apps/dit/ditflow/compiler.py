@@ -219,11 +219,7 @@ class DiTProgram:
         b.op("ADDI x7, x7, 2")
         b.op("ADDI x5, x5, 1")
         b.op("CSRRW x0, 0x801, x5")                     # DBG1: steps done
-        b.op("BEQ x5, x6, sampler_done")
-        b.op("NOP")
-        b.op("JAL x0, step")
-        b.op("NOP")
-        b.label("sampler_done")
+        b.branch_back(5, 6, "step")
         b.dma.store_now(vm["x_hi"].addr, self.out_hi, vm["x_hi"].nbytes)
         b.dma.store_now(vm["x_lo"].addr, self.out_lo, vm["x_lo"].nbytes)
         source = b.finish()

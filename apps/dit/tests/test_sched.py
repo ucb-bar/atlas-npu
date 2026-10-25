@@ -128,9 +128,10 @@ def test_dram_order():
             assert outputs(mode, sched, blobs, regions) == gold, (mode, sched)
 
 
-def test_delay_slot_with_blank_line():
-    source = "    BEQ x0, x0, L1\n\n    vmatpop.bf16.acc.mxu1 m10, acc0\n    vexp.bf16 m12, m14\nL1:\n"
-    assert S.schedule(source) == source
+def test_instruction_after_a_branch_is_scheduled():
+    """No delay slot: the instruction after a branch starts the next block, so it can move."""
+    branch, pop, exp = "    BEQ x0, x0, L1\n", "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n"
+    assert S.schedule(branch + pop + exp + "L1:\n") == branch + exp + pop + "L1:\n"
 
 
 def test_loop_kernels():

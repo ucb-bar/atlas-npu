@@ -18,8 +18,6 @@ from npu_model.util.converter import input_to_program
 from .asm import CSR_DBG0, CSR_DBG1
 from .numerics import FastRtlNumerics
 
-CONTROL = {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU", "JAL", "JALR"}
-
 
 class FuncSim:
     def __init__(self, source: str, dram_blobs, dram_size: int):
@@ -40,13 +38,7 @@ class FuncSim:
         while not s.halted:
             assert 0 <= pc < len(instrs), f"pc {pc} outside the program"
             target = self._step(pc)
-            if target is not None:
-                slot = instrs[pc + 1]
-                assert type(slot).__name__ not in CONTROL, f"control flow in the delay slot at {pc + 1}"
-                self._step(pc + 1)
-                pc = target
-            else:
-                pc += 1
+            pc = pc + 1 if target is None else target
             if self.executed >= max_instructions:
                 raise RuntimeError(f"no ECALL after {self.executed} instructions")
             if progress and self.executed % 200000 == 0:

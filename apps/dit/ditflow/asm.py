@@ -22,6 +22,8 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from npu_model.util.converter import expand_li
+
 from . import sched
 from .layout import BF16_TILE, FP8_TILE, tiles
 
@@ -37,6 +39,7 @@ SCRATCH = 19
 LOOP_REGS = [11, 12, 13, 14, 15, 16, 17, 18, 26, 27, 28, 29, 30, 31]
 RESIDENT_ERF = 28              # e0-e27 are set once in the header; e28-e31 are set at their use
 TWO_SOURCE = {"vadd.bf16", "vsub.bf16", "vmul.bf16", "vmaximum.bf16", "vminimum.bf16"}
+BRANCH_REACH = 1024            # instructions a branch can jump back over (4 KiB)
 
 
 @dataclass(frozen=True)
@@ -179,6 +182,15 @@ class Prog:
     def label(self, name: str) -> None:
         self.lines.append(f"{name}:")
 
+    def instructions_since(self, label: str) -> int:
+        """The number of instructions from label to the end of the program."""
+        n = 0
+        for line in self.lines[self.lines.index(f"{label}:") + 1:]:
+            s = line.split("#", 1)[0].split()
+            if s and not s[0].endswith(":"):
+                n += len(expand_li(0, int(s[2], 0))) if s[0] == "LI" else 1
+        return n
+
     def source(self) -> str:
         return "\n".join(self.lines) + "\n"
 
@@ -258,6 +270,18 @@ class Builder:
     def xreg(self) -> int:
         return self.xfree.pop(0)
 
+    def branch_back(self, rs1: int, rs2: int, top: str) -> None:
+        """Jump to top while x[rs1] != x[rs2]: a BNE, or a BEQ over a JAL if top is out of reach."""
+        if self.prog.instructions_since(top) <= BRANCH_REACH:
+            self.op(f"BNE x{rs1}, x{rs2}, {top}")
+        else:
+            out = self.prog.new_label("loop_end")
+            self.op(f"BEQ x{rs1}, x{rs2}, {out}")
+            self.op(f"JAL x0, {top}")
+            self.prog.label(out)
+        for r in self.xval:                         # sched.py knows only the values a block sets
+            self.xval[r] = None
+
     def xrelease(self, *regs: int) -> None:
         for r in regs:
             assert r not in self.xfree and r in LOOP_REGS
@@ -283,17 +307,13 @@ class Builder:
             return
         cnt = self.xreg()
         self.li(cnt, n)
-        top, out = self.prog.new_label("loop"), self.prog.new_label("loop_end")
+        top = self.prog.new_label("loop")
         self.label(top)
         yield
         for reg, delta in steps:
             self.add_imm(reg, reg, delta)
         self.op(f"ADDI x{cnt}, x{cnt}, -1")
-        self.op(f"BEQ x{cnt}, x0, {out}")
-        self.op("NOP")
-        self.op(f"JAL x0, {top}")
-        self.op("NOP")
-        self.label(out)
+        self.branch_back(cnt, 0, top)
         self.xrelease(cnt)
 
     # -- VMEM tensor access ------------------------------------------------------------------
