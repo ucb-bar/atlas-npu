@@ -84,11 +84,12 @@ def generate_random_float(op: str) -> float:
 #  Per-case builder
 # --------------------------------------------------------------------
 
-# Non-binary ops — descriptions and vecB suppression match the old script.
+# Ops that read no vecB: their files carry vecB = 0. The row reductions (rsum, rmax, rmin) keep
+# vecB, which is lanes 16-31 of the row (the second register of the BF16 pair).
 _UNARY_OPS = frozenset({
     "rcp", "sqrt", "sin", "cos", "tanh", "log", "exp", "exp2",
-    "square", "cube", "rmax", "rsum", "mov", "fp8pack", "fp8unpack",
-    "relu", "rmin", "cmax", "cmin",
+    "square", "cube", "mov", "fp8pack", "fp8unpack",
+    "relu", "cmax", "cmin",
     "vliOne", "vliCol", "vliRow", "vliAll",
 })
 

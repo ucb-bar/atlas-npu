@@ -23,11 +23,14 @@ import svsim.vcs.{Backend => VcsBackend}
 
 trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
 
-  // ── MREG bank assignments shared across all family tests ──
+  // ── MREG registers shared across all family tests ──
+  // A BF16 operand is the pair {mN, mN+1} with an even N. The row reductions read vecB as the
+  // second register of the source pair. vliCol and vliOne write one register, DEST2_BANK: the
+  // test clears DEST1_BANK, the other register of the pair, and checks that it stays 0.
   val SRC1_BANK  = 0
-  val SRC2_BANK  = 1
-  val DEST1_BANK = 2
-  val DEST2_BANK = 3
+  val SRC2_BANK  = 2
+  val DEST1_BANK = 4
+  val DEST2_BANK = 5
 
   // ── Test-vector case class (shape comes from vpu_vector_file.py blocks) ──
   case class TestVector(
@@ -352,15 +355,19 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
             opEnum == VPUOp.vliRow || opEnum == VPUOp.vliAll
         val isVliPair = opEnum == VPUOp.vliAll || opEnum == VPUOp.vliRow
         val isVliSingle = opEnum == VPUOp.vliCol || opEnum == VPUOp.vliOne
+        val isRowReduce =
+          opEnum == VPUOp.rsum || opEnum == VPUOp.rmax || opEnum == VPUOp.rmin
         val destBank =
           if (isVliSingle) DEST2_BANK else DEST1_BANK
 
         if (isCol) {
-          clearBank(dut, SRC2_BANK)
+          clearBank(dut, SRC1_BANK + 1)
           trfWriteCol(dut, SRC1_BANK, tv.vecA)
+        } else if (isVliSingle) {
+          clearBank(dut, DEST1_BANK)
         } else if (!isVli) {
           trfWriteRow(dut, SRC1_BANK, 0, vecAasBigInt)
-          trfWriteRow(dut, SRC2_BANK, 0, vecBasBigInt)
+          trfWriteRow(dut, if (isRowReduce) SRC1_BANK + 1 else SRC2_BANK, 0, vecBasBigInt)
         }
 
         if (isVli) {
