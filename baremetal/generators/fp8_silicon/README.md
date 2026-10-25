@@ -1,12 +1,13 @@
 # FP8 silicon vectors
 
 NVIDIA tensor-core outputs for 32-element E4M3 dot products with an FP32 C. They check the FP8
-MXU arithmetic contract: `../check_fp8_silicon.py` compares the model
-(`npu-model/npu_model/configs/fp8_mma.py`) with them, bit for bit. The contract is the fused
-dot-add (FDA) of MMA-Sim (arXiv 2511.10909, section IV-C) with F = 25 fractional bits, as the
-model's docstring states it.
+MXU arithmetic contract (`docs/fp8-mxu.md`): `../check_fp8_silicon.py` compares the model
+(`npu-model/npu_model/configs/fp8_mma.py`) with them, and `atlas.ipt.Fp8MmaSiliconTest` compares
+the RTL, bit for bit. The contract is the fused dot-add (FDA) of MMA-Sim (arXiv 2511.10909,
+section IV-C) with F = 25 fractional bits, as the model's docstring states it.
 
-The section [Conversions](#conversions) gives the vectors of the FP8 and BF16 conversions.
+The section [Tile chains](#tile-chains) gives K = 128 chains of 32 x 32 tiles, and the section
+[Conversions](#conversions) gives the vectors of the FP8 and BF16 conversions.
 
 ## Silicon
 
@@ -85,7 +86,11 @@ format of `fp8_mma`.
 
 ```bash
 python3 -I baremetal/generators/check_fp8_silicon.py                 # model vs silicon
+./mill atlas.test.testOnly atlas.ipt.Fp8MmaSiliconTest               # RTL vs silicon (Verilator)
 ```
+
+The RTL test runs every vector through `AnchorAccumulationTree`, the `mxu1` lane, with its
+default pipeline: 140,129 vectors, 0 differences (about 15 s).
 
 On an sm_120 GPU, in this directory (each full set is at most 10.2 MB):
 
@@ -99,6 +104,38 @@ python3 -I fp8_vectors.py records wide_s3.vec.gz wide_s3.bin         # the recor
 
 CUDA 12 cannot target `sm_120a`. With CUDA 13.2, `-arch=sm_120a` also embeds `compute_120` PTX,
 and `ptxas` then rejects kind 1. Use `-gencode` as above.
+
+## Tile chains
+
+`chain_s8.tiles.gz` holds 14 chains of 4 steps of 32 x 32 x 32 tiles (K = 128). Step s computes
+D_s = D_(s-1) + A_s W_s^T with D_(-1) = C, as `vmatmul.acc.mxu1` does on an accumulator: row j of
+W_s is output column j. `fp8_tile.cu` runs each step as 8 `mma.sync` m16n8k32 E4M3 x E4M3 + FP32
+(SASS `QMMA.16832.F32.E4M3.E4M3`) and feeds D back as C. The GPU, the driver and the CUDA
+version are those of [Silicon](#silicon); the run was on 2026-10-25.
+
+`fp8_vectors.py tiles` makes the inputs (`tiles(numpy.random.default_rng(8), 14)`): tile t takes
+the rows of A and W and its C from the generator `TILE_KINDS[t % 7]` of the single-step sets
+(normal, wide, cancel, cspecial, sparse, subnormal, bits), so the tiles include NaN, Inf,
+subnormal and zero C, all-zero rows and cancellation. C is cut to BF16, because
+`vmatpush.acc.bf16.mxu1` loads it.
+
+- `check_fp8_silicon.py` feeds `fp8_mma.matmul` its own output from step to step: 57,344 of
+  57,344 outputs equal the RTX 5090 (5,433 NaN, 492 Inf, 221 subnormal).
+- `atlas.ipt.Fp8MmaSiliconTest` runs each tile through `InnerProductTreesTop`: a BF16 push of
+  C, then per step a weight push and `vmatmul.acc.mxu1`. The FP32 rows that each matmul writes
+  into the accumulator equal the GPU's D on all 57,344 outputs.
+
+Format: a gzip-compressed `fp8-tiles-v1` file. It has one JSON header line (`count` tiles,
+`steps`), then `count` records of c[32][32] (FP32, little-endian), a[steps][32][32] and
+w[steps][32][32] (E4M3), then one column per entry of `columns`: count x steps x 32 x 32 FP32
+values, D after each step. `fp8_vectors.read_tiles` reads it.
+
+```bash
+python3 -I fp8_vectors.py tiles tiles.bin                            # on the host
+/usr/local/cuda-13.2/bin/nvcc -O2 -gencode arch=compute_120a,code=sm_120a -o fp8_tile fp8_tile.cu
+./fp8_tile tiles.bin tiles.out                                       # on the GPU
+python3 -I fp8_vectors.py pack-tiles tiles.out chain_s8.tiles.gz     # on the host
+```
 
 ## Conversions
 
@@ -164,7 +201,9 @@ inputs: 0 differences for E4M3 and 0 for BF16.
 The RTL equals the GPU too. `atlas.vector.Fp8CvtSiliconTest` runs `FP8Pack`, `FP8Unpack` and
 `atlas.common.Cvt` in Verilator on every vector of `vpack`, `vunpack`, `pop` and `push`, and on
 the first and the last input of each run: 0 differences (`./mill atlas.test.testOnly
-atlas.vector.Fp8CvtSiliconTest`, about one minute).
+atlas.vector.Fp8CvtSiliconTest`, about one minute). The BF16 runs also check `Cvt.bf16Rne(x)`, the
+one-adder form without a scale that the `mxu1` BF16 pop uses. A separate check, not stored here,
+compared its rule with `cvt.py` on all 2^32 FP32 inputs: 0 differences.
 
 ### Format
 

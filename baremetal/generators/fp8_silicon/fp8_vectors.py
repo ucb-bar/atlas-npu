@@ -3,8 +3,11 @@
 
     python3 -I fp8_vectors.py gen DIR                 # DIR/<set>.bin, the full sets
     python3 -I fp8_vectors.py records FILE.vec.gz OUT # the records of a stored set, for fp8_mma
+    python3 -I fp8_vectors.py tiles OUT               # the tile chains, for fp8_tile
+    python3 -I fp8_vectors.py pack-tiles GPU.out OUT  # tile chains + fp8_tile output -> OUT.tiles.gz
 
 Records are 68 bytes: a[32] b[32] c[4] (byte k is E4M3 element k; c is FP32, little-endian).
+A tile chain is c[32][32] (FP32) a[4][32][32] w[4][32][32] (E4M3; row j of w is output column j).
 """
 import gzip
 import json
@@ -202,6 +205,50 @@ SETS = {  # name: (generator, seed, count)
 }
 
 
+TILE_STEPS = 4
+TILE_KINDS = (gen_normal, gen_wide, gen_cancel, gen_cspecial, gen_sparse, gen_subnormal, gen_bits)
+TILE_SET = ("chain_s8", 8, 14)  # name, seed, tiles
+TILE_SOURCE = ("NVIDIA GeForce RTX 5090 (sm_120, driver 595.99.02), CUDA 13.2 V13.2.78; fp8_tile.cu "
+               "(8 mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 per step, D fed back as C)")
+
+
+def tiles(rng, n):
+    """(c, a, w) of n chains of TILE_STEPS 32 x 32 x 32 steps. Tile t takes its rows (A row i and
+    W row i are a vector of the generator) and C from TILE_KINDS[t % 7]. C is cut to BF16, the
+    precision of vmatpush.acc.bf16, which loads it into mxu1."""
+    c = np.empty((n, 32, 32), np.uint32)
+    a = np.empty((n, TILE_STEPS, 32, 32), np.uint8)
+    w = np.empty_like(a)
+    for t in range(n):
+        gen = TILE_KINDS[t % len(TILE_KINDS)]
+        for s in range(TILE_STEPS):
+            a[t, s], w[t, s], _ = gen(rng, 32)
+        c[t] = (gen(rng, 1024)[2] & 0xFFFF_0000).reshape(32, 32)
+    return c, a, w
+
+
+def tile_records(c, a, w):
+    n = len(c)
+    return np.concatenate([c.astype("<u4").reshape(n, -1).view(np.uint8), a.reshape(n, -1), w.reshape(n, -1)],
+                          1).tobytes()
+
+
+def read_tiles(path):
+    """(header, c, a, w, columns) of an fp8-tiles-v1 file; column k is D after each step."""
+    raw = gzip.decompress(Path(path).read_bytes())
+    nl = raw.index(b"\n")
+    hdr = json.loads(raw[:nl])
+    n, steps = hdr["count"], hdr["steps"]
+    rec = np.frombuffer(raw, np.uint8, offset=nl + 1, count=n * (4096 + 2048 * steps)).reshape(n, -1)
+    c = rec[:, :4096].copy().view("<u4").astype(np.uint32).reshape(n, 32, 32)
+    a = rec[:, 4096:4096 + 1024 * steps].reshape(n, steps, 32, 32)
+    w = rec[:, 4096 + 1024 * steps:].reshape(n, steps, 32, 32)
+    body = nl + 1 + rec.size
+    cols = {name: np.frombuffer(raw, "<u4", offset=body + 4096 * n * steps * k, count=1024 * n * steps)
+            .astype(np.uint32).reshape(n, steps, 32, 32) for k, name in enumerate(hdr["columns"])}
+    return hdr, c, a, w, cols
+
+
 def records(a, b, c):
     return np.concatenate([a, b, np.asarray(c, "<u4")[:, None].view(np.uint8)], 1).tobytes()
 
@@ -231,6 +278,21 @@ def main(argv):
     if argv[:1] == ["records"] and len(argv) == 3:
         _, a, b, c, _ = read_vec(argv[1])
         Path(argv[2]).write_bytes(records(a, b, c))
+        return 0
+    name, seed, n = TILE_SET
+    if argv[:1] == ["tiles"] and len(argv) == 2:
+        Path(argv[1]).write_bytes(tile_records(*tiles(np.random.default_rng(seed), n)))
+        return 0
+    if argv[:1] == ["pack-tiles"] and len(argv) == 3:
+        hdr = {"format": "fp8-tiles-v1", "name": name, "count": n, "steps": TILE_STEPS, "columns": ["rtx5090"],
+               "description": f"K = {32 * TILE_STEPS} chains of 32 x 32 tiles: D_s = D_(s-1) + A_s W_s^T, "
+                              f"D_(-1) = C (fp8_vectors.py tiles(numpy.random.default_rng({seed}), {n}))",
+               "source": TILE_SOURCE}
+        out = np.fromfile(argv[1], "<u4")
+        assert out.size == 1024 * n * TILE_STEPS
+        body = tile_records(*tiles(np.random.default_rng(seed), n)) + out.tobytes()
+        with gzip.GzipFile(argv[2], "wb", mtime=0) as f:
+            f.write(json.dumps(hdr).encode() + b"\n" + body)
         return 0
     print(__doc__, file=sys.stderr)
     return 2
