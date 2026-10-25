@@ -313,3 +313,11 @@ the two dual-MXU tests (15 tests) are gone. With the original kernels and with e
 removed, `default` gives 114 / 114 as expected (107 pass, 7 illegal) and `ipt-nvfp4` 114 / 114
 (112, 2). The other 101 tests keep their status and cycle count on both configurations, and
 `default` gives the same cycles and performance counters as `ipt` did.
+
+Verilator, 2026-10-25, ISA 2.0 with the test additions: the suite has 125 tests. The 10 new tests
+are six `csr_illegal_*` tests (writes to cycle and instret, the ISA 1.0 CSR numbers),
+`illegal_word_v1`, `illegal_word_reserved_bit`, `seld_byte_offsets` and `nvfp4_mxu1_overlap`.
+With the original kernels and with every `DELAY` removed, `default` gives 125 / 125 as expected
+(108 pass, 17 illegal) and `ipt-nvfp4` 125 / 125 (114, 11). The other 115 tests keep their
+status, cycle count and performance counters on both configurations. 16 of them load other FP8
+data, because the generators now encode E4M3 as `E4M3_RN_SATFINITE` (`gen_utils.py`).

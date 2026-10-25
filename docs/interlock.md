@@ -140,7 +140,9 @@ identically in both copies. Bisection puts the first difference at one instructi
 `vsub.bf16` result one BF16 ULP from the RTL's, and a `vmatmul.acc.mxu1` onto a large BF16
 partial sum. npu_model's `RtlNumerics` and ditflow's fast numerics agree with each other there,
 so the model's arithmetic is off in these two corner cases. No program fails only without
-`DELAY`.
+`DELAY`. With the ISA 2.0 numerics (VPU round to nearest even, FP32 `mxu1` accumulators), seeds
+1000 to 1063 on `default` give 65 / 65 (2026-10-25). So does `--seed 100 --count 8`, which
+failed the same way before (8 / 8, and 8 / 8 with `--spaced`).
 
 On the old RTL, the assertions came from three sources. Two-source VPU instructions named two
 pairs in one bank (now illegal). The MXU1 sequencer's push and pop checks counted an engine on
