@@ -95,14 +95,13 @@ class FSMOverlapTracking4 extends AnyFlatSpec with Matchers with PeekPokeAPI {
       driveDefaults(dut)
 
       dut.io.in.instFire.poke(true.B)
-      dut.io.in.instType.poke(VPUOp.add)
+      dut.io.in.instType.poke(VPUOp.exp)
       dut.io.in.instReadBank1.poke(0.U)
-      dut.io.in.instReadBank2.poke(4.U)
       dut.io.in.instWriteBank.poke(8.U)
       dut.clock.step(1)
 
       driveDefaults(dut)
-      dut.io.in.instType.poke(VPUOp.rsum)
+      dut.io.in.instType.poke(VPUOp.exp2)
       dut.io.out.VEReady.expect(false.B)
 
       dut.io.in.instType.poke(VPUOp.tanh)
