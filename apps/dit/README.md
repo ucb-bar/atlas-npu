@@ -2,7 +2,7 @@
 
 The noise predictor and flow-matching sampler of [specialist_lerobot](https://github.com/specialist-ai/specialist_lerobot)'s
 `specialist_dit` policy, compiled to one Atlas program and run on the standalone VCU118 build
-(`standalone/`). Every matmul is FP8 x FP8 with BF16 accumulation on the inner-product-tree MXU
+(`standalone/`). Every matmul is FP8 x FP8 with FP32 accumulation on the inner-product-tree MXU
 (`mxu1`). The weights are random. There are two programs:
 
 - the DiT sampler, which takes the policy's conditioning vector (below);
@@ -79,8 +79,9 @@ DRAM (`DRAM_LINE_W=21`).
   Activation scales come from calibration (the largest value over sampler trajectories on 4
   random inputs, with 2x headroom). Each scale is exact on Atlas, as a scale register for
   `vmatpop.fp8` or a power-of-two multiply.
-- Matmul: `mxu1` accumulates each output once per 32-wide K tile, rounding to BF16. LayerNorm,
-  softmax, RoPE, GELU, SiLU, the gates and residuals are BF16 VPU operations.
+- Matmul: `mxu1` accumulates in FP32 with NVIDIA Blackwell FP8 MMA arithmetic
+  (`docs/fp8-mxu.md`), and the BF16 pop rounds once. LayerNorm, softmax, RoPE, GELU, SiLU, the
+  gates and residuals are BF16 VPU operations.
 - BF16 to FP8 conversion pushes the tile into an accumulator and pops it as FP8. This also turns
   the VPU's column-split tile layout into the row-major layout `vmatmul` reads.
 - The tensors that scale token rows (adaLN's shift, scale and gate) are kept as tiles of 32
@@ -123,7 +124,8 @@ The board ran the 100 steps in 44.5 M cycles (0.89 s at 50 MHz); loading the 3.7
 UART TSI takes most of the 49 s wall time. Its final chunk and all 100 velocities equal the
 functional model's bit for bit. The functional model (`ditflow/funcsim.py`) is npu_model's
 instruction semantics in program order with arithmetic bit-exact to the RTL
-(`ditflow/numerics.py`, checked against npu_model's `rtl_math`: the FP8 converters on every input, the IPT matmul on random and edge-case tiles). The error against
+(`ditflow/numerics.py`, checked against npu_model's `rtl_math` on random and edge-case tiles; this
+was the v1 `mxu1`, see below for ISA 2.0). The error against
 FP32 is FP8 quantization (fake quant alone is 1.28%) plus about a fifth more from BF16
 arithmetic.
 
@@ -167,6 +169,27 @@ The chunk is now 0.23% from fake quant (rel. L2), against 0.87% with the v1 VPU.
 and its cycle counts do not change: in Verilator with every RTL assertion, 2 steps take 694,553
 cycles in `default` and in `ipt-nvfp4`, and every output word equals the functional model. The
 whole policy was not run again.
+
+### ISA 2.0 `mxu1` numerics (2026-10-25)
+
+`mxu1` now computes each K = 32 step as an NVIDIA Blackwell FP8 MMA into FP32 accumulators
+(`docs/fp8-mxu.md`): E4M3 subnormals count, and the accumulator keeps FP32 between K tiles. The
+FP8 pop (the BF16 to FP8 conversion above) rounds once and keeps E4M3 subnormals. The functional
+model's `ditflow/numerics.py` is a torch port of npu_model's `fp8_mma.py`: `tests/test_numerics.py`
+checks it against `fp8_mma` bit for bit, and it equals the RTX 5090 on all 197,473 outputs of
+`baremetal/generators/fp8_silicon`. The same sampler (100 steps):
+
+| vs FP32 | final chunk (rel. L2 / max abs / cosine) | per-step velocity (rel. L2, mean) |
+|---|---|---|
+| FP8 fake quant | 1.28% / 0.037 / 0.99992 | 4.9% (step 0) |
+| Atlas, ISA 2.0 VPU, v1 `mxu1` | 1.286% / 0.037 / 0.99992 | 5.53% |
+| Atlas, ISA 2.0 VPU and `mxu1` | 1.286% / 0.039 / 0.99992 | 5.52% |
+
+The FP8 quantization sets the error (fake quant alone is 1.28%); the chunk moves from 0.230% to
+0.224% from fake quant. The program and its cycle counts do not change: in Verilator with every
+RTL assertion, 1 step takes 378,496 cycles and 2 steps 694,553, in `default` and in `ipt-nvfp4`,
+and every output word equals the functional model. The whole policy (the encoder and 1 sampler
+step) also passes in both configurations, in 9,901,025 cycles.
 
 ## Instruction scheduling (2026-10-24)
 

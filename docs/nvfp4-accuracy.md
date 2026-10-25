@@ -129,9 +129,10 @@ The rules follow the published recipes:
 - MX scales are 2^ceil(log2(amax_block / max_element)), as ModelOpt sets them
   (`mxfp4_tensor.py`, line 75; `tensor_quant_mx.cu`, `compute_scale_e8m0_NV`).
 - FP8 is Atlas's: `apps/dit/ditflow/quant.py` (`exponent_for`, `to_fp8`). `quantstudy/formats.py`
-  flushes subnormals in (1) as today's `mxu1` does. Blackwell keeps FP8 subnormals (`fp8_mma.py`,
-  rule 2), so (2) keeps them. The row "(2), subnormals flushed" differs from (1) only in the accumulation and from (2)
-  only in the subnormals.
+  flushes subnormals in (1) as `mxu1` did before ISA 2.0. Blackwell keeps FP8 subnormals
+  (`fp8_mma.py`, rule 2), so (2) keeps them. The row "(2), subnormals flushed" differs from (1)
+  only in the accumulation and from (2) only in the subnormals. ISA 2.0 `mxu1` is row (2)
+  (`docs/fp8-mxu.md`).
 - Atlas does q, k and v as one GEMM, so they share one weight scale (the maximum of the three) and
   the activation scale.
 - Calibration takes the largest |value| of each matmul input over the calibration images, in FP32.
@@ -155,11 +156,12 @@ every scale as the hardware does, up to the rounding of the sum. TF32 is off. Ro
 32-wide K tile to a BF16 accumulator and rounds once per tile. `study.py check` runs these
 emulations and the bit-exact models of the same matmuls on real inputs of four layers (the patch
 embedding, layer 0 q, the middle layer's up and the last layer's down; 64 rows of 2 images, 8 x 64
-outputs for NVFP4):
+outputs for NVFP4). With ISA 2.0, `ditflow.numerics.ipt_matmul` became the datapath of row (2),
+so `check` no longer runs row (1); its row records the run before that change:
 
 | Matmul | Bit-exact model | ViT-B: identical outputs | rel. L2, emulation vs model | rel. L2, format vs FP32 |
 |---|---|---|---|---|
-| (1) Atlas `mxu1` | `ditflow.numerics.ipt_matmul` | 100% in all 4 layers | 0 | 1.6% to 8.4% |
+| (1) Atlas `mxu1` before ISA 2.0 | `ditflow.numerics.ipt_matmul` of ISA 1.0 | 100% in all 4 layers | 0 | 1.6% to 8.4% |
 | (2) Blackwell FP8 MMA | `npu_model/configs/fp8_mma.py` | 11% to 95% | 5.5e-8 to 7.2e-7 | 1.5% to 8.4% |
 | (3) Atlas NVFP4 MXU | `npu_model/configs/nvfp4.py` (`fp4_fedp`) | 12% to 40% | 8.1e-8 to 2.4e-7 | 2.5% to 22.7% |
 
