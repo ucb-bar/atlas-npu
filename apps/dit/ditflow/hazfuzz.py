@@ -27,6 +27,7 @@ import random
 from pathlib import Path
 
 import torch
+from npu_model.isa import ISA_VERSION
 
 from . import layout as L
 from .asm import Builder, FP8_TILE, SEGMENT
@@ -403,8 +404,8 @@ def make(seed: int, length: int, units=("mxu1",), spaced: bool = False) -> dict:
         check.append([dram, words])
     words = assemble(source)
     tag = "+".join(units) + (" spaced" if spaced else "")
-    return {"name": f"hazfuzz_{seed:04d}", "variant": f"{length} ops {tag}", "program": words,
-            "preload": preload(g.b.dram.blobs), "check": check, "perf": {}, "timeout": None,
+    return {"name": f"hazfuzz_{seed:04d}", "isa": list(ISA_VERSION), "variant": f"{length} ops {tag}",
+            "program": words, "preload": preload(g.b.dram.blobs), "check": check, "perf": {}, "timeout": None,
             "source": source, "stats": g.stats}
 
 
@@ -434,8 +435,9 @@ def directed_vload_war() -> dict:
     sim = FuncSim(source, b.dram.blobs, b.dram.size)
     sim.run()
     words = torch.frombuffer(bytearray(sim.read_dram(out, 3 * FP8_TILE)), dtype=torch.int32).numpy().astype("uint32").tolist()
-    return {"name": "hazard_vload_war_vpu_pair", "variant": "directed", "program": assemble(source),
-            "preload": preload(b.dram.blobs), "check": [[out, words]], "perf": {}, "timeout": None, "source": source}
+    return {"name": "hazard_vload_war_vpu_pair", "isa": list(ISA_VERSION), "variant": "directed",
+            "program": assemble(source), "preload": preload(b.dram.blobs), "check": [[out, words]], "perf": {},
+            "timeout": None, "source": source}
 
 
 def main(argv=None):

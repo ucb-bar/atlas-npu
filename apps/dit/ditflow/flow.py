@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 import torch
+from npu_model.isa import ISA_VERSION
 
 from . import compiler as C
 from . import model as M
@@ -61,8 +62,8 @@ def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int,
     words = assemble(c.source)
     assert len(words) <= 32768, f"{len(words)} instructions do not fit the 128 KiB IMEM"
     (out / "program.S").write_text(c.source)
-    bundle = {"name": f"dit_{preset}_{steps}", "variant": "", "program": words, "preload": preload(c.blobs),
-              "check": [], "perf": {}, "timeout": None}
+    bundle = {"name": f"dit_{preset}_{steps}", "isa": list(ISA_VERSION), "variant": "", "program": words,
+              "preload": preload(c.blobs), "check": [], "perf": {}, "timeout": None}
     (out / "bundle.json").write_text(json.dumps(bundle))
     c.manifest.update({"preset": preset, "seed": seed, "input_seed": input_seed, "instructions": len(words)})
     (out / "manifest.json").write_text(json.dumps(c.manifest, indent=1))
@@ -100,8 +101,8 @@ def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace
     words = assemble(c.source)
     assert len(words) <= 32768, f"{len(words)} instructions do not fit the 128 KiB IMEM"
     (out / "program.S").write_text(c.source)
-    bundle = {"name": f"policy_{steps}", "variant": "", "program": words, "preload": preload(c.blobs),
-              "check": [], "perf": {}, "timeout": None}
+    bundle = {"name": f"policy_{steps}", "isa": list(ISA_VERSION), "variant": "", "program": words,
+              "preload": preload(c.blobs), "check": [], "perf": {}, "timeout": None}
     (out / "bundle.json").write_text(json.dumps(bundle))
     c.manifest.update({"policy": True, "seed": seed, "input_seed": input_seed, "instructions": len(words),
                        "vision_scales": plans.vision.to_dict()})

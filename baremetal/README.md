@@ -20,6 +20,10 @@ PYTHONPATH=../npu-model uv run --locked --project ../npu-model --python 3.14 pyt
 
 The assembler also accepts `--out-hex`, `--out-bin`, `--dram-base`, and `--beat-bytes`. The DRAM base comes from a JSON entry when present, otherwise `@DRAM_BASE`, otherwise the CLI default. JSON preload/check data is used when supplied; inline `@DRAM` and `@CHECK_DRAM` provide the fallback when no JSON golden is supplied.
 
+The C test fails before it loads the program if the Atlas ISA CSR has another version than the
+assembler. It polls DBG0 until the kernel sets it or the core halts. A test with `# @EXPECT_ILLEGAL`
+passes only if the core stops at an illegal instruction.
+
 `atlas_asm.py --disasm FILE` prints the assembly of a program: hex text (one word per line) or, for
 a `.bin` file, raw binary. The disassembler (`npu_model.isa.disasm`) decodes the words with the ISA
 table and puts labels at branch and jump targets. Its output assembles to the same words, except an

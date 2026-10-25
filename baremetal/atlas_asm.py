@@ -215,6 +215,11 @@ def _parse_perf_report(source):
     return False
 
 
+def _parse_expect_illegal(source):
+    """True if the source has `# @EXPECT_ILLEGAL`: the test must stop at an illegal instruction."""
+    return re.search(r"^\s*#\s*@EXPECT_ILLEGAL\b", source, re.M) is not None
+
+
 def _parse_perf_macs(source):
     """Parse the `# @PERF_MACS_MXU1 <n>` directive.
 
@@ -232,8 +237,11 @@ def _parse_perf_macs(source):
 
 
 def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
-                perf_report=False, perf_macs_mxu1=None):
+                perf_report=False, perf_macs_mxu1=None, expect_illegal=False):
     """Generate a complete baremetal C test.
+
+    The test fails if the Atlas ISA CSR has another version than the assembler. It polls DBG0 and
+    stops when the core halts with a reason (ecall, ebreak or an illegal instruction).
 
     Args:
         code: list of 32-bit instruction words
@@ -248,7 +256,11 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
             cycle delta into CSR_DBG1 (CSRRW ..., 0x801) but rely on golden
             DRAM comparison for pass/fail.
         perf_macs_mxu1: total MACs issued to MXU1 in the timed window, or None.
+        expect_illegal: the test passes only if the core stops at an illegal instruction
+            (# @EXPECT_ILLEGAL).
     """
+    from npu_model.isa import ISA_VERSION
+    major, minor = ISA_VERSION
     n = len(code)
     array_body = ""
     for i, word in enumerate(code):
@@ -277,6 +289,10 @@ static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint3
 #define CSR_DBG0          (ATLAS_CSR_BASE + 0x10)
 #define CSR_DBG1          (ATLAS_CSR_BASE + 0x14)
 #define CSR_EXEC_CONTROL  (ATLAS_CSR_BASE + 0x18)
+#define CSR_ISA           (ATLAS_CSR_BASE + 0x1C)
+
+#define ATLAS_ISA_MAJOR   {major}U
+#define ATLAS_ISA_MINOR   {minor}U
 
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
@@ -305,6 +321,13 @@ int main(void)
 {{
     uint32_t i;
     int fail = 0;
+
+    uint32_t isa = mmio_read32(CSR_ISA);
+    if ((isa >> 24) != ATLAS_ISA_MAJOR || ((isa >> 16) & 0xFF) != ATLAS_ISA_MINOR) {{
+        printf("*** FAILED *** ({test_name}: assembled for ISA %u.%u, Atlas has ISA %u.%u)\\n",
+               ATLAS_ISA_MAJOR, ATLAS_ISA_MINOR, isa >> 24, (isa >> 16) & 0xFF);
+        return 1;
+    }}
 """
 
     if has_golden and golden[1]:
@@ -353,26 +376,40 @@ int main(void)
     uint32_t dbg0 = 0;
     for (i = 0; i < 200000000U; i++) {{
         dbg0 = mmio_read32(CSR_DBG0);
-        if (dbg0 != 0) break;
+        /* status [2:1]: the halt reason, cleared by the start */
+        if (dbg0 != 0 || (mmio_read32(CSR_STATUS) >> 1 & 3) != 0) break;
     }}
 
     printf("Issuing Atlas STOP command ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
     asm volatile ("fence" ::: "memory");
 
+    dbg0 = mmio_read32(CSR_DBG0);  /* the core may set DBG0 just before it halts */
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
-    uint32_t status   = mmio_read32(CSR_STATUS); 
+    uint32_t status   = mmio_read32(CSR_STATUS);
 
     printf("  DBG0    = %u\\n", dbg0);
     printf("  mcycles = %u\\n", cycles);
     printf("  minstret = %u\\n", instcnt);
     printf("  status  = 0x%08x\\n", status);
-
-    if (dbg0 == 0) {{
-        printf("*** FAILED *** (timeout — Atlas core did not complete)\\n");
-        return 1;
+"""
+    if expect_illegal:
+        return out + f"""
+    if (dbg0 == 0 && (status >> 1 & 3) == 1) {{
+        printf("*** PASSED *** ({test_name}: illegal instruction at word %u, as expected)\\n",
+               mmio_read32(CSR_ILLEGAL_PC));
+        return 0;
     }}
+    printf("*** FAILED *** ({test_name}: no illegal instruction, dbg0=%u)\\n", dbg0);
+    return 1;
+}}
+"""
+    out += """
+    if (dbg0 == 0) {
+        printf("*** FAILED *** (Atlas core did not complete: timeout, or halted with status 0x%08x)\\n", status);
+        return 1;
+    }
 """
 
     if perf_threshold is not None or perf_report:
@@ -525,7 +562,8 @@ def main():
         c_source = emit_c_file(code, test_name, golden=golden,
                                perf_threshold=perf_threshold,
                                perf_report=perf_report,
-                               perf_macs_mxu1=perf_macs_mxu1)
+                               perf_macs_mxu1=perf_macs_mxu1,
+                               expect_illegal=_parse_expect_illegal(source))
         with open(args.out_c, "w") as f:
             f.write(c_source)
         print(f"Wrote C file to {args.out_c} ({len(code)} instructions)")
