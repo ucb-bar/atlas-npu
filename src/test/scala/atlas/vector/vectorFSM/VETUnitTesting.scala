@@ -901,10 +901,7 @@ class VETUnitTesting extends AnyFlatSpec with Matchers with PeekPokeAPI {
             val r55 = randomBF16Matrix(useInt = false)   // To avoid overflow in sum, use smaller values for r55
             val formatedr54 = packMatrix(r54)
             val formatedr55 = packMatrix(r55)
-            val expectedr54 = goldenColSumMatrix(r54) 
-            val expectedr55 = goldenColSumMatrix(r55)
-            val finalVecSum = goldenAddSubVector(expectedr54(0), expectedr55(0), false)
-            val expected54n55 = Array.fill(32)(finalVecSum)
+            val expected54n55 = goldenColSumMatrix(r54 ++ r55)
 
 
             for (i <- 1200 until 1600) {
@@ -1104,6 +1101,7 @@ class VETUnitTesting extends AnyFlatSpec with Matchers with PeekPokeAPI {
             // println(s"Second Round of Tests: Passed $numPass2 / $total2 tests")
             // println(s"Third  Round of Tests: Passed $numPass3 / $total3 tests")
             println(s"Fourth Round of Tests: Passed ${results4.count(_._2)} / ${results4.length} tests")
+            results4.filterNot(_._2).map(_._1) shouldBe empty
             // Use assertion to check which matrix fail
             // results3.foreach { case (name, pass) =>
             //     assert(pass, s"$name failed")

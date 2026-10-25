@@ -499,14 +499,16 @@ object VectorTestUtils {
     Array.fill(32)(colMinVec.clone())
 }
 
+    /** vredsum.bf16 of a register pair: the FP32 sum of each column over the 64 rows of the pair,
+      * in row order, truncated to BF16 (ISA v2, 5.0), in each of the 32 rows of the result. */
     def goldenColSumMatrix(aMat: Array[Array[Short]]): Array[Array[Short]] = {
-        require(aMat.length == 32, s"Matrix must have 32 lanes, got ${aMat.length}")
+        require(aMat.length == 64, s"Matrix pair must have 64 lanes, got ${aMat.length}")
         
         // 1. Initialize an accumulator for the 16 columns
         val colSums = Array.fill(16)(0.0f)
 
-        // 2. Sum across the 32 rows for each column
-        for (row <- 0 until 32) {
+        // 2. Sum across the 64 rows for each column
+        for (row <- 0 until 64) {
             for (col <- 0 until 16) {
             val bf16Bits = aMat(row)(col)
             // Convert BF16 bits (Short) to Float
