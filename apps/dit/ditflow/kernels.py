@@ -11,7 +11,7 @@ and the VPU use, and vmatpop.fp8.acc returns FP8 in the row-major layout vmatmul
 import math
 from dataclasses import dataclass
 
-from .asm import Builder, Tensor
+from .asm import SEGMENT, Builder, Tensor
 from .layout import FP8_TILE, bf16_bits, pow2_bits
 
 ONE, HALF, ZERO = bf16_bits(1.0), bf16_bits(0.5), 0
@@ -38,9 +38,12 @@ class Linear:
 
 
 class Kernels:
-    def __init__(self, b: Builder, stage_bytes: int):
+    def __init__(self, b: Builder, stage_bytes: int, banked: bool = False):
+        """banked: each weight staging buffer starts a VMEM bank of its own, so the DMA that fills
+        one does not wait for vloads from the other (the LSU has priority on a bank)."""
         self.b = b
-        self.stage = [b.vmem.alloc("stage0", stage_bytes), b.vmem.alloc("stage1", stage_bytes)]
+        align = SEGMENT if banked else 1024
+        self.stage = [b.vmem.alloc("stage0", stage_bytes, align), b.vmem.alloc("stage1", stage_bytes, align)]
         self.stage_bytes = stage_bytes
 
     # -- small helpers -----------------------------------------------------------------------
@@ -75,7 +78,9 @@ class Kernels:
 
     # -- Linear --------------------------------------------------------------------------------
     def linear(self, lin: Linear, xq: Tensor, deq: int, epilogue, resident: bool | None = None) -> None:
-        """For each output tile (r, n): y = acc * 2**deq + bias, then epilogue(y_pair, r, n)."""
+        """For each output tile (r, n): y = acc * 2**deq + bias, then epilogue(y_pair, r, n). An
+        epilogue may return a store through acc{r}: it runs after the next tile's pop of acc{r},
+        so the next tile's matmuls can overlap the epilogue."""
         b, regs = self.b, self.b.regs
         RT, KT, NT = xq.rt, lin.kt, lin.nt
         assert xq.kind == "fp8" and xq.ct == KT and RT <= 2, (lin.name, xq)
@@ -101,6 +106,7 @@ class Kernels:
         queue(0)
         cmds = -(-lin.block_bytes // 4096)
         per_k = -(-cmds // KT)
+        held = {}                                       # row -> the previous tile's store, its pair
         for n in range(NT):
             b.dma.wait(f"{lin.name}#{n}")
             if n + 1 < NT:
@@ -125,12 +131,23 @@ class Kernels:
             for r in range(RT):
                 o = regs.pair()
                 b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
+                if r in held:
+                    self._store(*held.pop(r))
                 b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{deqt}")
                 if bias is not None:
                     b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
-                epilogue(o, r, n)
-                regs.release(pairs=(o,))
+                store = epilogue(o, r, n)
+                if store is None:
+                    regs.release(pairs=(o,))
+                else:
+                    held[r] = (store, o)
+        for store, o in held.values():
+            self._store(store, o)
         regs.release(*(xreg.values() if resident else stream), *wreg, pairs=(deqt,) + ((bias,) if bias is not None else ()))
+
+    def _store(self, store, o: int) -> None:
+        store()
+        self.b.regs.release(pairs=(o,))
 
     # -- epilogues -----------------------------------------------------------------------------
     def epi_store(self, out: Tensor):
@@ -139,11 +156,11 @@ class Kernels:
         return f
 
     def epi_quant(self, out: Tensor, a: int, pre=None):
-        """Optionally transform y in place (pre(o, r)), then store FP8(y / 2**a)."""
+        """Optionally transform y in place (pre(o, r)), then store FP8(y / 2**a) through acc{r}."""
         def f(o, r, n):
             if pre is not None:
                 pre(o, r)
-            self.quant_store(o, r, out.tile(r, n), 127 - a)
+            return lambda: self.quant_store(o, r, out.tile(r, n), 127 - a)
         return f
 
     def epi_residual_gate(self, x: Tensor, gate: Tensor):

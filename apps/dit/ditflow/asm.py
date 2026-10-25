@@ -22,6 +22,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from . import sched
 from .layout import BF16_TILE, FP8_TILE, tiles
 
 DRAM_BASE = 0x8000_0000
@@ -35,6 +36,7 @@ CSR_DBG0, CSR_DBG1 = 0xC10, 0xC11
 SCRATCH = 19
 LOOP_REGS = [11, 12, 13, 14, 15, 16, 17, 18, 26, 27, 28, 29, 30, 31]
 RESIDENT_ERF = 28              # e0-e27 are set once in the header; e28-e31 are set at their use
+TWO_SOURCE = {"vadd.bf16", "vsub.bf16", "vmul.bf16", "vmaximum.bf16", "vminimum.bf16"}
 
 
 @dataclass(frozen=True)
@@ -128,30 +130,35 @@ class DramImage:
 
 
 class Regs:
-    """Matrix-register pool. Pairs start at an even register (the VPU's BF16 tile rule)."""
+    """Matrix-register pool. Pairs start at an even register (the VPU's BF16 tile rule) and come
+    from m0-m31, so two pairs never share a physical bank (a two-source VPU instruction cannot
+    read two pairs of one bank). Single registers come from m32-m63 first. Each request takes the
+    register freed longest ago, which leaves the scheduler (sched.py) independent registers."""
 
     def __init__(self, n: int = 64):
-        self.free_set = set(range(n))
-        self.n = n
+        self.freed = {r: 0 for r in range(n)}     # free register -> when it was released
+        self.n, self.clock = n, 0
 
     def one(self) -> int:
-        r = min(self.free_set)
-        self.free_set.remove(r)
+        free = [r for r in self.freed if r >= self.n // 2] or list(self.freed)
+        r = min(free, key=lambda r: (self.freed[r], r))
+        del self.freed[r]
         return r
 
     def pair(self) -> int:
-        for r in range(0, self.n - 1, 2):
-            if r in self.free_set and r + 1 in self.free_set:
-                self.free_set -= {r, r + 1}
-                return r
-        raise RuntimeError("out of register pairs")
+        free = [r for r in range(0, self.n, 2) if r in self.freed and r + 1 in self.freed]
+        if not free:
+            raise RuntimeError("out of register pairs")
+        low = [r for r in free if r < self.n // 2] or free
+        r = min(low, key=lambda r: (max(self.freed[r], self.freed[r + 1]), r))
+        del self.freed[r], self.freed[r + 1]
+        return r
 
     def release(self, *regs: int, pairs: tuple[int, ...] = ()) -> None:
-        for r in regs:
-            assert r not in self.free_set
-            self.free_set.add(r)
-        for r in pairs:
-            self.release(r, r + 1)
+        for r in regs + tuple(p + i for p in pairs for i in (0, 1)):
+            assert r not in self.freed
+            self.clock += 1
+            self.freed[r] = self.clock
 
 
 class Prog:
@@ -177,9 +184,11 @@ class Prog:
 
 
 class Builder:
-    """Prog plus the helpers every kernel uses."""
+    """Prog plus the helpers every kernel uses. finish() reorders the program's basic blocks
+    (sched.py) unless schedule is False."""
 
-    def __init__(self, dram_size: int = 4 << 20):
+    def __init__(self, dram_size: int = 4 << 20, schedule: bool = True):
+        self.schedule = schedule
         self.prog = Prog()
         self.regs = Regs()
         self.vmem = VmemAlloc()
@@ -207,7 +216,7 @@ class Builder:
         self.op("ECALL")
         seli = [f"    seli e{idx}, {raw}" for raw, idx in sorted(self._erf.items(), key=lambda kv: kv[1])]
         self.prog.lines[self._header:self._header] = seli
-        return self.prog.source()
+        return sched.schedule(self.prog.source()) if self.schedule else self.prog.source()
 
     def op(self, text: str) -> None:
         self.prog.op(text)
@@ -314,6 +323,9 @@ class Builder:
         self.op(f"vli.all m{m}, {bits & 0xFFFF:#06x}")
 
     def v(self, mnemonic: str, *operands) -> None:
+        if mnemonic in TWO_SOURCE:
+            a, b = (int(s[1:]) for s in operands[1:])
+            assert a == b or (a - b) % 32, f"{mnemonic}: m{a} and m{b} share a physical bank"
         self.op(f"{mnemonic} " + ", ".join(operands))
 
 

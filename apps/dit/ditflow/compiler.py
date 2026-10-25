@@ -46,13 +46,14 @@ class Compiled:
 class DiTProgram:
     def __init__(self, d: M.DiTDims, plan: QuantPlan, x0: torch.Tensor, cond: torch.Tensor | None,
                  steps: int | None = None, trace: bool = True, dram_size: int = 4 << 20,
-                 builder: Builder | None = None, cond_tiles=None, cond_perm=None, state=None):
+                 builder: Builder | None = None, cond_tiles=None, cond_perm=None, state=None,
+                 schedule: bool = True):
         """cond: the conditioning vector, from DRAM. Or, when the observation encoder runs in the
         same program: cond_tiles, (VMEM tile, row) per conditioning K tile; cond_perm, the
         conditioning index of each of their columns (-1: none; the state is the last tile); state."""
         assert d.head_dim == 64 and d.horizon <= 64
         self.d, self.plan, self.steps, self.trace = d, plan, steps or d.steps, trace
-        self.b = builder or Builder(dram_size)
+        self.b = builder or Builder(dram_size, schedule)
         self.cond_tiles, self.cond_perm = cond_tiles, cond_perm
         b = self.b
         self.T, self.H = d.horizon, d.hidden
@@ -169,7 +170,7 @@ class DiTProgram:
         vt("xin_q", self.T, 32, "fp8")
         vt("vbuf", self.T, 32, "bf16")
         stage = max(lin.block_bytes for lin in self.lin.values())
-        self.k = Kernels(b, stage)
+        self.k = Kernels(b, stage, banked=True)
         self.lk = LoopKernels(b, self.k)
 
     # -------------------------------------------------------------------------------------
@@ -357,8 +358,8 @@ class DiTProgram:
         b.regs.release(pairs=(dd, kk, t))
 
 
-def compile_dit(d, plan, x0, cond, steps=None, trace=True) -> Compiled:
-    return DiTProgram(d, plan, x0, cond, steps=steps, trace=trace).compile()
+def compile_dit(d, plan, x0, cond, steps=None, trace=True, schedule=True) -> Compiled:
+    return DiTProgram(d, plan, x0, cond, steps=steps, trace=trace, schedule=schedule).compile()
 
 
 def read_outputs(c: Compiled, read) -> dict:

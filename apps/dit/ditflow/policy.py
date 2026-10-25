@@ -357,10 +357,10 @@ class EncoderEmitter:
 
 class PolicyProgram:
     def __init__(self, v: V.VisionDims, vplan: VisionPlan, d: M.DiTDims, dplan: Q.QuantPlan,
-                 views, state, x0, steps=None, trace=True, dram_size: int = 64 << 20):
+                 views, state, x0, steps=None, trace=True, dram_size: int = 64 << 20, schedule: bool = True):
         assert d.cond_dim == v.cond_dim and v.queries <= E_COLS
         self.v, self.d = v, d
-        self.b = Builder(dram_size)
+        self.b = Builder(dram_size, schedule)
         self.enc = EncoderEmitter(self.b, v, vplan, views)
         self.b.vmem.reset(self.enc.mark)           # the DiT's tensors reuse the encoder's working set
         # Conditioning K tiles, in the order the DiT's adaLN weights are permuted to.

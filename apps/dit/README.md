@@ -113,7 +113,9 @@ enabled, via `run_tests.py` on `bundle_checked.json`:
 | 1 | PASS: 3,072 words equal the golden, 522,137 cycles | PASS, 522,137 cycles | PASS, 522,137 cycles |
 | 2 | PASS: 4,096 words, 966,632 cycles | PASS, 966,632 cycles | PASS, 966,632 cycles |
 
-Each simulation takes about 35 minutes, most of it loading DRAM through the simulated bus.
+Each simulation then took about 35 minutes, most of it loading DRAM through the simulated bus.
+The model now loads DRAM through a backdoor (`standalone/README.md`): 1 step takes about 2.5
+minutes, 2 steps about 4.5.
 
 The board ran the 100 steps in 44.5 M cycles (0.89 s at 50 MHz); loading the 3.75 MiB image over
 UART TSI takes most of the 49 s wall time. Its final chunk and all 100 velocities equal the
@@ -145,6 +147,79 @@ arithmetic and LeRobot's sampler, with the same random weights and inputs.
 The conditioning vector's error is the encoder's FP8 quantization (the fake quant is within
 0.1 point of Atlas); the DiT then turns it into a 1.5% error on the chunk.
 
+## Instruction scheduling (2026-10-24)
+
+The core issues in program order and holds each instruction until its unit and its operands are
+free (docs/interlock.md). The kernels emit their work one unit at a time, so in program order the
+VPU, the LSU, `mxu1` and the DMA mostly take turns: 95% of a step's cycles were stalls.
+`ditflow/sched.py` reorders each basic block when `Builder.finish()` returns the program:
+
+- `OPS` gives the operands of every instruction that ditflow emits. From it the scheduler makes
+  the dependency graph of a block: m-registers (a BF16 pair is two), accumulators, weight slots,
+  scale and scalar registers, and VMEM. A VMEM address is exact when its base register has a
+  known value (the segment registers, or a value set earlier in the block). Other addresses can
+  alias any address. A DMA transfer touches its VMEM range when it issues and again at its
+  `DMA.WAIT`, and each DMA channel keeps its order. DRAM has no address tracking: a load of DRAM
+  stays behind the `DMA.WAIT` of an earlier store, and a store stays behind the `DMA.WAIT` of an
+  earlier load. Labels, branches with their delay slots, CSR
+  accesses, `ECALL` and instructions that are not in `OPS` stay in place.
+- `Machine` is a model of the interlock. It gives the cycle in which the core issues each
+  instruction: unit occupancy, register reservations on the 64 registers and the 32 physical
+  banks, the VPU's two slots, `mxu1`'s ports and paths, the LSU's bank rule, and the DMA. The
+  latencies come from npu-model/docs/rtl-timing.md and the RTL.
+- Of the ready instructions, the scheduler takes the one that the core can issue first. On a
+  tie, it takes the one with the longest dependent path to the end of the block.
+
+The schedule does not change the arithmetic, so the outputs stay bit-identical.
+`build --no-sched` keeps the program order. `tests/test_sched.py` compares scheduled and
+unscheduled programs bit for bit under five DMA timing models: the source read and the
+destination write of each transfer happen at issue or at its `DMA.WAIT`. Directed tests cover the
+DRAM order across `DMA.WAIT`, which the DiT and the policy do not exercise.
+
+Four compiler changes come with the scheduler:
+
+- `ada_t` runs on one row tile again. On 2026-10-22 it moved to the looped `linear_rows` (so that
+  the policy fits IMEM), which took only row pairs: a padding row tile cost 384 matmuls per step.
+  `linear_rows` now also takes one row tile.
+- The register pool gives the register that was freed longest ago, so consecutive tiles use
+  different registers. Pairs come from m0-m31 and single registers from m32-m63 first. Thus two
+  pairs never share a physical bank, which a two-source VPU instruction cannot read.
+- A linear with an FP8 epilogue (`up`, `time1`, `time2`) puts the FP8 store of each tile, which
+  borrows an accumulator, after the next tile's pop of that accumulator. The next tile's
+  matmuls then run during the epilogue's GELU on the VPU.
+- The DiT's two weight staging buffers each start a VMEM bank of their own. The LSU has priority
+  on a bank, so a DMA into a staging buffer waited for each vload from the same bank. VMEM use
+  goes from 754 KiB to 1,058 KiB.
+
+Verilator `ipt-nvfp4` with every RTL assertion enabled. In every run, every output word equals
+the golden, and the goldens of all builds are identical:
+
+| Build | 1 step | 2 steps | step 2 (2 - 1) |
+|---|---|---|---|
+| before (`630722d`) | 576,280 | 1,045,425 | 469,145 |
+| `ada_t` on one row tile | 532,057 | 986,166 | 454,109 |
+| + register pool, deferred FP8 stores, banked staging (`--no-sched`) | 504,847 | 942,262 | 437,415 |
+| + scheduling (the default) | 378,496 | 694,553 | 316,057 |
+
+Performance counters of step 2 (2 steps minus 1 step), in % of its cycles:
+
+| | cycles | stall_unit | stall_data | stall_dma | vpu_busy | vload_busy | mxu1_busy | mxu1_feed | dma_busy |
+|---|---|---|---|---|---|---|---|---|---|
+| before | 469,145 | 68.5 | 26.0 | 1.1 | 45.7 | 35.2 | 36.8 | 27.7 | 33.5 |
+| scheduled | 316,057 | 80.6 | 13.0 | 0.0 | 66.5 | 52.2 | 52.9 | 37.3 | 28.5 |
+
+The work of each unit stays almost the same (VPU 214 K to 210 K cycles, MXU feed 130 K to 118 K
+without the padding tile). It now overlaps. So 100 steps take about 31.7 M cycles in Verilator
+(step 1 plus 99 times step 2), 0.63 s at 50 MHz. With the DMA at the Verilator DRAM's rate (one
+beat per cycle), `Machine` gives 378,828 cycles for the scheduled 1-step program, against 378,496
+measured. The scheduler itself assumes half that DMA rate (`sched.py`, `DMA_BEAT`). With the
+measured rate it leaves the DMA too little slack: 380,172 cycles for 1 step, 317,733 for step 2.
+
+The whole policy (encoder and 1 sampler step) in the same Verilator model takes 10,771,167
+cycles before, 10,647,881 with `--no-sched` and 9,901,025 scheduled (-8.1%). Every output word,
+the pooled tokens too, equals the golden. The encoder gains less (about 7%) than the sampler: its
+kernels loop at run time, and the scheduler does not move work across a loop iteration.
+
 ## Usage
 
 Python 3.14 with torch, lerobot 0.6.1 (only its DiT module is imported), npu-model and
@@ -166,7 +241,8 @@ $PY -m ditflow.flow report ../../build/dit/small
 ```
 
 `build --steps N` compiles the first N steps of the same schedule; that is how the Verilator
-model runs it in minutes. `build --policy` builds the whole policy (encoder + sampler); its
+model runs it in minutes. `build --no-sched` keeps the program order ("Instruction
+scheduling"). `build --policy` builds the whole policy (encoder + sampler); its
 image needs the DDR4 board or a Verilator model with `DRAM_LINE_W=21`. `golden` also writes `bundle_checked.json`, which is the bundle with
 the golden as its DRAM checks, so `standalone/host/run_tests.py --sim/--board` can verify it.
 
@@ -189,6 +265,7 @@ functional model (docs/interlock.md, "Randomized hazard test").
 - `ditflow/loopk.py`: the same kernels looping at run time, for the encoder's long sequences.
 - `ditflow/vision.py`, `ditflow/policy.py`: the encoder's reference, and the policy program.
 - `ditflow/compiler.py`: the sampler program.
+- `ditflow/sched.py`: the list scheduler and its model of the interlocked core.
 - `ditflow/funcsim.py`, `ditflow/numerics.py`: the functional model.
 - `ditflow/flow.py`: the command line.
 - `ditflow/hazfuzz.py`: the randomized hazard test of the interlock.
@@ -202,6 +279,15 @@ functional model (docs/interlock.md, "Randomized hazard test").
 - The encoder's GELU (exact in DINOv3 and `QueryPool`) is evaluated in its tanh form, as the
   time MLP's is.
 - The program targets the interlocked core (`pipeline-interlock` and later) and emits no
-  `DELAY`. Upstream Atlas would need a scheduler.
-- Performance is untuned. A step takes ~445 K cycles, against ~130 K of MXU work: in-order
-  issue serializes the VPU (~3,000 BF16 ops per step), vload (~5,400 per step) and MXU streams.
+  `DELAY`. Upstream Atlas would also need `DELAY`s, which `sched.py` does not emit.
+- A step takes 316 K cycles, and the VPU is busy for 66% of them (210 K). More speed needs less
+  VPU work (vector-scalar operands, a fused GELU, a scale on `vmatpop.bf16`) or overlap across
+  loop iterations: the scheduler stays inside a basic block, so the encoder's looped kernels
+  (`loopk.py`) gain less. `down` loads its activations again for every output tile, as 64 FP8
+  tiles do not fit the registers.
+- The scheduler moves only the instructions in `OPS`; others stay in place. New instructions
+  need a row there, and some need more of the model. An op on fewer than 32 rows (a row count)
+  holds its unit and registers for fewer cycles, and a write of some rows also reads the rest
+  of the register. A row-broadcast operand reads one row, and a vector-scalar op can use the
+  VPU's second slot. A scaled pop reads a scale register and waits for a pending `seld`. The
+  NVFP4 MXU (2- and 4-register transfers, the scale sidecar) and `mxu0` are not in `OPS` yet.

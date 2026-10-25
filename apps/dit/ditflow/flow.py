@@ -1,6 +1,7 @@
 """The DiT-on-Atlas flow: build, golden, run, report.
 
     python -m ditflow.flow build  OUT [--preset small] [--steps N] [--seed S] [--input-seed I] [--policy]
+                                      [--no-sched]
     python -m ditflow.flow golden OUT                 # functional model, bit-exact with the RTL
     python -m ditflow.flow run    OUT --board [--port TTY] | --eth [IP] | --sim ATLAS_SIM
     python -m ditflow.flow report OUT
@@ -8,7 +9,8 @@
 build writes OUT/program.S, OUT/bundle.json (program words and DRAM preload, the format
 standalone/host/run_tests.py runs), OUT/compiled.pt and OUT/reference.pt: the sampler in FP32
 on LeRobot's DiffusionTransformer, and the same sampler with Atlas's FP8 quantization emulated
-in FP32 ("fake quant"). run loads the bundle into a standalone Atlas (board over UART TSI, or the
+in FP32 ("fake quant"). The program's basic blocks are list scheduled (sched.py) unless
+--no-sched. run loads the bundle into a standalone Atlas (board over UART TSI, or the
 Verilator model), reads back the action chunk and every step's velocity, and checks them
 bit for bit against the golden.
 
@@ -46,7 +48,8 @@ def preload(blobs) -> list:
     return out
 
 
-def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int, trace: bool) -> None:
+def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int, trace: bool,
+          schedule: bool = True) -> None:
     out.mkdir(parents=True, exist_ok=True)
     d = M.PRESETS[preset]
     steps = steps or d.steps
@@ -54,7 +57,7 @@ def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int,
     p = M.params(net, d)
     plan = Q.QuantPlan(p, d, Q.calibrate(p, d))
     x0, cond = Q.random_inputs(d, input_seed)
-    c = C.compile_dit(d, plan, x0, cond, steps=steps, trace=trace)
+    c = C.compile_dit(d, plan, x0, cond, steps=steps, trace=trace, schedule=schedule)
     words = assemble(c.source)
     assert len(words) <= 32768, f"{len(words)} instructions do not fit the 128 KiB IMEM"
     (out / "program.S").write_text(c.source)
@@ -80,7 +83,8 @@ def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int,
           f"VMEM {c.manifest['vmem_bytes'] / 1024:.0f} KiB, {steps} steps")
 
 
-def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace: bool) -> None:
+def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace: bool,
+                 schedule: bool = True) -> None:
     from . import policy as P
     from . import vision as V
     out.mkdir(parents=True, exist_ok=True)
@@ -90,7 +94,8 @@ def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace
     dp, vp = M.params(net, d), V.params(enc, v)
     plans = P.PolicyPlans(vp, dp, v, d)
     views, state, x0 = P.random_observation(v, d, input_seed)
-    prog = P.PolicyProgram(v, plans.vision, d, plans.dit, views, state, x0, steps=steps, trace=trace)
+    prog = P.PolicyProgram(v, plans.vision, d, plans.dit, views, state, x0, steps=steps, trace=trace,
+                           schedule=schedule)
     c = prog.compile()
     words = assemble(c.source)
     assert len(words) <= 32768, f"{len(words)} instructions do not fit the 128 KiB IMEM"
@@ -247,6 +252,7 @@ def main(argv=None) -> None:
     b.add_argument("--input-seed", type=int, default=7)
     b.add_argument("--no-trace", action="store_true")
     b.add_argument("--policy", action="store_true", help="encoder + DiT (the whole policy)")
+    b.add_argument("--no-sched", action="store_true", help="keep the program order (no sched.py)")
     g = sub.add_parser("golden")
     g.add_argument("out", type=Path)
     r = sub.add_parser("run")
@@ -261,9 +267,9 @@ def main(argv=None) -> None:
     p.add_argument("out", type=Path)
     a = ap.parse_args(argv)
     if a.cmd == "build" and a.policy:
-        build_policy(a.out, a.steps, a.seed, a.input_seed, not a.no_trace)
+        build_policy(a.out, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched)
     elif a.cmd == "build":
-        build(a.out, a.preset, a.steps, a.seed, a.input_seed, not a.no_trace)
+        build(a.out, a.preset, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched)
     elif a.cmd == "golden":
         golden(a.out)
     elif a.cmd == "run":

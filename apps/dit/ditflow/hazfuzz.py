@@ -70,7 +70,7 @@ class Gen:
         self.fp8_units = [u for u in units if u in ("mxu0", "mxu1")]
         self.nv = "nv" in units
         self.spaced = spaced
-        self.b = Builder()
+        self.b = Builder(schedule=False)
         self.b.begin()
         self.rtype: dict[int, str] = {}        # per register: "fp8", "bf16" or "fp32"
         self.rbound: dict[int, float] = {}     # and a log2 magnitude bound
@@ -415,7 +415,7 @@ def directed_vload_war() -> dict:
     vadd.bf16 m8, m2, m6 reads m2 for 32 cycles, then m3. A vload of m3 right after it must wait
     for that read (WAR); if it does not, m9 = Z + B_hi instead of A_hi + B_hi."""
     from .flow import assemble, preload
-    b = Builder()
+    b = Builder(schedule=False)
     b.begin()
     gen = torch.Generator().manual_seed(1)
     tiles = {}
