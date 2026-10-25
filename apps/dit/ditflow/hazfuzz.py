@@ -1,8 +1,9 @@
 """Randomized hazard test of the interlock.
 
 Each program is a random stream of dependent tensor instructions with no DELAY: vload, vstore,
-VPU operations (with the .vx and .vr forms), MXU push / matmul / pop, and XLU transposes, over 20
-registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a bank) and a few VMEM tiles.
+VPU operations (with the .vx and .vr forms, and vgelu), MXU push / matmul / pop, and XLU
+transposes, over 20 registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a bank) and a few
+VMEM tiles.
 Instructions are biased to read or overwrite what the previous ones touch, so RAW, WAR and WAW
 hazards on MREG registers, weight slots, accumulators and VMEM tiles are frequent. A .vx often
 reads x4 right after a scalar load writes it. The program ends by storing every register and the
@@ -47,7 +48,7 @@ NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
 
 VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vminimum.bf16", "vmaximum.bf16")
 SCALARS = (0.5, -1.25, 3.0, 0.0078125)                        # .vx operands, |s| < 2^2
-VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16")
+VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16", "vgelu.bf16")
 
 
 def fp8_codes(n: int, gen: torch.Generator) -> torch.Tensor:
@@ -229,7 +230,8 @@ class Gen:
         if a is None:
             return False
         ba = self.rbound[a]
-        bound = {"vsquare.bf16": 2 * ba, "vredsum.row.bf16": ba + 5, "vredmax.row.bf16": ba}[op]
+        bound = {"vsquare.bf16": 2 * ba, "vredsum.row.bf16": ba + 5, "vredmax.row.bf16": ba,
+                 "vgelu.bf16": ba}[op]
         if bound > MAX_BOUND:
             return False
         dst = self.pick(PAIRS)

@@ -38,10 +38,11 @@ class Op:
     roles: str
     lat: int = 1                # cycles from issue to the last write, inclusive
     cls: str = ""               # VPU lane box: two ops of one class never share the VPU
+    reads: int = 0              # VPU: cycles from issue until the sources are free, if not lat - 1
 
 
-def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False) -> Op:
-    return Op("vpu2" if both else "vpu", roles, lat, cls)
+def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False, reads: int = 0) -> Op:
+    return Op("vpu2" if both else "vpu", roles, lat, cls, reads)
 
 
 # Operand roles: x scalar register, e scale register, m m-register, M BF16 pair (m, m+1), R row 0
@@ -73,6 +74,7 @@ OPS = {
     "vexp.bf16": _vpu("Mw Mr", "exp"), "vtanh.bf16": _vpu("Mw Mr", "tanh"),
     "vsin.bf16": _vpu("Mw Mr", "sincos"), "vcos.bf16": _vpu("Mw Mr", "sincos"),
     "vrecip.bf16": _vpu("Mw Mr", "rcp"), "vsqrt.bf16": _vpu("Mw Mr", "sqrt"),
+    "vgelu.bf16": _vpu("Mw Mr", "gelu", 75, reads=65),
     "vli.all": _vpu("Mw i", "vli", 65), "vli.col": _vpu("mw i", "vli", 33),
     "vtrpose.xlu": Op("xlu", "mw mr", 66),
     "vmatpush.weight.mxu1": Op("push", "ww mr", 33),
@@ -226,7 +228,8 @@ class Block:
             elif op.unit == "xlu":
                 c = 33 if read else op.lat
             elif op.unit in ("vpu", "vpu2") and read:
-                c = 33 if op.lat < 65 else op.lat - 1    # a row reduction reads both halves at once
+                # a row reduction reads both halves at once
+                c = 33 if op.lat < 65 else op.reads or op.lat - 1
             elif op.unit in ("vpu", "vpu2", "vload", "vstore"):
                 c = op.lat
             else:                                        # mxu1 streams rows T+1 .. T+32

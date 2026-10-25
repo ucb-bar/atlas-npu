@@ -179,6 +179,43 @@ def test_broadcast_forms():
     check(source, blobs, [(DRAM + 0x1000, 8192)])
 
 
+def test_vgelu():
+    """vgelu.bf16 reads T(vs1) for 64 cycles and writes T(vd) up to 75 cycles after issue: a later
+    vload into its source stays behind its reads, a reader of its result behind its writes, and the
+    scheduled program computes what the program order computes."""
+    g = torch.Generator().manual_seed(5)
+    source = f"""    LI x20, 0
+    LI x5, 0
+    dma.config x5, ch0
+    LI x1, 0
+    LI x2, {DRAM:#x}
+    LI x3, 2048
+    dma.load x1, x2, x3, ch0
+    dma.wait ch0
+    vload m0, 0(x20)
+    vload m1, 8(x20)
+    vgelu.bf16 m4, m0
+    vtanh.bf16 m6, m0
+    vload m0, 8(x20)
+    vgelu.bf16 m8, m0
+    vgelu.bf16 m4, m4
+    vstore m4, 0(x20)
+    vstore m5, 8(x20)
+    vstore m6, 16(x20)
+    vstore m7, 24(x20)
+    vstore m8, 32(x20)
+    vstore m9, 40(x20)
+    LI x1, 0
+    LI x2, {DRAM + 0x1000:#x}
+    LI x3, 6144
+    dma.store x2, x1, x3, ch3
+    dma.wait ch3
+    ECALL
+"""
+    blobs = [("d", DRAM, (torch.randn(1024, generator=g) * 4).to(torch.bfloat16).view(torch.uint8).numpy().tobytes())]
+    check(source, blobs, [(DRAM + 0x1000, 6144)])
+
+
 def test_instruction_after_a_branch_is_scheduled():
     """No delay slot: the instruction after a branch starts the next block, so it can move."""
     branch, pop, exp = "    BEQ x0, x0, L1\n", "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n"
