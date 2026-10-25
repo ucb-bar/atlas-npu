@@ -88,8 +88,10 @@ DRAM (`DRAM_LINE_W=21`).
   timestep tile is built by reducing one element over rows and columns. The conditioning row is
   replicated exactly with `E @ Z^T`, where E is the FP8 tile with ones in column 0.
 - The time MLP's exact GELU is evaluated in its tanh form, the only one the VPU has.
-- VPU additions truncate to BF16, which would bias 100 accumulated Euler steps, so x is carried
-  as a compensated hi + lo pair. dt = 0.01 is applied as two BF16 factors.
+- BF16 additions would lose most of each small Euler step over 100 steps, so x is carried as a
+  compensated hi + lo pair. VPU additions round to nearest even (ISA v2), so lo is the exact
+  error of each step's sum when |x| >= |dt * v| (Fast2Sum). dt = 0.01 is applied as two BF16
+  factors.
 
 ## Results (2026-10-22)
 

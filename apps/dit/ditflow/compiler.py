@@ -16,7 +16,9 @@ Numbers on Atlas:
   reducing a single element over rows and columns, and the conditioning row is replicated
   exactly through the MXU (E @ Z^T, E the FP8 tile with ones in column 0).
 - The time MLP's exact GELU is evaluated in its tanh form, the only one the VPU has.
-- VPU adds truncate, so x is carried as hi + lo BF16 (a compensated sum) across the 100 steps.
+- BF16 keeps 8 significant bits, so x is carried as hi + lo BF16 (a compensated sum) across the
+  100 steps. VPU adds round to nearest even, so lo is the exact error of hi + d when |hi| >= |d|
+  (Fast2Sum).
 """
 import math
 from dataclasses import dataclass, field

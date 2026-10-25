@@ -8,12 +8,10 @@ silently diverge from the RTL on ties, ±0, and the bitwise NaN ordering.
 
 There is intentionally no `bf16_add` / `bf16_sub` here. AddSubSumVec.scala
 runs every add/sub/rsum through `VectorAddRecFN(8, BF16.sigWidth + 16 = 24)`
-— i.e. FP32-precision adders — and extracts the BF16 result via a *raw*
-upper-16-bit slice (`fNFromRecFN(8, 24, v)(31, 16)`), NOT a second
-RNE-to-BF16 rounding pass. A naive `bf16_to_f32 -> f32_add -> f32_to_bf16_rne`
-helper double-rounds on the half-ULP cases that AddRecFN has already pinned
-down; use `fp32_bits_from_bf16 + fp32_bits_add/sub + bf16_upper_half_of_fp32_bits`
-instead. `bf16_mul` is fine — `MulRec.scala` lives entirely at BF16 precision
+— i.e. FP32-precision adders. Add/sub round that FP32 result to BF16, nearest
+even (`fp32_bits_add/sub + f32_to_bf16_bits_rne`); the column sum takes its
+raw upper 16 bits (`bf16_upper_half_of_fp32_bits`). `bf16_mul` is fine —
+`MulRec.scala` lives entirely at BF16 precision
 (`MulRawFN(8,8)` + `RoundRawFNToRecFN(8,8,0)`), which the FP32-mul + RNE
 round-trip matches exactly.
 """

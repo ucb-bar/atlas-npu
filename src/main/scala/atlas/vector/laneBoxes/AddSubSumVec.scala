@@ -130,7 +130,16 @@ class AddSubSumVec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) e
     val isAddSubValid = (isValidStage1 && !isSumStage1)
     val isReduSumValid = (isValidStage4 && isSumStage4)
     val resValid = isAddSubValid || isReduSumValid
-    val addSubOut = VecInit(addSubResultNext.map(v => fNFromRecFN(BF16T.expWidth, computeSigWidth, v)(31,16)))
+    // Round the FP32 sum to BF16, nearest even. FP32 has more than 2 x 8 + 1 significand bits, so
+    // the two roundings give BF16_RNE of the exact sum (Figueroa, "When is double rounding
+    // innocuous?", 1995).
+    val addSubOut = VecInit(addSubResultNext.map { v =>
+        val toBF16 = Module(new RecFNToRecFN(BF16T.expWidth, computeSigWidth, BF16T.expWidth, BF16T.sigWidth))
+        toBF16.io.in := v
+        toBF16.io.roundingMode := round_near_even
+        toBF16.io.detectTininess := tininess_afterRounding
+        fNFromRecFN(BF16T.expWidth, BF16T.sigWidth, toBF16.io.out)
+    })
     val reduSumOut = VecInit(Seq.fill(numLanes)(fNFromRecFN(BF16T.expWidth, computeSigWidth, reduceSumStage3Next)(31,16))) 
 
     // Assigning outputs

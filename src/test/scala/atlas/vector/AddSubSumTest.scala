@@ -102,13 +102,15 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       // Generate Input Vectors
       // aVec: 1.0, 2.0, 3.0 ... 16.0
-      // bVec: 0.5, 0.5, 0.5 ... 0.5
+      // bVec: 1.5, 3.0, 4.5 ... 24.0 times 2^-8: the exact a + b and a - b fall between
+      // BF16 values, and some on ties, so truncation and nearest even differ.
       val aVals = Seq.tabulate(numLanes)(i => (i + 1).toDouble)
-      val bVals = Seq.fill(numLanes)(0.5)
+      val bVals = Seq.tabulate(numLanes)(i => (i + 1) * 1.5 * math.pow(2, -8))
 
-      // Calculate Expected Outputs
-      val expectedAdd = aVals.zip(bVals).map { case (a, b) => a + b }
-      val expectedSub = aVals.zip(bVals).map { case (a, b) => a - b }
+      // Calculate Expected Outputs: add and sub round the exact result to nearest even.
+      def rne(d: Double): Double = bf16IntToDouble(VectorTestUtils.fpToBf16(d.toFloat) & 0xFFFF)
+      val expectedAdd = aVals.zip(bVals).map { case (a, b) => rne(a + b) }
+      val expectedSub = aVals.zip(bVals).map { case (a, b) => rne(a - b) }
       val expectedSum = Seq.fill(numLanes)(aVals.sum)
 
       // Test sequence: (Operation Name, isSub, isSum, Expected Results)
@@ -159,7 +161,7 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             val actual = bf16IntToDouble(resultBits)
 
             println(f"  Lane $i%2d | Actual: $actual%7.4f (Expected: ${expected(i)}%7.4f)")
-            actual should be (expected(i) +- 0.1) 
+            actual should be (expected(i))
           }
           resultsFound += 1
         }

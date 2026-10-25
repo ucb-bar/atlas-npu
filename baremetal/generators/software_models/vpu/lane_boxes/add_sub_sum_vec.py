@@ -2,9 +2,11 @@
 
 Mirrors the laneBox at FP32 precision (computeSigWidth = BF16.sigWidth + 16
 = 24, which is exactly IEEE-754 binary32). Every BF16 input is widened by
-appending 16 zero bits, every adder runs in FP32, and the BF16 output is the
-*raw* upper 16 bits of the FP32 result — NOT a second RNE-to-BF16 rounding
-pass. This matches `fNFromRecFN(8, 24, v)(31, 16)` in the Scala module.
+appending 16 zero bits and every adder runs in FP32. The add/sub output is
+the FP32 result rounded to BF16, nearest even (`RecFNToRecFN(8, 24, 8, 8)`
+in the Scala module); the two roundings equal one rounding of the exact sum.
+The rsum output is the *raw* upper 16 bits of the FP32 result
+(`fNFromRecFN(8, 24, v)(31, 16)`).
 
 The rsum reduction tree pairing must match AddSubSumVec.scala bit-for-bit
 because floating-point sum is order-sensitive. The Scala adders pair
@@ -74,7 +76,7 @@ class AddSubSumVec:
                 a32 = fp.fp32_bits_from_bf16(req.aVec[i])
                 b32 = fp.fp32_bits_from_bf16(req.bVec[i])
                 s32 = f32_op(a32, b32)
-                out.append(fp.bf16_upper_half_of_fp32_bits(s32))
+                out.append(fp.f32_to_bf16_bits_rne(fp.u32_to_float(s32)))
             return AddSubSumResp(result=out)
 
         # Reduction sum (rsum). Pairing must match AddSubSumVec.scala:42-110:
