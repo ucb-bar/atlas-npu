@@ -90,7 +90,7 @@ $(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S atlas_asm.py $(wildcard \
 		echo "Error: initialize the npu-model submodule (git submodule update --init npu-model)" >&2; exit 1; }; \
 	BASE=$*; \
 	if [ ! -f "$(GEN_DIR)/gen_$$BASE.py" ]; then \
-		BASE=$$(echo $$BASE | sed -E 's/mxu[01]_/mxu_/'); \
+		BASE=$$(echo $$BASE | sed -E 's/mxu1_/mxu_/'); \
 	fi; \
 	if [ -f "$(GEN_DIR)/gen_$$BASE.py" ]; then \
 		echo "--> Using generator gen_$$BASE.py for test $*"; \

@@ -6,11 +6,11 @@
 # Required env: NAME, GEN_DIR, TESTS_DIR, ASM_DIR, BUILD_DIR, SIMV
 set -u
 
-# Some tests fall back to a prefix-stripped generator name (mxu0_*/mxu1_* → mxu_*),
+# Some tests fall back to a prefix-stripped generator name (mxu1_* → mxu_*),
 # matching the Makefile's atlas_%.c pattern rule.
 GEN_BASE="$NAME"
 if [[ ! -f "$GEN_DIR/gen_$GEN_BASE.py" ]]; then
-    GEN_BASE=${NAME//mxu[01]_/mxu_}
+    GEN_BASE=${NAME//mxu1_/mxu_}
 fi
 
 GEN_PY="$GEN_DIR/gen_$GEN_BASE.py"

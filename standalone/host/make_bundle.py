@@ -42,8 +42,8 @@ def strip_delays(source):
 
 
 def generator_for(test):
-    """The Makefile's rule: gen_<test>.py, else gen_<test with mxu0_/mxu1_ -> mxu_>.py."""
-    for base in (test, re.sub(r"mxu[01]_", "mxu_", test)):
+    """The Makefile's rule: gen_<test>.py, else gen_<test with mxu1_ -> mxu_>.py."""
+    for base in (test, re.sub(r"mxu1_", "mxu_", test)):
         path = BAREMETAL / "generators" / f"gen_{base}.py"
         if path.exists():
             return path
