@@ -40,11 +40,11 @@ instruction in S1 (`ScalarCore.scala`, section "Interlock"). They fall into two 
 | LSU scalar and vector paths must not share a VMEM bank | LSU `vloadVmemBank` / `vstoreVmemBank` |
 | DMA must not overtake a VLOAD/VSTORE on the banks it touches | the same bank reports against the DMA's line range |
 | Scalar load result (no bypass) and register-file write port | pending load `rd`, response cycle |
-| `seld` result and the scale-register write port | pending `seld`, for `vpack`/`vunpack`, `vmatpop.fp8`, `seli` |
+| `seld` result and the scale-register write port | pending `seld`, for `vpack`/`vunpack`, `vmatpop.fp8`, the scaled BF16 pops, `seli` |
 
-The NVFP4 MXU (docs/nvfp4-mxu.md) exports the same `cmdReady`, its 2- and 4-register transfers
-report every register they will still touch, and `vload.scale` / `vstore.scale` count as VLOAD /
-VSTORE.
+The NVFP4 MXU (docs/nvfp4-mxu.md) exports the same `cmdReady`, the 2- and 4-register transfers
+of both MXUs report every register they will still touch, and `vload.scale` / `vstore.scale`
+count as VLOAD / VSTORE.
 
 The MXU sequencers' accept logic now also waits for these, which were only assertions
 (`AccumulationBuffers`, shared weight/accumulator push paths):
@@ -53,7 +53,11 @@ The MXU sequencers' accept logic now also waits for these, which were only asser
   accumulator push still writes (one write path each);
 - an accumulator push to `accN` while a matmul to `accN` is in flight (one write port);
 - a pop or `vmatmul.acc` of `accN` in the cycle a push writes row 0 of `accN`;
-- a pop of `accN` while a `vmatmul.acc` still reads its partial sums, and the reverse (one read port).
+- a pop of `accN` while a `vmatmul.acc` still reads its partial sums, and the reverse (one read
+  port);
+- on mxu1, a pop or `vmatmul.acc` of `accN` until an FP32 push has written row 0 in its second
+  phase, and a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase
+  (docs/fp8-mxu.md).
 
 To let back-to-back commands on one register keep their 32-cycle stride, the MXUs now report a
 port to the tracker only while it will still access its bank after the current cycle. The MXU

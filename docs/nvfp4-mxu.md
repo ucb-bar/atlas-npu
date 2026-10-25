@@ -54,7 +54,8 @@ MXU instructions use opcode custom-0 (`0x0B`, VR format: funct7, vs2, vs1, vd) w
 | `vmatpush.weight.nv w(vd), m(vs1)` | `0B/60` | `w[vd] = m[vs1]` and its scales |
 | `vmatpush.acc.bf16.nv acc(vd), m(vs1)` | `0B/61` | `acc[vd] = {m[vs1], m[vs1+1]}` (BF16, exact in FP32) |
 | `vmatpush.acc.fp32.nv acc(vd), m(vs1)` | `0B/62` | `acc[vd] = m[vs1 .. vs1+3]` (FP32) |
-| `vmatpop.bf16.acc.nv m(vd), acc(vs2)` | `0B/64` | `{m[vd], m[vd+1]} = BF16(acc[vs2])`, round to nearest even |
+| `vmatpop.bf16.acc.nv m(vd), acc(vs2)` | `0B/64` | `{m[vd], m[vd+1]} = BF16_RNE(acc[vs2])` |
+| `vmatpop.bf16.scaled.acc.nv m(vd), acc(vs2), e(es1)` | `0B/65` | `{m[vd], m[vd+1]} = BF16_RNE(acc[vs2] x 2^(e[es1] - 127))`, one rounding |
 | `vmatpop.fp32.acc.nv m(vd), acc(vs2)` | `0B/66` | `m[vd .. vd+3] = acc[vs2]` |
 | `vmatmul.nv acc(vd), m(vs1), w(vs2)` | `0B/68` | `acc[vd] = A @ W^T`, A = `m[vs1]` with its scales |
 | `vmatmul.acc.nv acc(vd), m(vs1), w(vs2)` | `0B/69` | `acc[vd] += A @ W^T` |
@@ -63,6 +64,11 @@ MXU instructions use opcode custom-0 (`0x0B`, VR format: funct7, vs2, vs1, vd) w
 
 The green card (`npu-model/npu_spec/06_instruction_set/README.md`) gives the match and mask of
 each word. A pair register `r` is even and an FP32 base `r` a multiple of 4.
+
+The BF16 pops round as mxu1's do (`docs/fp8-mxu.md`, State and instructions): BF16_RNE is
+`cvt.rn.bf16.f32` of the RTX 5090, and every NaN gives `0x7FFF` (v1 gave the input's sign and
+`0x7FC0`). The scaled pop rounds the exact product acc x 2^(e - 127) once, also to a BF16
+subnormal; a GPU epilogue (`FMUL`, then the cvt) can round two times there.
 
 `npu-model` assembles these instructions and defines their semantics
 (`npu_model/configs/isa_definition.py`, arithmetic in `npu_model/configs/nvfp4.py`). Its timing
@@ -136,9 +142,10 @@ contract:
 - Each global scale is a power of two, 2^gA for A and 2^gW for W, at least amax / (6 x 448) of
   its tensor, so that every block scale fits in UE4M3 (448 or less). Transformer Engine uses
   amax / (6 x 448) itself as the FP32 global scale.
-- After `vmatpop.bf16.acc.nv`, the epilogue multiplies by a BF16 tile of 2^(gA + gW)
-  (`vmul.bf16`). A power-of-two factor adds no rounding: BF16(acc) x 2^(gA + gW) equals
-  BF16(acc x 2^(gA + gW)) while the result stays in the BF16 normal range.
+- The epilogue applies 2^(gA + gW) with `vmatpop.bf16.scaled.acc.nv` and e = 127 + gA + gW: one
+  rounding of acc x 2^(gA + gW), also to a BF16 subnormal. `vmatpop.bf16.acc.nv` and then a
+  `vmul.bf16` by a BF16 tile of 2^(gA + gW) give the same result while the result stays in the
+  BF16 normal range: a power-of-two factor adds no rounding there.
 - The epilogue adds a bias after that scaling (`vadd.bf16`), or it preloads the bias divided by
   2^(gA + gW) into the accumulator (`vmatpush.acc.bf16.nv` or `vmatpush.acc.fp32.nv`). The
   division is exact, and the bias is then the C of the first `vmatmul.acc.nv`.
