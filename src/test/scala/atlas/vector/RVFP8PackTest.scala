@@ -188,7 +188,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       val actual = drivePairAndRead(dut, firstBf16, secondBf16, e = 127)
       expectPackedMatches(firstBf16, secondBf16, e = 127, actual, "baseline")
-    }
+    }.result
   }
 
   it should "multiply by 2^(e - 127)" in {
@@ -201,7 +201,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       val actual = drivePairAndRead(dut, row, row, e = 129)
       expectPackedMatches(row, row, e = 129, actual, "e = 129")
       actual.foreach(_ shouldBe 0x48) // 4.0
-    }
+    }.result
   }
 
   it should "keep E4M3 subnormals and round below them to nearest even" in {
@@ -221,7 +221,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       val tie   = drivePairAndRead(dut, signs, signs, e = 117)
       expectPackedMatches(signs, signs, e = 117, tie, "tie")
       tie.zipWithIndex.foreach { case (b, i) => b shouldBe (if (i % 2 == 0) 0x00 else 0x80) }
-    }
+    }.result
   }
 
   it should "saturate above 448 to max finite" in {
@@ -242,7 +242,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       val sat = drivePairAndRead(dut, big, big, e = 127)
       expectPackedMatches(big, big, e = 127, sat, "saturate")
       sat.zipWithIndex.foreach { case (b, i) => b shouldBe (if (i % 2 == 0) 0x7E else 0xFE) }
-    }
+    }.result
   }
 
   it should "use 2^128 for e = 255" in {
@@ -253,7 +253,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       // BF16 subnormal 2^-128 times 2^128 is 1.0.
       val row = Seq.fill(16)(0x0020)
       drivePairAndRead(dut, row, row, e = 255).foreach(_ shouldBe 0x38)
-    }
+    }.result
   }
 
   it should "give signed zero, 448 for Inf and 0x7F for NaN" in {
@@ -273,6 +273,6 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         }
       }
       expectPackedMatches(row, row, e = 177, actual, "specials")
-    }
+    }.result
   }
 }

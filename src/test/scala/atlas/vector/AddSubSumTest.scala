@@ -178,6 +178,6 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       resultsFound should be (requests.length)
       println(f"\n>>> TEST COMPLETE: Processed $resultsFound operations in $cycles cycles.")
-    }
+    }.result
   }
 }

@@ -131,7 +131,7 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
-        }
+        }.result
     }
 
     it should "Verify the correctness of cube" in {
@@ -197,6 +197,6 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
-        }
+        }.result
     }
 }
