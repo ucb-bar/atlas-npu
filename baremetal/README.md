@@ -20,6 +20,10 @@ PYTHONPATH=../npu-model uv run --locked --project ../npu-model --python 3.14 pyt
 
 The assembler also accepts `--out-hex`, `--out-bin`, `--dram-base`, and `--beat-bytes`. The DRAM base comes from a JSON entry when present, otherwise `@DRAM_BASE`, otherwise the CLI default. JSON preload/check data is used when supplied; inline `@DRAM` and `@CHECK_DRAM` provide the fallback when no JSON golden is supplied.
 
+`atlas_asm.py --disasm FILE` prints the assembly of a program: hex text (one word per line) or, for
+a `.bin` file, raw binary. The disassembler (`npu_model.isa.disasm`) decodes the words with the ISA
+table and puts labels at branch and jump targets. Its output assembles to the same words.
+
 3) Build:
 
 ```bash

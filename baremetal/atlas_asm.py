@@ -2,7 +2,7 @@
 """
 atlas_asm.py — Atlas baremetal harness using npu_model's assembler.
 
-Outputs hex text, raw binary or a C test harness.
+Outputs hex text, raw binary or a C test harness, or disassembles a program.
 
 Usage:
     python atlas_asm.py assembly/alu_basic.S
@@ -10,6 +10,7 @@ Usage:
     python atlas_asm.py input.S --out-bin program.bin
     python atlas_asm.py input.S --out-hex program.hex --out-bin program.bin
     python atlas_asm.py input.S --out-c header.c
+    python atlas_asm.py --disasm program.hex      # or program.bin
 """
 
 import argparse
@@ -26,6 +27,19 @@ def encode(source):
     return input_to_program(io.StringIO(source)).assemble()
 
 assemble = encode
+
+
+def disassemble_file(path):
+    """Assembly of a program in hex text (one word per line) or, for a .bin file, raw binary."""
+    from npu_model.isa.disasm import disassemble
+    with open(path, "rb") as f:
+        data = f.read()
+    if path.endswith(".bin"):
+        words = list(struct.unpack(f"<{len(data) // 4}I", data))
+    else:
+        words = [int(token, 16) for token in data.decode().split()]
+    return disassemble(words)
+
 
 def _hex_to_words(hex_str):
     """Convert an arbitrarily wide hex string to a list of 32-bit words, LSW first."""
@@ -463,7 +477,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Atlas SALU assembler — .S to hex/binary/C"
     )
-    parser.add_argument("input", help="Input .S assembly file")
+    parser.add_argument("input", help="Input .S assembly file (with --disasm: .hex or .bin program)")
     parser.add_argument("--out-hex", default=None, help="Output hex file (one 32-bit word per line)")
     parser.add_argument("--out-bin", default=None, help="Output raw binary file (little-endian 32-bit words)")
     parser.add_argument("--out-c", default=None, help="Output C file with full baremetal test")
@@ -473,7 +487,13 @@ def main():
                         help="DRAM base address for golden data (default 0x00000000)")
     parser.add_argument("--beat-bytes", type=int, default=32,
                         help="DMA beat width in bytes (default 32)")
+    parser.add_argument("--disasm", action="store_true",
+                        help="Print the assembly of the input program (hex text, or raw binary if .bin)")
     args = parser.parse_args()
+
+    if args.disasm:
+        print(disassemble_file(args.input), end="")
+        return
 
     with open(args.input, "r") as f:
         source = f.read()
