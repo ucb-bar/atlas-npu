@@ -164,3 +164,68 @@ def test_loop_kernels():
         kr.output(t)
     kr.run()
     check(kr.source, kr.b.dram.blobs, [(addr, t.nbytes) for t, addr in kr.outputs.values()])
+
+
+def issue_cycles(lines):
+    """The cycle in which Machine issues each instruction of one block, in program order."""
+    code = [S.Ins(line, *S.parse(line), S.OPS[S.parse(line)[0]]) for line in lines]
+    m, t, out = S.Machine(), 0, []
+    for ins in S.Block(code, {}).code:
+        t = m.earliest(ins, t)
+        m.issue(ins, t)
+        out.append(t)
+        t += ins.words
+    return out
+
+
+def test_machine_models_the_mxu1_fp32_transfers_and_scaled_pop():
+    """The interlock's rules for the new mxu1 transfers (docs/fp8-mxu.md)."""
+    push, pop = "vmatpush.acc.fp32.mxu1 acc0, m4", "vmatpop.fp32.acc.mxu1 m8, acc0"
+    assert issue_cycles([push, "vmatpop.bf16.acc.mxu1 m12, acc0"]) == [0, 34]  # after row 0's second write
+    assert issue_cycles([push, "vload m4, 0(x20)"]) == [0, 32]                 # m4, m5 read in T+1 .. T+32
+    assert issue_cycles([push, "vload m6, 0(x20)"]) == [0, 64]                 # m6, m7 in T+33 .. T+64
+    assert issue_cycles([pop, "vmatpush.acc.bf16.mxu1 acc0, m2"]) == [0, 33]   # after the first phase
+    assert issue_cycles([pop, "vmatmul.mxu1 acc0, m1, w0"]) == [0, 33]
+    assert issue_cycles([pop, "vexp.bf16 m20, m8"]) == [0, 32]
+    assert issue_cycles([pop, "vexp.bf16 m20, m10"]) == [0, 64]
+    assert issue_cycles([pop, "vmatpop.fp8.acc.mxu1 m12, acc1, e0"]) == [0, 64]  # both write ports
+    assert issue_cycles(["seli e1, 3", "vmatpop.bf16.scaled.acc.mxu1 m8, acc0, e1",
+                         "vmatpop.fp8.acc.mxu1 m12, acc1, e0"]) == [0, 1, 33]
+
+
+def test_fp32_spill_and_scaled_pop_schedule():
+    """A block with the new mxu1 transfers computes the same after scheduling."""
+    body = """    LI x1, 0
+    LI x3, 4096
+    dma.load x1, x2, x3, ch0
+    dma.wait ch0
+    vload m0, 0(x20)
+    vload m1, 8(x20)
+    vload m2, 16(x20)
+    seli e1, 120
+    vmatpush.weight.mxu1 w0, m1
+    vmatmul.mxu1 acc0, m0, w0
+    vmatpop.fp32.acc.mxu1 m8, acc0
+    vmatpush.acc.fp32.mxu1 acc1, m8
+    vmatmul.acc.mxu1 acc1, m0, w0
+    vmatpop.bf16.scaled.acc.mxu1 m12, acc1, e1
+    vexp.bf16 m14, m2
+    vstore m8, 32(x20)
+    vstore m9, 40(x20)
+    vstore m10, 48(x20)
+    vstore m11, 56(x20)
+    vstore m12, 64(x20)
+    vstore m13, 72(x20)
+    vstore m14, 80(x20)
+    vstore m15, 88(x20)
+    LI x1, 1024
+    LI x2, 0x80002000
+    dma.store x2, x1, x3, ch1
+    LI x1, 2048
+    LI x2, 0x80003000
+    dma.store x2, x1, x3, ch2
+    dma.wait ch1
+    dma.wait ch2"""
+    g = torch.Generator().manual_seed(9)
+    blobs = [("d", DRAM, bytes(torch.randint(0, 256, (4096,), generator=g, dtype=torch.uint8).tolist()))]
+    check(dram_program(body), blobs, [(DRAM + 0x2000, 8192)])

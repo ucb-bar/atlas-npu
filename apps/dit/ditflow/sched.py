@@ -45,8 +45,9 @@ def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False) -> Op:
 
 
 # Operand roles: x scalar register, e scale register, m m-register, M BF16 pair (m, m+1),
-# a accumulator, w weight slot, each followed by r (read), w (write) or rw; v VMEM tile and
-# s scalar VMEM access, both imm(x), followed by r or w; c DMA channel; i immediate.
+# Q FP32 quad (m .. m+3), a accumulator, w weight slot, each followed by r (read), w (write) or
+# rw; v VMEM tile and s scalar VMEM access, both imm(x), followed by r or w; c DMA channel;
+# i immediate.
 # Latencies: npu-model/docs/rtl-timing.md and npu_model/hardware (vpu.py, mxu.py).
 OPS = {
     "LI": Op("alu", "xw i"), "ADDI": Op("alu", "xw xr i"), "ADD": Op("alu", "xw xr xr"),
@@ -70,10 +71,13 @@ OPS = {
     "vtrpose.xlu": Op("xlu", "mw mr", 66),
     "vmatpush.weight.mxu1": Op("push", "ww mr", 33),
     "vmatpush.acc.bf16.mxu1": Op("pushacc", "aw Mr", 33),
+    "vmatpush.acc.fp32.mxu1": Op("pushacc", "aw Qr", 65),
     "vmatmul.mxu1": Op("mm", "aw mr wr", 35),
     "vmatmul.acc.mxu1": Op("mm", "arw mr wr", 35),
     "vmatpop.fp8.acc.mxu1": Op("pop", "mw ar er", 33),
     "vmatpop.bf16.acc.mxu1": Op("pop", "Mw ar", 33),
+    "vmatpop.bf16.scaled.acc.mxu1": Op("pop", "Mw ar er", 33),
+    "vmatpop.fp32.acc.mxu1": Op("pop", "Qw ar", 65),
 }
 
 
@@ -147,9 +151,9 @@ class Block:
             if kind in "xe":
                 if s != "x0":
                     (ins.reads if acc == "r" else ins.writes).append(s)
-            elif kind in "mM":
+            elif kind in "mMQ":
                 n = _num(s)
-                regs = [f"m{n}", f"m{n + 1}"] if kind == "M" else [f"m{n}"]
+                regs = [f"m{n + i}" for i in range({"m": 1, "M": 2, "Q": 4}[kind])]
                 (ins.reads if acc == "r" else ins.writes).extend(regs)
             elif kind in "aw":
                 if kind == "a":
@@ -204,10 +208,11 @@ class Block:
 
     def _reserve(self, ins: Ins) -> None:
         """m-register reservations: (register, cycles from issue until it is free). The VPU holds
-        both registers of a pair until it has read, or written, all 64 rows."""
+        both registers of a pair until it has read, or written, all 64 rows. An mxu1 FP32 transfer
+        streams m, m+1 in T+1 .. T+32 and m+2, m+3 in T+33 .. T+64."""
         op = ins.op
         for role, s in zip(op.roles.split(), ins.args):
-            if role[0] not in "mM":
+            if role[0] not in "mMQ":
                 continue
             n, read = _num(s), role[1] == "r"
             if op.unit == "xlu":
@@ -218,8 +223,11 @@ class Block:
                 c = op.lat
             else:                                        # mxu1 streams rows T+1 .. T+32
                 c = 32
-            regs = [n, n + 1] if role[0] == "M" else [n]
-            (ins.rr if read else ins.rw).extend((r, c) for r in regs)
+            if role[0] == "Q":
+                regs = [(n + i, 32 * (1 + i // 2)) for i in range(4)]
+            else:
+                regs = [(r, c) for r in ([n, n + 1] if role[0] == "M" else [n])]
+            (ins.rr if read else ins.rw).extend(regs)
 
     def _propagate(self, ins: Ins) -> None:
         a, k = ins.args, self.known
@@ -339,16 +347,17 @@ class Machine:
         elif u == "xlu":
             e = max(e, f["xlu"])
         elif u == "mm":
-            e = max(e, f["P0"], f["row0", b], f["wpush", ins.slot], f["pushacc", b])
+            e = max(e, f["P0"], f["row0", b], f["wpush", ins.slot], f["pushacc", b],
+                    f["popfirst", b])
             if ins.name == "vmatmul.acc.mxu1":
                 e = max(e, f["pop", b])
         elif u == "push":
             e = max(e, min(f["P0"], f["P1"]), f["wpath"], f["wread", ins.slot])
         elif u == "pushacc":
-            e = max(e, f["P0"], f["P1"], f["row0", b], f["accpath"], f["mm", b])
+            e = max(e, f["P0"], f["P1"], f["row0", b], f["accpath"], f["mm", b], f["popfirst", b])
         elif u == "pop":
             e = max(e, f["W0"], f["row0", b], f["pushrow0", b], f["psum", b])
-            if ins.name == "vmatpop.bf16.acc.mxu1":
+            if ins.op.roles[0] in "MQ":                  # BF16 and FP32 pops take both write ports
                 e = max(e, f["W1"])
         elif u in ("dma", "wait"):
             e = max(e, f[ins.args[-1]])
@@ -387,13 +396,15 @@ class Machine:
         elif u == "push":
             f["P1" if f["P1"] <= T else "P0"] = T + 32
             f["wpath"], f["wpush", ins.slot] = T + 32, T + 31
-        elif u == "pushacc":
-            f["P0"] = f["P1"] = f["accpath"] = f["pushacc", b] = T + 32
-            f["pushrow0", b] = T + 2
+        elif u == "pushacc":                             # rows land at T+1 .. T+32 (FP32: twice)
+            f["P0"] = f["P1"] = f["accpath"] = f["pushacc", b] = T + ins.lat - 1
+            f["pushrow0", b] = T + ins.lat - 31          # after the last write of row 0
         elif u == "pop":
-            f["W0"] = f["pop", b] = T + 32
-            if ins.name == "vmatpop.bf16.acc.mxu1":
-                f["W1"] = T + 32
+            f["W0"] = f["pop", b] = T + ins.lat - 1
+            if ins.op.roles[0] in "MQ":
+                f["W1"] = T + ins.lat - 1
+            if ins.op.roles[0] == "Q":                   # rows are read again in T+33 .. T+64
+                f["popfirst", b] = T + 33
         elif u == "dma":
             start = max(T + 1, self.dma)
             self.dma = start + ins.beats * DMA_BEAT
