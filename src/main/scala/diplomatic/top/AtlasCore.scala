@@ -158,7 +158,7 @@ class AtlasCore(
   // Utility
   // ==========================================================================
 
-  def makeVpuStatus(busy: Bool, issueBusy: UInt): VpuStatus = {
+  def makeVpuStatus(busy: Bool, issueBusy: Vec[UInt]): VpuStatus = {
     val s = Wire(new VpuStatus)
     s.busy      := busy
     s.done      := !busy

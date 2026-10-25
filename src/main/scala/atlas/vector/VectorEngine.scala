@@ -17,6 +17,7 @@ package atlas.vector
 import chisel3._
 import chisel3.util._
 import atlas.common.VpuParams
+import atlas.scalar.ScalarISA.{VSRC_XREG, VSRC_ROW0}
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 
@@ -31,7 +32,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
 			val write2 = Output(Valid(new RegFileWriteReq()))
       val activeReads  = Output(Vec(4, Valid(UInt(6.W))))
       val activeWrites = Output(Vec(4, Valid(UInt(6.W))))
-      val issueBusy = Output(UInt((VPUOp.all.size + 1).W))
+      val issueBusy = Output(Vec(3, UInt((VPUOp.all.size + 1).W)))
+      val row0Resp  = Output(Bool())   // the read responses of this cycle are row 0 of a .vr's T(vs2)
       val busy   = Output(Bool())
   })
 
@@ -56,13 +58,15 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   // Commands launch directly; illegal timing is caught by the assert below.
   fsm.io.in.instFire               := io.inst.valid
   fsm.io.in.instType               := io.inst.bits.instType
+  fsm.io.in.instSrc                := io.inst.bits.src
   fsm.io.in.instReadBank1          := io.inst.bits.instReadBank1
   fsm.io.in.instReadBank2          := io.inst.bits.instReadBank2
   fsm.io.in.instWriteBank          := io.inst.bits.instWriteBank
   fsm.io.in.instPackScaleE8M0      := io.inst.bits.packScaleE8M0
   fsm.io.in.instUnpackScaleE8M0    := io.inst.bits.unpackScaleE8M0
-  fsm.io.in.dataInFire1            := dataInFire1
-  fsm.io.in.dataInFire2            := dataInFire2
+  // The row 0 responses of a .vr count as its slot's first read.
+  fsm.io.in.dataInFire1            := dataInFire1 || fsm.io.out.row0Resp1
+  fsm.io.in.dataInFire2            := dataInFire2 || fsm.io.out.row0Resp2
   fsm.io.in.dataOutFire1           := dataOutFire1
   fsm.io.in.dataOutFire2           := dataOutFire2
   fsm.io.in.divSqrtReady           := divSqrtReady
@@ -160,6 +164,21 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
 	val vector2 = io.data2.bits.data.asTypeOf(Vec(p.numLanes, UInt(p.wordWidth.W)))
   val pairRowReduceInput = VecInit(vector1 ++ vector2)
 
+  // The second operand of each slot's two-input op: the row of T(vs2) on read port 2 (.bf16, which
+  // uses both slots), the .vx scalar in every lane, or row 0 of the register of T(vs2) that matches
+  // the register of T(vs1) that the row comes from (.vr).
+  val row0Lo = Reg(UInt(256.W))
+  val row0Hi = Reg(UInt(256.W))
+  when(io.row0Resp) {
+    row0Lo := io.data1.bits.data
+    row0Hi := io.data2.bits.data
+  }
+  private def second(src: UInt, imm: SInt, hi: Bool): Vec[UInt] = MuxLookup(src, vector2)(Seq(
+    VSRC_XREG -> VecInit.fill(p.numLanes)(imm.asUInt),
+    VSRC_ROW0 -> Mux(hi, row0Hi, row0Lo).asTypeOf(vector2)))
+  val second1 = second(fsm.io.out.src1, fsm.io.out.imm1, RegNext(fsm.io.out.readBank1(0)))
+  val second2 = second(fsm.io.out.src2, fsm.io.out.imm2, RegNext(fsm.io.out.readBank2(0)))
+
   // -------------------------------------------------------------------------
   // Functional Units
   // -------------------------------------------------------------------------
@@ -171,11 +190,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   addSubSum.io.req.bits.isDoneReadingColSum   := fsm.io.out.isDoneReadingColSum
   addSubSum.io.req.bits.isSub                := isSubValid
   addSubSum.io.req.bits.isSum                := false.B
-  addSubSum.io.req.bits.aVec                 := Mux(isAddValid || isSubValid, vector1, vector2)
-  addSubSum.io.req.bits.bVec                 := MuxCase(addSubSum.io.resp.bits.result,
-                                                  Seq(
-                                                    (isAddValid || isSubValid) -> vector2
-                                                  ))
+  addSubSum.io.req.bits.aVec                 := Mux(isAdd1 || isSub1, vector1, vector2)
+  addSubSum.io.req.bits.bVec                 := Mux(isAdd1 || isSub1, second1, second2)
 
   val mul = Module(new MulRec(p.BF16))
   mul.io.req.valid             := isMulValid
@@ -184,8 +200,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   mul.io.req.bits.whichBank    := 0.U
   mul.io.req.bits.wRow         := 0.U
   mul.io.req.bits.laneMask     := 0xFFFF.U(16.W)
-  mul.io.req.bits.aVec         := vector1
-  mul.io.req.bits.bVec         := vector2
+  mul.io.req.bits.aVec         := Mux(isMul1, vector1, vector2)
+  mul.io.req.bits.bVec         := Mux(isMul1, second1, second2)
 
   val rcp = Module(new Rcp(p.BF16))
   rcp.io.req.valid             := isRcpValid
@@ -288,24 +304,26 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   pairMax.io.req.valid                       := isPairMaxValid || isCMaxValid
   pairMax.io.req.bits.isDoneReadingColMax     := fsm.io.out.isDoneReadingColMax
   pairMax.io.req.bits.laneMask               := 0xFFFF.U(16.W)
-  pairMax.io.req.bits.aVec                   := Mux(isCMax1 || isPairMaxValid, vector1, vector2)
+  pairMax.io.req.bits.aVec                   := Mux(isCMax1 || isPairMax1, vector1, vector2)
   pairMax.io.req.bits.bVec                   := MuxCase(pairMax.io.resp.bits.result,
                                                   Seq(
                                                     (isCMax1 && (fsm.io.out.readRow1 === 1.U) && !fsm.io.out.readBank1(0)) -> vector1,
                                                     (isCMax2 && (fsm.io.out.readRow2 === 1.U) && !fsm.io.out.readBank2(0)) -> vector2,
-                                                    (isPairMaxValid) -> vector2
+                                                    (isPairMax1 && io.data1.valid) -> second1,
+                                                    (isPairMax2 && io.data2.valid) -> second2
                                                   ))
 
   val pairMin = Module(new PairWiseMin(p.BF16))
   pairMin.io.req.valid                       := isPairMinValid || isCMinValid
   pairMin.io.req.bits.isDoneReadingColMin     := fsm.io.out.isDoneReadingColMin
   pairMin.io.req.bits.laneMask               := 0xFFFF.U(16.W)
-  pairMin.io.req.bits.aVec                   := Mux(isCMin1 || isPairMinValid, vector1, vector2)
+  pairMin.io.req.bits.aVec                   := Mux(isCMin1 || isPairMin1, vector1, vector2)
   pairMin.io.req.bits.bVec                   := MuxCase(pairMin.io.resp.bits.result,
                                                   Seq(
                                                     (isCMin1 && (fsm.io.out.readRow1 === 1.U) && !fsm.io.out.readBank1(0)) -> vector1,
                                                     (isCMin2 && (fsm.io.out.readRow2 === 1.U) && !fsm.io.out.readBank2(0)) -> vector2,
-                                                    (isPairMinValid) -> vector2
+                                                    (isPairMin1 && io.data1.valid) -> second1,
+                                                    (isPairMin2 && io.data2.valid) -> second2
                                                   ))
 
   val vli = Module(new VectorLoadImm(p.BF16, p.numLanes, 5))
@@ -411,7 +429,6 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   ))
 
   dataOutFire2 := MuxCase(false.B, Seq(
-    // Two-input ops (add/sub/mul/pairmax/pairmin) never fire data2 out
     isRSum1                -> rowSumPair.io.resp.valid,
     isRcp2                 -> rcp.io.resp.valid,
     isSqrt2                -> sqrt.io.resp.valid,
@@ -421,15 +438,18 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isTanh2                -> tanh.io.resp.valid,
     isRMax1                -> rowMaxPairValid,
     isRMin1                -> rowMinPairValid,
-    isCMax2                -> pairMax.io.resp.valid,
-    isCMin2                -> pairMin.io.resp.valid,
+    (isPairMax2 || isCMax2) -> pairMax.io.resp.valid,
+    (isPairMin2 || isCMin2) -> pairMin.io.resp.valid,
     (isSquare2 || isCube2) -> sqcb.io.resp.valid,
     isFp8pack2             -> fp8pack.io.resp.valid,
     isFp8unpack2           -> fp8unpack.io.resp.valid,
     isRelu2                -> relu.io.resp.valid,
     isVli2                 -> vli.io.resp.valid,
     isMov2                 -> mov.io.resp.valid,
-    isCSum2                -> csum.io.resp.valid
+    isCSum2                -> csum.io.resp.valid,
+    // .vx and .vr in slot 2. Last: in the double state inst2 is a stand-in add.
+    (isAdd2 || isSub2)     -> addSubSum.io.resp.valid,
+    isMul2                 -> mul.io.resp.valid
   ))
 
   writeData1 := MuxCase(0.U, Seq(
@@ -474,7 +494,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isRelu2                       -> relu.io.resp.bits.result.asUInt,
     isVli2                        -> vli.io.resp.bits.result.asUInt,
     isMov2                        -> mov.io.resp.bits.result.asUInt,
-    isCSum2                       -> finalResultBF16.asUInt
+    isCSum2                       -> finalResultBF16.asUInt,
+    (isAdd2 || isSub2)            -> addSubSum.io.resp.bits.result.asUInt
   ))
 
   // Software-scheduled contract: commands must only be issued when the
@@ -507,5 +528,6 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   io.activeReads  := fsm.io.out.activeReads
   io.activeWrites := fsm.io.out.activeWrites
   io.issueBusy := fsm.io.out.issueBusy
+  io.row0Resp  := fsm.io.out.row0Resp1 || fsm.io.out.row0Resp2
   io.busy := fsm.io.out.busy
 }

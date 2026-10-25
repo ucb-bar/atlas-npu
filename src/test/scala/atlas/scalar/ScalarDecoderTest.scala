@@ -2,6 +2,7 @@ package atlas.scalar
 
 import chisel3._
 import chisel3.simulator.EphemeralSimulator._
+import chisel3.util.BitPat
 import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.util.Random
@@ -10,7 +11,8 @@ import scala.util.Random
   * with random operands decode as their instruction, legal and with its unit. A word one bit away
   * from an instruction's match word decodes as the table says: a word that sets a bit that the
   * table fixes, for example a reserved operand bit, is illegal unless it is another instruction.
-  * The decoder's x-register fields (rd_x, rs1_ren, rs2_ren) are the table's x operands.
+  * The decoder's x-register fields (rd_x, rs1_ren, rs2_ren) are the table's x operands, and a .vx
+  * or .vr form has the vpu_cmd of its .bf16 form.
   */
 class ScalarDecoderTest extends AnyFlatSpec {
   import ScalarISA._
@@ -66,6 +68,21 @@ class ScalarDecoderTest extends AnyFlatSpec {
         val fields = Seq("rd" -> d.rd_x, "rs1" -> d.rs1_ren, "rs2" -> d.rs2_ren)
           .collect { case (f, b) if b.peek().litToBoolean => f }.toSet
         assert(fields == Instructions.xRegs.getOrElse(name, Set.empty[String]), name)
+      }
+    }
+  }
+
+  it should "decode a .vx or .vr form as its .bf16 op with another second operand" in {
+    simulate(new ScalarDecoder) { dut =>
+      def decode(p: BitPat): (BigInt, BigInt) = {
+        dut.io.instr.poke(p.value.U(32.W))
+        (dut.io.decoded.vpu_cmd.peek().litValue, dut.io.decoded.vpu_src.peek().litValue)
+      }
+      val pats = Instructions.all.map { case (name, p, _) => name -> p }.toMap
+      for ((name, p, _) <- Instructions.all; (suffix, src) <- Seq("_VX" -> VSRC_XREG, "_VR" -> VSRC_ROW0)
+           if name.endsWith(suffix)) {
+        val (cmd, pair) = decode(pats(name.stripSuffix(suffix)))
+        assert(cmd != 0 && pair == VSRC_PAIR.litValue && decode(p) == (cmd, src.litValue), name)
       }
     }
   }

@@ -44,10 +44,11 @@ class VPUOutput(val p: VpuParams) extends Bundle {
 
 class VectorInput(val p: VpuParams) extends Bundle {
   val instType        = VPUOp()
+  val src             = UInt(2.W)   // ScalarISA.VSRC_*: the .bf16, .vx or .vr form of a two-input op
   val instReadBank1   = UInt(6.W)
   val instReadBank2   = UInt(6.W)
   val instWriteBank   = UInt(6.W)
-  val imm             = SInt(16.W)
+  val imm             = SInt(16.W)  // vli.*: the immediate; .vx: the BF16 scalar
   val packScaleE8M0   = UInt(8.W)   // E8M0 scale for VPACK_BF16_FP8
   val unpackScaleE8M0 = UInt(8.W)   // E8M0 scale for VUNPACK_FP8_BF16
 }

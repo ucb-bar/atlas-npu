@@ -24,6 +24,7 @@ class DecodedInstr extends Bundle {
   val mxu_cmd  = UInt(4.W)   // funct7[3:0]
   val mxu_sel  = UInt(1.W)   // funct7[4]: the MXU slot
   val vpu_cmd  = UInt(5.W)
+  val vpu_src  = UInt(2.W)   // second operand of a two-input VPU op: T(vs2), x[rs2] or row 0 of T(vs2)
   val xlu_cmd  = UInt(1.W)
   val mem_cmd  = UInt(4.W)   // scalar load/store type
   val lsu_cmd  = UInt(3.W)   // vload / vstore / vload.scale / vstore.scale
@@ -119,6 +120,7 @@ class ScalarDecoder extends Module {
   dec.mxu_cmd  := funct7(3, 0)
   dec.mxu_sel  := funct7(4)
   dec.vpu_cmd  := cs(12)
+  dec.vpu_src  := cs(18)
   dec.xlu_cmd  := cs(13)
   dec.mem_cmd  := cs(14)
   dec.lsu_cmd  := cs(15)

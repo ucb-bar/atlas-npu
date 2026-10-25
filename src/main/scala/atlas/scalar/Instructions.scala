@@ -92,6 +92,16 @@ object Instructions {
   def VMUL_BF16                    = BitPat("b0000011?????0?????0?????00001011")
   def VMINIMUM_BF16                = BitPat("b0000100?????0?????0?????00001011")
   def VMAXIMUM_BF16                = BitPat("b0000110?????0?????0?????00001011")
+  def VADD_BF16_VX                 = BitPat("b0001000?????0?????0?????00001011")
+  def VSUB_BF16_VX                 = BitPat("b0001010?????0?????0?????00001011")
+  def VMUL_BF16_VX                 = BitPat("b0001011?????0?????0?????00001011")
+  def VMINIMUM_BF16_VX             = BitPat("b0001100?????0?????0?????00001011")
+  def VMAXIMUM_BF16_VX             = BitPat("b0001110?????0?????0?????00001011")
+  def VADD_BF16_VR                 = BitPat("b0010000?????0?????0?????00001011")
+  def VSUB_BF16_VR                 = BitPat("b0010010?????0?????0?????00001011")
+  def VMUL_BF16_VR                 = BitPat("b0010011?????0?????0?????00001011")
+  def VMINIMUM_BF16_VR             = BitPat("b0010100?????0?????0?????00001011")
+  def VMAXIMUM_BF16_VR             = BitPat("b0010110?????0?????0?????00001011")
   def VREDSUM_BF16                 = BitPat("b0000001000000?????0?????00001011")
   def VREDMIN_BF16                 = BitPat("b0000101000000?????0?????00001011")
   def VREDMAX_BF16                 = BitPat("b0000111000000?????0?????00001011")
@@ -200,6 +210,16 @@ object Instructions {
     ("VMUL_BF16", VMUL_BF16, "vpu"),
     ("VMINIMUM_BF16", VMINIMUM_BF16, "vpu"),
     ("VMAXIMUM_BF16", VMAXIMUM_BF16, "vpu"),
+    ("VADD_BF16_VX", VADD_BF16_VX, "vpu"),
+    ("VSUB_BF16_VX", VSUB_BF16_VX, "vpu"),
+    ("VMUL_BF16_VX", VMUL_BF16_VX, "vpu"),
+    ("VMINIMUM_BF16_VX", VMINIMUM_BF16_VX, "vpu"),
+    ("VMAXIMUM_BF16_VX", VMAXIMUM_BF16_VX, "vpu"),
+    ("VADD_BF16_VR", VADD_BF16_VR, "vpu"),
+    ("VSUB_BF16_VR", VSUB_BF16_VR, "vpu"),
+    ("VMUL_BF16_VR", VMUL_BF16_VR, "vpu"),
+    ("VMINIMUM_BF16_VR", VMINIMUM_BF16_VR, "vpu"),
+    ("VMAXIMUM_BF16_VR", VMAXIMUM_BF16_VR, "vpu"),
     ("VREDSUM_BF16", VREDSUM_BF16, "vpu"),
     ("VREDMIN_BF16", VREDMIN_BF16, "vpu"),
     ("VREDMAX_BF16", VREDMAX_BF16, "vpu"),
@@ -278,5 +298,10 @@ object Instructions {
     "VSTORE_SCALE" -> Set("rs1"),
     "DMA_LOAD" -> Set("rd", "rs1", "rs2"),
     "DMA_STORE" -> Set("rd", "rs1", "rs2"),
-    "DMA_CONFIG" -> Set("rs1"))
+    "DMA_CONFIG" -> Set("rs1"),
+    "VADD_BF16_VX" -> Set("rs2"),
+    "VSUB_BF16_VX" -> Set("rs2"),
+    "VMUL_BF16_VX" -> Set("rs2"),
+    "VMINIMUM_BF16_VX" -> Set("rs2"),
+    "VMAXIMUM_BF16_VX" -> Set("rs2"))
 }

@@ -3,12 +3,14 @@ package atlas.vector
 import chisel3._
 import chisel3.util._
 import atlas.common.VpuParams
+import atlas.scalar.ScalarISA.{VSRC_PAIR, VSRC_XREG, VSRC_ROW0}
 import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 
 class FSMIn extends Bundle {
     val instFire      = Bool()
     val instType      = VPUOp()
+    val instSrc       = UInt(2.W)
     val instReadBank1 = UInt(6.W)
     val instReadBank2 = UInt(6.W)
     val instWriteBank = UInt(6.W)
@@ -25,6 +27,8 @@ class FSMIn extends Bundle {
 class FSMOut extends Bundle {
     val inst1 = VPUOp()
     val inst2 = VPUOp()
+    val src1  = UInt(2.W)
+    val src2  = UInt(2.W)
     val imm1  = SInt(16.W)
     val imm2  = SInt(16.W)
     val packScale1   = UInt(8.W)
@@ -59,7 +63,9 @@ class FSMOut extends Bundle {
     val writeDone2 = Bool()
     val activeReads  = Vec(4, Valid(UInt(6.W)))
     val activeWrites = Vec(4, Valid(UInt(6.W)))
-    val issueBusy = UInt((VPUOp.all.size + 1).W)
+    val row0Resp1 = Bool()
+    val row0Resp2 = Bool()
+    val issueBusy = Vec(3, UInt((VPUOp.all.size + 1).W))
     val busy = Bool()
 }
 
@@ -103,6 +109,8 @@ class VectorFSM(val p: VpuParams) extends Module {
     val unpackScale2Reg = RegInit(127.U(8.W))
     val imm1Reg = RegInit(0.S(16.W))
     val imm2Reg = RegInit(0.S(16.W))
+    val src1Reg = RegInit(VSRC_PAIR)
+    val src2Reg = RegInit(VSRC_PAIR)
 
     val slot1NewInst = WireDefault(false.B)
     val slot2NewInst = WireDefault(false.B)
@@ -172,11 +180,13 @@ class VectorFSM(val p: VpuParams) extends Module {
         packScale1Reg   := io.in.instPackScaleE8M0
         unpackScale1Reg := io.in.instUnpackScaleE8M0
         imm1Reg         := io.in.instImm
+        src1Reg         := io.in.instSrc
     }
     when (slot2NewInst) {
         packScale2Reg   := io.in.instPackScaleE8M0
         unpackScale2Reg := io.in.instUnpackScaleE8M0
         imm2Reg         := io.in.instImm
+        src2Reg         := io.in.instSrc
     }
 
     val isColReduce1  = (inst1 === VPUOp.cmax) || (inst1 === VPUOp.cmin) || (inst1 === VPUOp.csum)
@@ -206,7 +216,11 @@ class VectorFSM(val p: VpuParams) extends Module {
 
     val isWriteOnly = opIsVli(io.in.instType)
     val inputIsRowReduce = opIsRowReduce(io.in.instType)
-    val inputUsesDoublePorts = opUsesDoublePorts(io.in.instType)
+    // .vx and .vr stream one pair, as a single-input op does. A .vr reads row 0 of T(vs2) on both
+    // read ports in its issue cycle and streams T(vs1) from the next cycle on.
+    val inputUsesDoublePorts = opUsesDoublePorts(io.in.instType) && io.in.instSrc === VSRC_PAIR
+    val inputIsRow0 = io.in.instSrc === VSRC_ROW0
+    val firstReadCount = Mux(isWriteOnly || inputIsRow0, 0.U, 1.U)
     val inputUsesDualWritePorts = opUsesDualWritePorts(io.in.instType)
     val inputReadBank2 = Mux(inputIsRowReduce, io.in.instReadBank1 + 1.U, io.in.instReadBank2)
     val inputWriteBank2 = io.in.instWriteBank + 1.U
@@ -220,21 +234,23 @@ class VectorFSM(val p: VpuParams) extends Module {
     val nextState = WireDefault(state)
     state := nextState
 
-    private def canIssueOp(op: VPUOp.Type): Bool = {
+    private def canIssueOp(op: VPUOp.Type, src: UInt): Bool = {
         // The overlap path only has room for a second single-input op; anything
         // that needs both read slots must wait until the engine is otherwise free.
-        val opNeedsDoublePorts = opUsesDoublePorts(op)
+        // A .vr also needs the other slot's read port in its issue cycle.
+        val opNeedsDoublePorts = opUsesDoublePorts(op) && src === VSRC_PAIR
+        val opNeedsBothPorts = src === VSRC_ROW0
         MuxLookup(state, false.B)(Seq(
             idle   -> true.B,
             single -> Mux(done1 && done2, true.B,
-                      Mux(done1, !opNeedsDoublePorts && !opsShareLogic(op, inst2),
-                      Mux(done2, !opNeedsDoublePorts && !opsShareLogic(op, inst1),
+                      Mux(done1, !opNeedsDoublePorts && !opsShareLogic(op, inst2) && (!opNeedsBothPorts || readDone2),
+                      Mux(done2, !opNeedsDoublePorts && !opsShareLogic(op, inst1) && (!opNeedsBothPorts || readDone1),
                           false.B))),
             double -> doubleDone
         ))
     }
 
-    val VEReady = canIssueOp(io.in.instType)
+    val VEReady = canIssueOp(io.in.instType, io.in.instSrc)
 
     switch(state) {
         is(idle) {
@@ -279,7 +295,7 @@ class VectorFSM(val p: VpuParams) extends Module {
                 readValid1 := true.B; readValid2 := true.B
             }.elsewhen(newInputToSINGLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := Mux(isWriteOnly, 0.U, 1.U)
+                readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := firstReadCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                 inst2 := VPUOp.add; readDone2 := true.B; readBank2 := 0.U; readCounter2 := 0.U
                 writeDone2 := true.B; writeBank2 := 0.U; writeCounter2 := 0.U
@@ -301,14 +317,14 @@ class VectorFSM(val p: VpuParams) extends Module {
             }.elsewhen(newInputToSINGLE) {
                 when(done1 && done2) {
                     inst1 := io.in.instType; slot1NewInst := true.B
-                    readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := Mux(isWriteOnly, 0.U, 1.U)
+                    readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := firstReadCount
                     writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                     inst2 := VPUOp.add; readDone2 := true.B; readBank2 := 0.U; readCounter2 := 0.U
                     writeDone2 := true.B; writeBank2 := 0.U; writeCounter2 := 0.U
                     readValid1 := !isWriteOnly; readValid2 := false.B
                 }.elsewhen(done1) {
                     inst1 := io.in.instType; slot1NewInst := true.B
-                    readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := Mux(isWriteOnly, 0.U, 1.U)
+                    readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := firstReadCount
                     writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                     inst2 := inst2
                     readDone2 := Mux(readValid2 && io.in.dataInFire2 && readCounter2 === readLim2, true.B, readDone2)
@@ -323,7 +339,7 @@ class VectorFSM(val p: VpuParams) extends Module {
                     writeDone1 := Mux(io.in.dataOutFire1 && writeCounter1 === writeLim1, true.B, writeDone1)
                     writeBank1 := writeBank1; writeCounter1 := Mux(io.in.dataOutFire1, writeCounter1 + 1.U, writeCounter1)
                     inst2 := io.in.instType; slot2NewInst := true.B
-                    readDone2 := isWriteOnly; readBank2 := io.in.instReadBank1; readCounter2 := Mux(isWriteOnly, 0.U, 1.U)
+                    readDone2 := isWriteOnly; readBank2 := io.in.instReadBank1; readCounter2 := firstReadCount
                     writeDone2 := false.B; writeBank2 := io.in.instWriteBank; writeCounter2 := 0.U
                     readValid1 := !readDone1; readValid2 := !isWriteOnly
                 }
@@ -360,7 +376,7 @@ class VectorFSM(val p: VpuParams) extends Module {
                 readValid1 := true.B; readValid2 := true.B
             }.elsewhen(newInputToSINGLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := Mux(isWriteOnly, 0.U, 1.U)
+                readDone1 := isWriteOnly; readBank1 := io.in.instReadBank1; readCounter1 := firstReadCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                 inst2 := VPUOp.add; readDone2 := true.B; readBank2 := 0.U; readCounter2 := 0.U
                 writeDone2 := true.B; writeBank2 := 0.U; writeCounter2 := 0.U
@@ -390,23 +406,28 @@ class VectorFSM(val p: VpuParams) extends Module {
     }
 
     io.out.inst1 := inst1; io.out.inst2 := inst2
+    io.out.src1 := src1Reg; io.out.src2 := src2Reg
     io.out.imm1 := imm1Reg; io.out.imm2 := imm2Reg
     io.out.packScale1 := packScale1Reg; io.out.packScale2 := packScale2Reg
     io.out.unpackScale1 := unpackScale1Reg; io.out.unpackScale2 := unpackScale2Reg
-    io.out.readValid1 := readValid1
-    io.out.readBank1 := Mux(
+    // A .vr reads row 0 of m[vs2] on port 1 and of m[vs2+1] on port 2 in its issue cycle.
+    val row0Issue = io.in.instFire && inputIsRow0
+    io.out.row0Resp1 := RegNext(row0Issue && slot1NewInst, false.B)
+    io.out.row0Resp2 := RegNext(row0Issue && slot2NewInst, false.B)
+    io.out.readValid1 := readValid1 || row0Issue
+    io.out.readBank1 := Mux(row0Issue, io.in.instReadBank2, Mux(
         readEarly1,
         io.in.instReadBank1,
         Mux((state === double) && doubleIsRowReduce, readBank1, Mux(isNextReadBank1, nextReadBank1, readBank1))
-    )
-    io.out.readRow1 := readCounter1FiveBits
-    io.out.readValid2 := readValid2
-    io.out.readBank2 := Mux(
+    ))
+    io.out.readRow1 := Mux(row0Issue, 0.U, readCounter1FiveBits)
+    io.out.readValid2 := readValid2 || row0Issue
+    io.out.readBank2 := Mux(row0Issue, io.in.instReadBank2 + 1.U, Mux(
         readEarly2,
         Mux(newInputToDOUBLE, inputReadBank2, io.in.instReadBank1),
         Mux((state === double) && doubleIsRowReduce, readBank2, Mux(isNextReadBank2, nextReadBank2, readBank2))
-    )
-    io.out.readRow2 := readCounter2FiveBits
+    ))
+    io.out.readRow2 := Mux(row0Issue, 0.U, readCounter2FiveBits)
     io.out.writeValid1 := Mux(
         isColReduce1,
         !writeDone1 && io.in.dataOutFire1 && writeCounter1 >= 64.U,
@@ -481,6 +502,8 @@ class VectorFSM(val p: VpuParams) extends Module {
 
     io.out.activeReads := activeReads
     io.out.activeWrites := activeWrites
-    io.out.issueBusy := VecInit(Seq(false.B) ++ VPUOp.all.toSeq.map(op => !canIssueOp(op))).asUInt
+    // Indexed by vpu_src: the .bf16, .vx and .vr form of each op.
+    io.out.issueBusy := VecInit(Seq(VSRC_PAIR, VSRC_XREG, VSRC_ROW0).map(src =>
+        VecInit(Seq(false.B) ++ VPUOp.all.toSeq.map(op => !canIssueOp(op, src))).asUInt))
     io.out.busy := slot1Active || slot2Active
 }

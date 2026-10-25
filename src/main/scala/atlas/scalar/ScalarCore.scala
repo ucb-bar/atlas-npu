@@ -119,14 +119,15 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   private def vpuReadsPrimaryPair(cmd: UInt): Bool =
     cmd =/= VPU_NONE && !vpuIsVli(cmd) && !vpuUsesUnpackScale(cmd)
 
-  private def vpuReadsSecondaryPair(cmd: UInt): Bool =
-    vpuIsTwoInput(cmd)
+  // A .bf16 two-input op streams T(vs2); a .vr reads row 0 of it in its issue cycle.
+  private def vpuReadsSecondaryPair(dec: DecodedInstr): Bool =
+    vpuIsTwoInput(dec.vpu_cmd) && dec.vpu_src =/= VSRC_XREG
 
   private def vpuWritesPair(cmd: UInt): Bool =
     cmd =/= VPU_NONE && !vpuUsesPackScale(cmd) && !vpuIsVliColOrOne(cmd)
 
-  private def vpuIssueBusy(cmd: UInt): Bool =
-    io.vpu_status.issueBusy(cmd)
+  private def vpuIssueBusy(dec: DecodedInstr): Bool =
+    io.vpu_status.issueBusy(dec.vpu_src)(dec.vpu_cmd)
 
   /** The instruction is an MXU instruction with one of these commands (either slot). */
   private def mxuOp(d: DecodedInstr, ops: UInt*): Bool = d.is_mxu && ops.map(_ === d.mxu_cmd).reduce(_ || _)
@@ -150,7 +151,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
       val src1Bank = vpuPrimaryReadBank(dec)
       val src1Haz = wb(src1Bank) ||
         (vpuReadsPrimaryPair(dec.vpu_cmd) && wb(src1Bank + 1.U))
-      val src2Haz = vpuReadsSecondaryPair(dec.vpu_cmd) &&
+      val src2Haz = vpuReadsSecondaryPair(dec) &&
         (wb(dec.vs2) || wb(dec.vs2 + 1.U))
       h := Mux(vpuIsVli(dec.vpu_cmd), false.B, src1Haz || src2Haz)
     }
@@ -237,8 +238,9 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val unitAbsent = !hasNvfp4.B && (isNvCmd || isScaleLsu)
   // A two-source VPU instruction streams both source pairs in the same cycles. Two different
   // pairs in one physical bank (m_i and m_i+32 share bank i) can never be read together, so
-  // the instruction is illegal; the same pair twice is fine (one read serves both).
-  val vpuSourceBankClash = dec.vpu_cmd =/= VPU_NONE && vpuReadsSecondaryPair(dec.vpu_cmd) &&
+  // the instruction is illegal; the same pair twice is fine (one read serves both). .vx and .vr
+  // stream one pair.
+  val vpuSourceBankClash = vpuIsTwoInput(dec.vpu_cmd) && dec.vpu_src === VSRC_PAIR &&
     dec.vs1(4, 0) === dec.vs2(4, 0) && dec.vs1 =/= dec.vs2
   // A CSR instruction is illegal on an unmapped CSR, or when it writes a read-only one.
   val csrIllegal = dec.is_csr && io.csrPort.illegal
@@ -301,7 +303,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val isDmaXfer = dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST
 
   val mxuNotReady = dec.is_mxu && Mux(isNvCmd, !io.nvReady, !io.mxu1Ready)
-  val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)
+  val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec)
   val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
   val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
                     (dec.is_mem_load && (memLoadPending || io.lsu_scalar_busy))
@@ -340,8 +342,8 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     (dec.xlu_cmd =/= XLU_NONE,                                 dec.vs1),
     (dec.vpu_cmd =/= VPU_NONE && !vpuIsVli(dec.vpu_cmd),       vpuSrc1),
     (vpuReadsPrimaryPair(dec.vpu_cmd),                         vpuSrc1 + 1.U),
-    (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2),
-    (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2 + 1.U))
+    (vpuReadsSecondaryPair(dec),                               dec.vs2),
+    (vpuReadsSecondaryPair(dec),                               dec.vs2 + 1.U))
   val mregWrites: Seq[(Bool, UInt)] = Seq(
     (mxuWritesVd,                                                 dec.vd),
     (mxuWritesPair,                                               dec.vd + 1.U),
@@ -454,13 +456,13 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   assert(!(s1_fire && instrMregWriteHazard(dec)),
     "ASSERT FAIL: MREG WAR/WAW hazard: instruction writes bank with pending read/write")
 
-  assert(!(s1_fire && dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)),
+  assert(!(s1_fire && dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec)),
     "ASSERT FAIL: VPU command issued while its issue-busy bit is set")
 
   val vpuPrimaryBank = vpuPrimaryReadBank(dec)
   assert(!(s1_fire && vpuReadsPrimaryPair(dec.vpu_cmd) && vpuPrimaryBank(0)),
     "ASSERT FAIL: VPU pair-read primary bank must be even")
-  assert(!(s1_fire && vpuReadsSecondaryPair(dec.vpu_cmd) && dec.vs2(0)),
+  assert(!(s1_fire && vpuReadsSecondaryPair(dec) && dec.vs2(0)),
     "ASSERT FAIL: VPU pair-read secondary bank must be even")
   assert(!(s1_fire && vpuWritesPair(dec.vpu_cmd) && dec.vd(0)),
     "ASSERT FAIL: VPU pair-write destination bank must be even")
@@ -685,11 +687,12 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
 
   io.vpuCmd.valid           := is_vpu_launch
   io.vpuCmd.bits.op         := dec.vpu_cmd
+  io.vpuCmd.bits.src        := dec.vpu_src
   io.vpuCmd.bits.scaleE8M0  := scaleRF.io.regs(dec.vs1(4, 0))
   io.vpuCmd.bits.vd         := dec.vd
   io.vpuCmd.bits.vs1        := dec.vs1
   io.vpuCmd.bits.vs2        := dec.vs2
-  io.vpuCmd.bits.imm        := dec.vi_imm
+  io.vpuCmd.bits.imm        := Mux(dec.vpu_src === VSRC_XREG, rs2_data(31, 16), dec.vi_imm)
 
   io.xluCmd.valid        := is_xlu_launch
   io.xluCmd.bits.op      := dec.xlu_cmd

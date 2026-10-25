@@ -144,6 +144,12 @@ object ScalarISA {
   val VPU_X          =  0.U(5.W)  // don't-care
   val NUM_VPU_STATUS_OPS = 31     // status bit i matches VPU_* encoding i; bit 0 = VPU_NONE
 
+  // ── VPU second operand (2-bit): the .bf16, .vx and .vr forms of a two-input op ──
+  val VSRC_PAIR = 0.U(2.W)   // T(vs2)
+  val VSRC_XREG = 1.U(2.W)   // the BF16 bits x[rs2][31:16] in every element
+  val VSRC_ROW0 = 2.U(2.W)   // row 0 of T(vs2) in every row
+  val VSRC_X    = 0.U(2.W)
+
   // ── Scalar-core command (2-bit) ────────────────────────────────────
   val SC_NONE  = 0.U(2.W)
   val SC_SELI  = 1.U(2.W)
@@ -153,6 +159,7 @@ object ScalarISA {
   // ── x-register fields (3-bit): bit 2 rd, bit 1 rs2, bit 0 rs1 ───────
   val XR_N   = 0.U(3.W)
   val XR_1   = 1.U(3.W)
+  val XR_2   = 2.U(3.W)
   val XR_12  = 3.U(3.W)
   val XR_D   = 4.U(3.W)
   val XR_D1  = 5.U(3.W)

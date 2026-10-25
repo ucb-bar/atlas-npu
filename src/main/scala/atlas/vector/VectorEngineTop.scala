@@ -11,6 +11,7 @@
 //     - fp8unpack: reads one packed-FP8 mreg, writes two BF16 mregs
 //     - vliCol / vliOne: write exactly one 32x16 BF16 tensor register
 //     - vliAll / vliRow: write a full BF16 tensor pair
+//     - .vr: reads row 0 of vs2 and vs2 + 1 in its issue cycle only, then streams vs1
 //   We expose enough ports for the MregBankTracker to see every live bank the
 //   VPU is reading or reserving for writeback, including overlap between two
 //   independent single-input ops.
@@ -22,6 +23,7 @@ import chisel3._
 import chisel3.util._
 import atlas.common.{VpuParams, MregParams, MregReadReq, MregWriteReq}
 import atlas.scalar.VpuCmd
+import atlas.scalar.ScalarISA.VSRC_XREG
 
 class VectorEngineTop(
   p:     VpuParams,
@@ -42,7 +44,7 @@ class VectorEngineTop(
 
     // ── Busy signals ──
     val busy      = Output(Bool())
-    val issueBusy = Output(UInt((VPUOp.all.size + 1).W))
+    val issueBusy = Output(Vec(3, UInt((VPUOp.all.size + 1).W)))   // by vpu_src
 
     // ── Active mreg bank tracking (for MregBankTracker) ──
     val activeReads  = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
@@ -80,6 +82,7 @@ class VectorEngineTop(
   val isVli = isVliAllOrRow || isVliColOrOne
 
   vecInput.instType      := cmdOp
+  vecInput.src           := io.cmd.bits.src
   vecInput.instReadBank1 := Mux(isPackUnpack, io.cmd.bits.vs2, io.cmd.bits.vs1)
   vecInput.instReadBank2 := io.cmd.bits.vs2
   vecInput.instWriteBank := io.cmd.bits.vd
@@ -105,7 +108,8 @@ class VectorEngineTop(
   io.mregReadReq0.bits.mregId := core.io.read1.bits.bank
   io.mregReadReq0.bits.row    := core.io.read1.bits.row
 
-  core.io.data1.valid     := io.mregReadResp0.valid
+  // Row 0 of a .vr's T(vs2) goes to the VPU's row-0 registers, not to a lane box.
+  core.io.data1.valid     := io.mregReadResp0.valid && !core.io.row0Resp
   core.io.data1.bits.data := io.mregReadResp0.bits
 
   // ==========================================================================
@@ -116,7 +120,7 @@ class VectorEngineTop(
   io.mregReadReq1.bits.mregId := core.io.read2.bits.bank
   io.mregReadReq1.bits.row    := core.io.read2.bits.row
 
-  core.io.data2.valid     := Mux(mirroredReadReq_d, io.mregReadResp0.valid, io.mregReadResp1.valid)
+  core.io.data2.valid     := Mux(mirroredReadReq_d, io.mregReadResp0.valid, io.mregReadResp1.valid) && !core.io.row0Resp
   core.io.data2.bits.data := Mux(mirroredReadReq_d, io.mregReadResp0.bits, io.mregReadResp1.bits)
 
   // ==========================================================================
@@ -148,7 +152,7 @@ class VectorEngineTop(
   // Structural hazard assertion (debug only)
   // ==========================================================================
 
-  val cmdIssueBusy = core.io.issueBusy(io.cmd.bits.op)
+  val cmdIssueBusy = core.io.issueBusy(io.cmd.bits.src)(io.cmd.bits.op)
   assert(!(io.cmd.valid && cmdIssueBusy),
     "VPU: command issued while selected VPU resources are busy (software-scheduling contract violated)")
 
@@ -161,7 +165,7 @@ class VectorEngineTop(
                     cmdOp === VPUOp.mul || cmdOp === VPUOp.pairmax ||
                     cmdOp === VPUOp.pairmin)
   val readsPrimaryPair = !isVli && !isFp8unpack
-  val readsSecondaryPair = isTwoInput
+  val readsSecondaryPair = isTwoInput && io.cmd.bits.src =/= VSRC_XREG
   val writesPair = !isFp8pack && !isVliColOrOne
 
   assert(!(io.cmd.valid && readsPrimaryPair && vecInput.instReadBank1(0)),

@@ -41,8 +41,8 @@ class VpuStatus extends Bundle {
   val busy      = Bool()
   val done      = Bool()
   val error     = Bool()
-  // Bit i matches ScalarISA.VPU_* encoding i; bit 0 corresponds to VPU_NONE.
-  val issueBusy = UInt(NUM_VPU_STATUS_OPS.W)
+  // Indexed by ScalarISA.VSRC_*; bit i matches ScalarISA.VPU_* encoding i, bit 0 VPU_NONE.
+  val issueBusy = Vec(3, UInt(NUM_VPU_STATUS_OPS.W))
 }
 
 class DmaCmd extends Bundle {
@@ -63,10 +63,11 @@ class MxuCmd extends Bundle {
 
 class VpuCmd extends Bundle {
   val op        = UInt(5.W)
+  val src       = UInt(2.W)    // ScalarISA.VSRC_*
   val vd        = UInt(6.W)
   val vs1       = UInt(6.W)
   val vs2       = UInt(6.W)
-  val imm       = UInt(16.W)
+  val imm       = UInt(16.W)   // vli.*: the immediate; .vx: the BF16 bits x[rs2][31:16]
   val scaleE8M0 = UInt(8.W)
 }
 

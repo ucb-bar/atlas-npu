@@ -32,7 +32,7 @@ instruction in S1 (`ScalarCore.scala`, section "Interlock"). They fall into two 
 |---|---|
 | Same-unit issue spacing: MXU | `cmdReady` from each MXU sequencer: its own accept condition for the decoded command |
 | MXU buffer rules | the same `cmdReady`, plus five port/path rules the sequencers used to assert on (below) |
-| Same-unit issue spacing: VPU, XLU | VPU `issueBusy(op)`, XLU `busy` |
+| Same-unit issue spacing: VPU, XLU | VPU `issueBusy(vpu_src)(op)`, XLU `busy` |
 | `vload`/`vstore`/scalar load, same path | LSU `vloadBusy` / `vstoreBusy`, scalar load pending |
 | DMA to a busy channel | channel busy, and the next command slot free (`DmaEngine.canEnqueue`) |
 | Register reservations (RAW, WAR, WAW), for every instruction including `vload` | `MregBankTracker` read/write busy |
@@ -72,6 +72,10 @@ source pairs in the same cycles. Two different pairs in one physical bank, such 
 can never be read together, and no amount of waiting fixes that. Such an instruction is
 illegal: the core halts with STATUS 3. Naming the same pair twice is fine, since one read serves
 both operands.
+
+The `.vx` and `.vr` forms stream one pair, so this rule does not apply to them. A `.vr` reads row 0
+of T(vs2) on both VPU read ports in its issue cycle, before T(vs1) streams. So it waits until the
+other VPU slot has read its last row, and `issueBusy` has one vector for each `vpu_src`.
 
 ### Scalar registers
 
@@ -113,8 +117,9 @@ The results below date from 2026-10-21 to 2026-10-23 and name the configurations
 ### Randomized hazard test
 
 `apps/dit/ditflow/hazfuzz.py` generates random streams of dependent tensor instructions with no
-`DELAY`: `vload`, `vstore`, VPU arithmetic and row reductions, MXU push, matmul and pop, XLU
-transposes, and the NVFP4 2- and 4-register transfers. They run over 20 registers, including
+`DELAY`: `vload`, `vstore`, VPU arithmetic (with the `.vx` and `.vr` forms; a `.vx` often reads x4
+right after a scalar load writes it) and row reductions, MXU push, matmul and pop, XLU transposes,
+and the NVFP4 2- and 4-register transfers. They run over 20 registers, including
 ones that share a physical bank. Each next instruction is biased to read or overwrite what the
 previous ones touched. The expected DRAM comes from the functional model, which runs in program
 order, the architectural meaning on an interlocked core. A `--spaced` copy of each program puts
