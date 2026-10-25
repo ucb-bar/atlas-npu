@@ -1,11 +1,11 @@
-# triple_unit_concurrent.S — MXU0 + MXU1 + VPU concurrent execution
+# triple_unit_concurrent.S — two MXU1 matmuls + VPU concurrent execution
 # @TIMEOUT 500000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_triple_unit_concurrent.py 777
 #
-# Three independent functional units compute simultaneously:
-#   MXU0 (SA):  C0 = X0 @ W0      (32×32, single k-tile, BF16 out)
-#   MXU1 (IPT): C1 = X1 @ W1      (32×32, single k-tile, BF16 out)
+# MXU1 (both weight slots and accumulators) and the VPU compute simultaneously:
+#   MXU1 acc1:  C0 = X0 @ W0      (32×32, single k-tile, BF16 out)
+#   MXU1 acc0:  C1 = X1 @ W1      (32×32, single k-tile, BF16 out)
 #   VPU:        D  = vadd(A, B)    (32×32 BF16 element-wise)
 #               E  = vmul(A, B)    (32×32 BF16 element-wise)
 #
@@ -13,26 +13,26 @@
 #   F  = vadd(C0, C1)              (VPU processes MXU outputs)
 #
 # Overlap patterns demonstrated:
-#   [a] MXU0 weight push + MXU0 acc push (prologue)
-#   [b] MXU1 weight push + MXU1 acc push (prologue)
-#   [c] MXU0 compute + MXU1 compute + VPU add (TRIPLE UNIT)
-#   [d] MXU0 pop + VPU mul (pop on MXU0 + VPU on different banks)
-#   [e] MXU1 pop + VPU store (pop on MXU1 + LSU store of VPU result)
+#   [a] MXU1 w1 push + acc1 push (prologue)
+#   [b] MXU1 w0 push + acc0 push (prologue)
+#   [c] MXU1 compute on acc1 + acc0 + VPU add
+#   [d] MXU1 acc1 pop + VPU mul (pop + VPU on different banks)
+#   [e] MXU1 acc0 pop + VPU store (pop + LSU store of VPU result)
 #   [f] 4-channel DMA parallel load during setup
 #   [g] DMA store + VPU compute (cross-unit post-processing)
 #
 # TRF bank map (all 16 banks used):
-#   m0    MXU0 activations (X0, FP8)
+#   m0    X0 activations (FP8)
 #   m1    weight raw scratch (shared staging for XLU)
-#   m2    MXU0 weight transposed
+#   m2    W0 transposed
 #   m3    zero bias (shared, persistent)
-#   m4,5  MXU0 BF16 result (pop)
-#   m6    MXU1 activations (X1, FP8)
-#   m7    MXU1 weight transposed
+#   m4,5  C0 BF16 result (pop)
+#   m6    X1 activations (FP8)
+#   m7    W1 transposed
 #   m8,9  VPU input A (BF16, 2 banks)
 #   m10,11 VPU input B (BF16, 2 banks)
 #   m12,13 VPU output / scratch (BF16, 2 banks)
-#   m14,15 MXU1 BF16 result (pop)
+#   m14,15 C1 BF16 result (pop)
 #
 # VMEM staging map (word addresses, 256 words = 1024B per tile):
 #   [0..255]      general tile staging (DMA ch 0)
@@ -41,20 +41,20 @@
 #   [768..1023]   store staging area 2
 #
 # DRAM layout:
-#   0x0000  X0           (1024B FP8)  — MXU0 activations
-#   0x0400  W0           (1024B FP8)  — MXU0 weights
-#   0x0800  X1           (1024B FP8)  — MXU1 activations
-#   0x0C00  W1           (1024B FP8)  — MXU1 weights
+#   0x0000  X0           (1024B FP8)  — C0 activations
+#   0x0400  W0           (1024B FP8)  — C0 weights
+#   0x0800  X1           (1024B FP8)  — C1 activations
+#   0x0C00  W1           (1024B FP8)  — C1 weights
 #   0x1000  zero bias    (1024B FP8, all 0x00)
 #   0x1400  A_vpu bank0  (1024B BF16) — VPU input A lanes 0-15
 #   0x1800  A_vpu bank1  (1024B BF16) — VPU input A lanes 16-31
 #   0x1C00  B_vpu bank0  (1024B BF16) — VPU input B lanes 0-15
 #   0x2000  B_vpu bank1  (1024B BF16) — VPU input B lanes 16-31
 #   — outputs —
-#   0x2400  C0 lo        (1024B BF16) — MXU0 result lanes 0-15
-#   0x2800  C0 hi        (1024B BF16) — MXU0 result lanes 16-31
-#   0x2C00  C1 lo        (1024B BF16) — MXU1 result lanes 0-15
-#   0x3000  C1 hi        (1024B BF16) — MXU1 result lanes 16-31
+#   0x2400  C0 lo        (1024B BF16) — result lanes 0-15
+#   0x2800  C0 hi        (1024B BF16) — result lanes 16-31
+#   0x2C00  C1 lo        (1024B BF16) — result lanes 0-15
+#   0x3000  C1 hi        (1024B BF16) — result lanes 16-31
 #   0x3400  add bank0    (1024B BF16) — VPU vadd result lanes 0-15
 #   0x3800  add bank1    (1024B BF16) — VPU vadd result lanes 16-31
 #   0x3C00  mul bank0    (1024B BF16) — VPU vmul result lanes 0-15
@@ -69,7 +69,7 @@
     seli e1, 127          # scale reg 1 — identity E8M0
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 0: Load zero bias → m3 (persistent, shared by both MXUs)
+# PHASE 0: Load zero bias → m3 (persistent, shared by both accumulators)
 # ═══════════════════════════════════════════════════════════════
 
     ADDI  x6, x0, 0
@@ -81,7 +81,7 @@
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 1: Prepare MXU0 weights — load W0, transpose, push
+# PHASE 1: Prepare W0 — load W0, transpose, push to MXU1 w1
 # ═══════════════════════════════════════════════════════════════
 
     # W0 → VMEM[0] → m1 (raw) → XLU transpose → m2
@@ -95,14 +95,14 @@
     vtrpose.xlu m2, m1
     DELAY 64
 
-    # ── OVERLAP [a]: MXU0 weight push + acc push ──
-    # Slot B: push W0 transposed → MXU0 wbuf 0
-    # Slot A: push zero bias → MXU0 acc 0
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    # ── OVERLAP [a]: MXU1 weight push + acc push ──
+    # Slot B: push W0 transposed → MXU1 wbuf 1
+    # Slot A: push zero bias → MXU1 acc 1
+    vmatpush.weight.mxu1 w1, m2
+    vmatpush.acc.fp8.mxu1 acc1, m3
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 2: Prepare MXU1 weights — load W1, transpose, push
+# PHASE 2: Prepare W1 — load W1, transpose, push to MXU1 w0
 #          (m1 is free now; reuse as raw staging)
 # ═══════════════════════════════════════════════════════════════
 
@@ -188,18 +188,18 @@
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 4: TRIPLE UNIT CONCURRENT COMPUTE
-#   MXU0: MATMUL.ACC acc 0, X0 (m0), wbuf 0
+# PHASE 4: MXU1 + VPU CONCURRENT COMPUTE
+#   MXU1: MATMUL.ACC acc 1, X0 (m0), wbuf 1
 #   MXU1: MATMUL.ACC acc 0, X1 (m6), wbuf 0
 #   VPU:  VADD.BF16 m12, m8, m10
 #
-#   Bank conflicts: MXU0 reads m0, MXU1 reads m6, VPU reads m8/m10
-#                   writes: MXU0→acc0, MXU1→acc0, VPU→m12/m13
+#   Bank conflicts: MXU1 reads m0 then m6, VPU reads m8/m10
+#                   writes: MXU1→acc1, acc0, VPU→m12/m13
 #                   All distinct banks. Safe.
 # ═══════════════════════════════════════════════════════════════
 
-    # ── OVERLAP [c]: MXU0 compute + MXU1 compute + VPU add ──
-    vmatmul.acc.mxu0 acc0, m0, w0
+    # ── OVERLAP [c]: MXU1 compute (acc1, acc0) + VPU add ──
+    vmatmul.acc.mxu1 acc1, m0, w1
     vmatmul.acc.mxu1 acc0, m6, w0
     vadd.bf16 m12, m8, m10
 
@@ -209,27 +209,27 @@
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 5: MXU0 pop + VPU mul (overlapped)
-#   MXU0 pop BF16 → m4,m5
+# PHASE 5: MXU1 acc1 pop + VPU mul (overlapped)
+#   MXU1 pop BF16 → m4,m5
 #   VPU:  VMUL.BF16 m8, m8, m10
 #         BF16 writes consume an even-start register pair, so the mul result
 #         overwrites m8,m9 after both add and mul have already consumed A_vpu.
 #
-#   MXU0 pop writes m4,m5, so there is no bank conflict with the VPU writeback.
+#   MXU1 pop writes m4,m5, so there is no bank conflict with the VPU writeback.
 # ═══════════════════════════════════════════════════════════════
 
-    # ── OVERLAP [d]: MXU0 pop + VPU mul ──
-    vmatpop.bf16.acc.mxu0 m4, acc0
+    # ── OVERLAP [d]: MXU1 acc1 pop + VPU mul ──
+    vmatpop.bf16.acc.mxu1 m4, acc1
     vmul.bf16 m8, m8, m10      # overwrite m8,m9 with mul result
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 6: MXU1 pop + store VPU add result
+# PHASE 6: MXU1 acc0 pop + store VPU add result
 #   MXU1 pop BF16 → m14,m15
 #   Store VPU add (m12,m13) to DRAM while pop runs
 # ═══════════════════════════════════════════════════════════════
 
-    # ── OVERLAP [e]: MXU1 pop + VPU add store ──
+    # ── OVERLAP [e]: MXU1 acc0 pop + VPU add store ──
     vmatpop.bf16.acc.mxu1 m14, acc0
 
     # Store VPU add result: m12 → VMEM[512], m13 → VMEM[768]
@@ -275,7 +275,7 @@
     dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 8: Store MXU0 result (m4,m5)
+# PHASE 8: Store C0 (m4,m5)
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512
@@ -297,7 +297,7 @@
     dma.wait ch1
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 9: Store MXU1 result (m14,m15)
+# PHASE 9: Store C1 (m14,m15)
 # ═══════════════════════════════════════════════════════════════
 
     LI    x8, 512

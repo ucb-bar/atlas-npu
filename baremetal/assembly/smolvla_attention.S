@@ -1,6 +1,6 @@
-# smolvla_attention.S — dual-MXU scaled dot-product attention (MXU0 + MXU1)
+# smolvla_attention.S — scaled dot-product attention on MXU1
 # Tests: single-tile scaled dot-product attention pipeline
-#   scores = Q @ K             (MXU0, FP8 → BF16)
+#   scores = Q @ K             (MXU1, FP8 → BF16)
 #   scaled = scores * scale    (VPU BF16 pair op)
 #   probs  = softmax(scaled)   (rowmax → sub → exp → rowsum → recip → mul)
 #   packed = VFP8PACK(probs)   (atlas 2→1 phased pack, permuted layout)
@@ -18,7 +18,7 @@
 # each bank into packed row i / i+16. The output mreg is therefore a
 # permuted layout — packed[i, :] is NOT probs[i, :] — so the second
 # matmul does not compute probs@V in the PyTorch attention sense.
-# Golden uses atlas's own VectorEngineModel + SARTLLinearFunction which
+# Golden uses atlas's own VectorEngineModel + IPTLinearRTLFunction which
 # have the same permuted layout, so RTL and model agree bit-exactly.
 #
 # DRAM layout:
@@ -96,11 +96,11 @@
     # ── Matmul 1: scores = Q @ K (push K^T) ──
     vtrpose.xlu m3, m2
     DELAY 64
-    vmatpush.weight.mxu0 w0, m3
+    vmatpush.weight.mxu1 w0, m3
     DELAY 31
-    vmatmul.mxu0 acc0, m0, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m10, acc0
+    vmatmul.mxu1 acc0, m0, w0
+    DELAY 34
+    vmatpop.bf16.acc.mxu1 m10, acc0
     DELAY 31
 
     # ── Scale: (m12, m13) = scores * scale ──

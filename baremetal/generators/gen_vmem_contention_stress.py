@@ -5,10 +5,10 @@ gen_vmem_contention_stress.py
 Generate test vectors for vmem_contention_stress.S.
 
 Computations verified despite VMEM bank-arbitration backpressure:
-    MXU0 (SA):  C0 = X0 @ W0   (32×32 BF16)
-    MXU1 (IPT): C1 = X1 @ W1   (32×32 BF16)
+    MXU1 acc1:  C0 = X0 @ W0   (32×32 BF16)
+    MXU1 acc0:  C1 = X1 @ W1   (32×32 BF16)
     VPU:        D  = vadd(A, B) (32×32 BF16)
-    MXU0 (SA):  C2 = X2 @ W2   (32×32 BF16, post-contention)
+    MXU1 acc1:  C2 = X2 @ W2   (32×32 BF16, post-contention)
 
 All MXU results use zero bias (FP8 0x00 = 0.0).
 
@@ -38,7 +38,6 @@ from vpu_gen_utils import (
     pack_u16_le,
     run_binary_rows,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
@@ -122,11 +121,6 @@ def emit_bf16_rows_check(checks, byte_off_b0, byte_off_b1, rows_b0, rows_b1):
 
 # ── Functional models ──
 
-sa_bf16 = SARTLLinearFunction(
-    rows=32, cols=32,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
-
 ipt_bf16 = IPTLinearRTLFunction(
     vec_len=32, num_lanes=32, pipeline_depth=1,
     out_fmt_sel=OutputFmtSel.OutBF16,
@@ -153,20 +147,20 @@ A_vpu_b1_rows = float_matrix_to_bf16_rows(A_vpu[:, 16:])
 B_vpu_b0_rows = float_matrix_to_bf16_rows(B_vpu[:, :16])
 B_vpu_b1_rows = float_matrix_to_bf16_rows(B_vpu[:, 16:])
 
-# ── Reference: C0 = X0 @ W0 (MXU0 SA) ──
+# ── Reference: C0 = X0 @ W0 (MXU1 acc1) ──
 
-# Keep weight tensors alive across calls; the C-backed model caches by tensor
-# identity, and freed temporary storage can be reused by a later weight.
+# Keep weight tensors alive across calls; the model caches by tensor identity,
+# and freed temporary storage can be reused by a later weight.
 X0_t = torch.from_numpy(X0)
 W0_t = torch.from_numpy(W0.T.copy())
 
-C0 = sa_bf16(
+C0 = ipt_bf16(
     X0_t,
     W0_t,  # F.linear convention: y = x @ w^T
     b_q=b0_t, scale_exp=0,
 ).numpy().astype(np.float32)
 
-# ── Reference: C1 = X1 @ W1 (MXU1 IPT) ──
+# ── Reference: C1 = X1 @ W1 (MXU1 acc0) ──
 
 X1_t = torch.from_numpy(X1)
 W1_t = torch.from_numpy(W1.T.copy())
@@ -187,12 +181,12 @@ C1 = ipt_bf16(
 add_b0_rows = run_binary_rows("add", A_vpu_b0_rows, B_vpu_b0_rows)
 add_b1_rows = run_binary_rows("add", A_vpu_b1_rows, B_vpu_b1_rows)
 
-# ── Reference: C2 = X2 @ W2 (MXU0 SA, post-contention) ──
+# ── Reference: C2 = X2 @ W2 (MXU1 acc1, post-contention) ──
 
 X2_t = torch.from_numpy(X2)
 W2_t = torch.from_numpy(W2.T.copy())
 
-C2 = sa_bf16(
+C2 = ipt_bf16(
     X2_t,
     W2_t,
     b_q=b0_t, scale_exp=0,
@@ -219,16 +213,16 @@ emit_bf16_rows_preload(preloads, B_VPU_B1_BASE, B_vpu_b1_rows)
 
 checks = []
 
-# C0 (MXU0 result, stored via VMEM→DMA in Phase 7 under shared-port backpressure)
+# C0 (MXU1 acc1 result, stored via VMEM→DMA in Phase 7 under shared-port backpressure)
 emit_bf16_split_check(checks, C0_LO_BASE, C0_HI_BASE, C0)
 
-# C1 (MXU1 result)
+# C1 (MXU1 acc0 result)
 emit_bf16_split_check(checks, C1_LO_BASE, C1_HI_BASE, C1)
 
 # VPU add (stored via VMEM→DMA after shared-port contention phases)
 emit_bf16_rows_check(checks, ADD_B0_BASE, ADD_B1_BASE, add_b0_rows, add_b1_rows)
 
-# C2 (MXU0 second compute, data loaded during contention)
+# C2 (MXU1 acc1 second compute, data loaded during contention)
 emit_bf16_split_check(checks, C2_LO_BASE, C2_HI_BASE, C2)
 
 # ── Summary ──

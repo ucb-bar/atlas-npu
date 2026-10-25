@@ -35,7 +35,7 @@ VMEM staging at `0x2000`, `0x2400`, `0x2800`). These are the actual values to pu
 
 ## Compute Units
 
-**MXU0 (Systolic) and MXU1 (Inner-Product Tree):** Each performs 32×32 FP8 matrix multiply with BF16 accumulation. Latency: 32 cycles per matmul. Peak throughput: 2048 FLOPs/cycle each (4096 combined). Operands: activation from tensor register (FP8), weight from local weight slot (FP8), result in local accumulation buffer (BF16). Both MXUs can execute concurrently.
+**MXU1 (Inner-Product Tree):** Performs 32×32 FP8 matrix multiply with BF16 accumulation. Latency: 32 cycles per matmul. Peak throughput: 2048 FLOPs/cycle. Operands: activation from tensor register (FP8), weight from local weight slot (FP8), result in local accumulation buffer (BF16).
 
 **VPU (16 BF16 lanes):** Operates on 32×16 BF16 half-tiles (one `m` register). Supports elementwise add, sub, mul, min, max, ReLU, reciprocal, exp, exp2, sin, cos, tanh, log2, sqrt, and column/row reductions. Pipelineable ops (add, sub, mul, min, max, mov, relu, reductions): 2-cycle latency. Non-pipelineable ops (exp, exp2, recip, sin, cos, tanh, log2, sqrt): 8-cycle latency.
 
@@ -49,7 +49,7 @@ VMEM staging at `0x2000`, `0x2400`, `0x2800`). These are the actual values to pu
 
 2. **MXU data staging is explicit.** Weights must be pushed to weight slots (`vmatpush.weight.*`, 16 cycles) before matmul. Accumulator preload (`vmatpush.acc.*`) and spill (`vmatpop.*`) are separate blocking operations. BF16 accumulator push/pop moves 2048 bytes (32 cycles); FP8 moves 1024 bytes (16 cycles).
 
-3. **Overlap is the primary performance lever.** MXU0, MXU1, VPU, and XLU can all be active simultaneously. Schedule `delay` instructions to cover matmul latency (32 cycles) while issuing other work. Use both MXUs in parallel when possible. For generated regression tests, be conservative with DMA overlap and avoid patterns that depend on multiple DMA requests being in flight at once.
+3. **Overlap is the primary performance lever.** MXU1, VPU, and XLU can all be active simultaneously. Schedule `delay` instructions to cover matmul latency (32 cycles) while issuing other work. For generated regression tests, be conservative with DMA overlap and avoid patterns that depend on multiple DMA requests being in flight at once.
 
 4. **DRAM bandwidth is scarce (2 B/cycle vs. 64 B/cycle VMEM).** Prefetch data via DMA well ahead of use, but for robust regression tests issue DMA requests conservatively: after a `DMA.LOAD` or `DMA.STORE`, use `DMA.WAIT` before issuing another DMA request, even if the next request uses a different channel. Each channel supports one outstanding transfer; issuing to a busy channel is illegal, and the current RTL/testbench path should not be assumed to tolerate multi-channel outstanding DMA traffic.
 

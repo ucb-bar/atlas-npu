@@ -11,7 +11,7 @@ from gen_utils import (
     matrix_to_fp8_words,
     bf16_bits_to_words,
     quantize_fp8,
-    mxu0_sa_bf16_bits,
+    mxu1_bf16_bits,
 )
 
 TILE = 32
@@ -29,7 +29,7 @@ B_q = quantize_fp8(B).astype(np.float32)
 BT_q = quantize_fp8(B_q.T).astype(np.float32)
 
 # Assembly pushes BT_q as weight; MXU computes A @ (BT_q)^T = A @ B_q.
-C_bits = mxu0_sa_bf16_bits(A_q, B_q)
+C_bits = mxu1_bf16_bits(A_q, B_q)
 
 preloads = []
 checks = []

@@ -115,7 +115,6 @@ def main():
             failed.append(t)
             print(f"  {t}: {type(e).__name__}: {e}")
             continue
-        macs0, macs1 = atlas_asm._parse_perf_macs(source)
         timeout = re.search(r"^\s*#\s*@TIMEOUT\s+(\d+)", source, re.M)
         bundle = {
             "name": t,
@@ -128,7 +127,7 @@ def main():
             "check": pairs(golden[2], golden[3]) if golden else [],
             "perf": {"threshold": atlas_asm._parse_perf_threshold(source),
                      "report": atlas_asm._parse_perf_report(source),
-                     "macs_mxu0": macs0, "macs_mxu1": macs1},
+                     "macs_mxu1": atlas_asm._parse_perf_macs(source)},
             "timeout": int(timeout.group(1)) if timeout else None,
         }
         (out / f"{t}.json").write_text(json.dumps(bundle))

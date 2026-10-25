@@ -15,10 +15,10 @@ dma.store x10, x6, x12, ch1
 dma.wait ch1
 csrrw x0, 0xC10, x7
 csrrs x7, 0xC10, x0
-vmatpop.fp8.acc.mxu0 m4, acc0, e0
+vmatpop.fp8.acc.mxu1 m4, acc0, e0
 ```
 
-CSR instructions use real RISC-V operand order (`rd, csr, rs1`); `csrr` and `csrw` are not accepted pseudo-operations. `vmatpop.fp8.acc.mxuN` takes the accumulator before the exponent operand.
+CSR instructions use real RISC-V operand order (`rd, csr, rs1`); `csrr` and `csrw` are not accepted pseudo-operations. `vmatpop.fp8.acc.mxu1` takes the accumulator before the exponent operand.
 
 ## Atlas scheduling and hardware rules
 
@@ -32,7 +32,7 @@ DMA configuration sets a global base; hardware ignores the channel encoded by `d
 
 ## Atlas timing and hazard rules
 
-Only `delay imm` and `dma.wait chN` stall the scalar pipe; other accelerator operations are asynchronous. Treat these minimum delays as floors: scalar load or `seld` 2 cycles; `vload`/`vstore` 33; `vtrpose.xlu` 64; `vmatpush`/`vmatpop` 31; `vmatmul` MXU0 95 and MXU1 34; `vunpack.fp8.bf16` 65; VPU row reductions 32–37, column reductions 128; `vli.all`/`vli.row` 63 and `vli.col`/`vli.one` 31; other VPU operations 64. DMA completion requires `dma.wait`, never a fixed delay. Use more time when operations overlap or contend.
+Only `delay imm` and `dma.wait chN` stall the scalar pipe; other accelerator operations are asynchronous. Treat these minimum delays as floors: scalar load or `seld` 2 cycles; `vload`/`vstore` 33; `vtrpose.xlu` 64; `vmatpush`/`vmatpop` 31; `vmatmul` 34; `vunpack.fp8.bf16` 65; VPU row reductions 32–37, column reductions 128; `vli.all`/`vli.row` 63 and `vli.col`/`vli.one` 31; other VPU operations 64. DMA completion requires `dma.wait`, never a fixed delay. Use more time when operations overlap or contend.
 
 A scalar load response cannot coincide with another scalar register writeback; `seld` cannot coincide with `seli`. Separate loads from register-writing work by at least the scalar-load floor. The VMEM LSU is shared: same-bank scalar load plus `vload`, or scalar store plus `vstore`, can assert. Do not issue another `vload` or another `vstore` while that same path is busy. Use 1 KiB-aligned vector bases. DMA shares VMEM ports and can extend LSU progress.
 

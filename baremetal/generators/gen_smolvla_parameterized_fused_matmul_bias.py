@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """Generate test vectors for `smolvla_parameterized_fused_matmul_bias.S`
-(dual-MXU, 64x32x64).
+(MXU1, 64x32x64).
 
 Port of jrmills20 parameterized_fused_matmul_bias.py + the stock
-smolvla_fused_matmul_bias per-tile body, column-split across engines:
-  n_tile == 0 → MXU0 (SA, SARTLLinearFunction)
-  n_tile == 1 → MXU1 (IPT, IPTLinearRTLFunction, FP32-decoded inputs)
+smolvla_fused_matmul_bias per-tile body:
 
   out[m,n] = (A[m,0] @ B[0,n]) + bias[m,n]
 
   - A BF16 quantized on-chip to FP8 via VMATPUSH.ACC.BF16 + VMATPOP.FP8
     (golden side: bf16_tile_to_e4m3_bytes)
   - B pre-quantized FP8 in DRAM (same converter)
-  - Per-tile FP8 matmul routed through the matching software model so
-    each engine's BF16 output matches RTL bit-exactly.
+  - Per-tile FP8 matmul through IPTLinearRTLFunction (FP32-decoded
+    inputs), so the BF16 output matches the MXU1 RTL bit-exactly.
   - Bias added via run_binary_rows("add", ...) to match VADD.BF16 exactly
 """
 
@@ -36,7 +34,6 @@ from vpu_gen_utils import (
     tensor_checks,
     tensor_preloads,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
@@ -96,9 +93,6 @@ def main():
     B = (torch.randn(K, N) * 0.5).to(torch.bfloat16)
     BIAS = torch.randn(M, N, dtype=torch.bfloat16)
 
-    sa_bf16 = SARTLLinearFunction(
-        rows=TILE, cols=TILE, out_fmt_sel=OutputFmtSel.OutBF16
-    )
     ipt_bf16 = IPTLinearRTLFunction(
         vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
         out_fmt_sel=OutputFmtSel.OutBF16,
@@ -140,7 +134,7 @@ def main():
             ))
             bias_offset += BEATS_PER_BF16_TILE
 
-    # ── Per-output-tile golden through SA + bias add ───────────────────
+    # ── Per-output-tile golden through IPT + bias add ──────────────────
     out_offset = OUT_BASE
     for m in range(M_TILES):
         a_tile_bf16 = A[m * TILE:(m + 1) * TILE, 0:TILE]
@@ -149,15 +143,11 @@ def main():
             b_tile_fp8 = b_tiles_fp8[n]
             bias_tile = BIAS[m * TILE:(m + 1) * TILE, n * TILE:(n + 1) * TILE]
 
-            # Both engines compute y = x @ w^T; pass w = B^T for y = A @ B.
-            # .S dispatches n_tile=0 to MXU0 (SA) and n_tile=1 to MXU1 (IPT).
+            # The MXU computes y = x @ w^T; pass w = B^T for y = A @ B.
             w_uint8 = torch.from_numpy(b_tile_fp8.numpy().T.copy())
-            if n == 0:
-                mat_bf16 = sa_bf16(a_tile_fp8, w_uint8, scale_exp=0).to(torch.bfloat16)
-            else:
-                a_fp32 = e4m3_bytes_to_float(a_tile_fp8)
-                w_fp32 = e4m3_bytes_to_float(w_uint8)
-                mat_bf16 = ipt_bf16(a_fp32, w_fp32, scale_exp=0).to(torch.bfloat16)
+            a_fp32 = e4m3_bytes_to_float(a_tile_fp8)
+            w_fp32 = e4m3_bytes_to_float(w_uint8)
+            mat_bf16 = ipt_bf16(a_fp32, w_fp32, scale_exp=0).to(torch.bfloat16)
 
             mat_rows = bf16_tile_to_bank_rows(mat_bf16)
             bias_rows = bf16_tile_to_bank_rows(bias_tile)

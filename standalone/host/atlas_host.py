@@ -840,10 +840,9 @@ class Atlas:
             return r
 
         perf = test.get("perf", {})
-        for unit in ("mxu0", "mxu1"):
-            macs = perf.get(f"macs_{unit}")
-            if macs is not None:
-                r.util[unit] = (macs * 100) // (1024 * dbg1) if dbg1 else 0
+        macs = perf.get("macs_mxu1")
+        if macs is not None:
+            r.util["mxu1"] = (macs * 100) // (1024 * dbg1) if dbg1 else 0
         threshold = perf.get("threshold")
         if threshold is not None and (dbg1 == 0 or any(u < threshold for u in r.util.values())):
             r.status, r.detail = "FAIL", f"utilization {r.util} below {threshold}%"

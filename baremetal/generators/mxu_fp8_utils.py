@@ -3,7 +3,7 @@
 
 Wraps the per-element `bf16_scale_to_e4m3` from the IPT converter into
 a tile-level loop. Mirrors atlas's hardware BF16->FP8 quantization path
-(`VMATPUSH.ACC.BF16.MXU0` + `SELI` + `VMATPOP.FP8.MXU0`).
+(`VMATPUSH.ACC.BF16` + `SELI` + `VMATPOP.FP8`).
 
 Underflow: BF16 values whose scaled unbiased exponent is below -6
 flush to +0 / -0. The converter does NOT emit E4M3 subnormals — see

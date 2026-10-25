@@ -134,8 +134,8 @@ _sim-%: status-% $(BUILD_DIR)/atlas_%.riscv simv
 	    BREAK_SIM_PREREQ=1
 
 # Don't let GNU Make auto-delete .riscv binaries as "intermediate" after a
-# test-% rule consumes them. Without this, `make test-mxu0` would print a
-# bunch of `rm .../atlas_mxu0_*.riscv` lines at the end and the next sweep
+# test-% rule consumes them. Without this, `make test-mxu1` would print a
+# bunch of `rm .../atlas_mxu1_*.riscv` lines at the end and the next sweep
 # would have to relink them. The .c files have the same pattern-rule fate
 # so cover both.
 .SECONDARY: $(GENERATED_C) $(addprefix $(BUILD_DIR)/atlas_,$(addsuffix .riscv,$(TESTS)))

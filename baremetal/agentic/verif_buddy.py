@@ -217,7 +217,7 @@ def _extract_function_signature(text: str, func_name: str) -> str:
 def _extract_class_signature(text: str, class_name: str) -> str:
     """Return the class line plus the signatures (and docstrings) of
     ``__init__`` and ``__call__`` for a single class. Used to surface
-    the software-model adapters (SARTLLinearFunction / IPTLinearRTLFunction)
+    the software-model adapter (IPTLinearRTLFunction)
     without dumping their full implementation bodies into the prompt.
     """
 
@@ -455,7 +455,7 @@ def _load_vpu_gen_utils_reference(path: Path) -> str:
 
 def _load_software_models_reference() -> str:
     """Signature-only surface for the software RTL models used by the checked-in
-    MXU and attention generators. These are the source of truth for MXU0/MXU1
+    MXU and attention generators. These are the source of truth for MXU1
     golden numerics; generators MUST call them instead of re-implementing
     FP8 matmul, E4M3 quantization, or BF16 accumulation.
     """
@@ -464,7 +464,6 @@ def _load_software_models_reference() -> str:
     if not models_dir.is_dir():
         return ""
 
-    sa_path = models_dir / "mxu0_sa" / "systolic_array_rtl_linear.py"
     ipt_path = models_dir / "mxu1_ipt" / "ipt_rtl_linear.py"
     fp_fmt_path = models_dir / "mxu1_ipt" / "fp_formats.py"
     conv_path = models_dir / "mxu1_ipt" / "converters.py"
@@ -472,30 +471,16 @@ def _load_software_models_reference() -> str:
 
     blocks: list[str] = []
 
-    if sa_path.exists():
-        sa_text = sa_path.read_text(encoding="utf-8", errors="replace")
-        sa_sig = _extract_class_signature(sa_text, "SARTLLinearFunction")
-        if sa_sig:
-            blocks.append(
-                "# --- software_models.mxu0_sa.systolic_array_rtl_linear ---\n"
-                "# MXU0 systolic-array functional adapter. Computes\n"
-                "#     y = x @ w^T + b\n"
-                "# with FP32 accumulation over K-tiles and final BF16/E4M3 truncation.\n"
-                "# For C = A @ B + bias, pass w = B.T so y = A @ B.\n"
-                "# Accepts torch tensors (float or uint8 raw E4M3 bytes) and returns\n"
-                "# a torch tensor shaped like x with last dim replaced by out_features.\n"
-                + sa_sig
-            )
-
     if ipt_path.exists():
         ipt_text = ipt_path.read_text(encoding="utf-8", errors="replace")
         ipt_sig = _extract_class_signature(ipt_text, "IPTLinearRTLFunction")
         if ipt_sig:
             blocks.append(
                 "# --- software_models.mxu1_ipt.ipt_rtl_linear ---\n"
-                "# MXU1 inner-product-tree functional adapter. Same y = x @ w^T + b\n"
-                "# contract as SARTLLinearFunction but modeled bit-for-bit against\n"
-                "# the IPT lane RTL (E4M3 inputs, BF16 or E4M3 output format).\n"
+                "# MXU1 inner-product-tree functional adapter. Computes\n"
+                "#     y = x @ w^T + b\n"
+                "# bit for bit against the IPT lane RTL (E4M3 inputs, BF16 or E4M3\n"
+                "# output format). For C = A @ B + bias, pass w = B.T so y = A @ B.\n"
                 + ipt_sig
             )
 
@@ -629,8 +614,7 @@ def _generator_canonical_imports_block() -> str:
         )
 
         # Software RTL models for MXU goldens (use for any test that pushes a
-        # matmul tile through MXU0 / MXU1 — these are bit-exact against the RTL):
-        from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
+        # matmul tile through MXU1 — these are bit-exact against the RTL):
         from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
         from software_models.mxu1_ipt.fp_formats import OutputFmtSel, AddendSel
         from software_models.mxu1_ipt.converters import (
@@ -644,12 +628,12 @@ def _generator_canonical_imports_block() -> str:
 def _generator_examples_block() -> str:
     """Three end-to-end example skeletons covering the common oracle paths:
     MXU+packing via gen_utils, VPU-only via vpu_gen_utils, and a full
-    MXU0+VPU integration using the software RTL model.
+    MXU1+VPU integration using the software RTL model.
     """
 
     mxu_only = textwrap.dedent(
         """\
-        # Example 1: BF16 / FP8 MXU tile test (matches gen_mxu0_single_output_tile_bf16).
+        # Example 1: BF16 / FP8 MXU tile test (matches gen_mxu1_single_output_tile_bf16).
         # DMA→VLOAD→MXU→VSTORE→DMA; uses gen_utils helpers only — no VPU op in the chain.
         #
         # DRAM offsets in the assembly are BYTE offsets from @DRAM_BASE.
@@ -664,9 +648,9 @@ def _generator_examples_block() -> str:
         W_q = quantize_fp8(W).astype(np.float32)
         # Prefer the software RTL model over fp8_matmul_reference when the
         # hardware path uses FP8 inputs with a BF16 accumulator / output,
-        # because SARTLLinearFunction matches the exact MXU0 K-chain rounding:
-        sa = SARTLLinearFunction(rows=32, cols=32, out_fmt_sel=OutputFmtSel.OutBF16)
-        C  = sa(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
+        # because IPTLinearRTLFunction matches the exact MXU1 K-chain rounding:
+        ipt = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
+        C   = ipt(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
         # Preload FP8 tiles at DRAM byte offsets 0x0000 and 0x0400:
         preloads  = preloads_from_words_packed(0x0000 // 32, matrix_to_fp8_words(A_q))
         preloads += preloads_from_words_packed(0x0400 // 32, matrix_to_fp8_words(W_q))
@@ -705,10 +689,10 @@ def _generator_examples_block() -> str:
 
     integ_example = textwrap.dedent(
         """\
-        # Example 3: MXU0 + VPU integration test (matches gen_mxu_chain_vpu_reduce
+        # Example 3: MXU1 + VPU integration test (matches gen_mxu_chain_vpu_reduce
         # and gen_smolvla_fused_*). The assembly stages one or more MXU tiles,
         # pops a BF16 result tensor, then feeds it to the VPU for reduce /
-        # pointwise / pack. The golden chains SARTLLinearFunction for the MXU
+        # pointwise / pack. The golden chains IPTLinearRTLFunction for the MXU
         # stage and `run_*_rows` / `MODEL.execute` for every VPU op.
         import numpy as np
         import torch
@@ -717,8 +701,8 @@ def _generator_examples_block() -> str:
         W = rand_matrix_fp8_safe(TILE, TILE, seed=43)
         A_q = quantize_fp8(A).astype(np.float32)
         W_q = quantize_fp8(W).astype(np.float32)
-        sa = SARTLLinearFunction(rows=32, cols=32, out_fmt_sel=OutputFmtSel.OutBF16)
-        C_bf16 = sa(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
+        ipt = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
+        C_bf16 = ipt(torch.from_numpy(A_q), torch.from_numpy(W_q.T.copy())).numpy()
         # Treat the BF16 result as a 32-row tensor of BF16 bits for VPU consumption.
         from gen_utils import float_to_bf16_bits  # already imported above
         mxu_bits = np.vectorize(float_to_bf16_bits)(C_bf16).astype(np.uint16)
@@ -768,12 +752,10 @@ def _load_generator_helper_reference() -> str:
            binary, row/col reduce, VLI, fp8pack/fp8unpack. Do NOT hand-simulate
            exp / sqrt / tanh / relu / rcp; they go through the model which is the
            bit-exact mirror of the RTL lane boxes.
-        3. `generators/software_models/` — bit-exact RTL models of the two MXUs and
-           the VPU:
-             - `software_models.mxu0_sa.systolic_array_rtl_linear.SARTLLinearFunction`
-               — MXU0 golden for BF16 / FP8 matmul with optional bias.
+        3. `generators/software_models/` — bit-exact RTL models of MXU1 and the VPU:
              - `software_models.mxu1_ipt.ipt_rtl_linear.IPTLinearRTLFunction` —
-               MXU1 (inner-product-tree) golden, same contract.
+               MXU1 (inner-product-tree) golden for BF16 / FP8 matmul with
+               optional bias.
              - `software_models.mxu1_ipt.fp_formats` — canonical enums
                (`OutputFmtSel`, `AddendSel`) and BF16/E4M3 rounding primitives.
              - `software_models.mxu1_ipt.converters` — `bf16_scale_to_e4m3` and
@@ -1581,8 +1563,8 @@ tests contribute coverage.
    `generators/vpu_gen_utils.py` (VPU functional-model wrappers: `run_unary_rows`,
    `run_binary_rows`, `run_row_reduce_tensor`, `run_col_reduce_tensor`,
    `run_fp8_pack_rows`, `run_vli_rows`, `tensor_preloads`/`tensor_checks`), and
-   `generators/software_models/` (the bit-exact MXU0 `SARTLLinearFunction`, MXU1
-   `IPTLinearRTLFunction`, VPU `VectorEngineModel`, and `bf16_scale_to_e4m3` /
+   `generators/software_models/` (the bit-exact MXU1 `IPTLinearRTLFunction`,
+   VPU `VectorEngineModel`, and `bf16_scale_to_e4m3` /
    `OutputFmtSel` / `AddendSel`). They are the single source of truth for every
    numerical model in the chip. If you find yourself writing a custom
    `bf16_word(v)` lookup, a `fp8_byte(v)` dict, a `(v << 8)` conversion, an

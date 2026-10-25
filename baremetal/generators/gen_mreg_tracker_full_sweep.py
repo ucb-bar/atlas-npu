@@ -7,7 +7,7 @@ and a VSTORE source. Because every VLOAD uses the SAME 1 KiB source
 tile, every VSTORE result also equals that same 1 KiB tile. The DRAM
 output region is therefore the input tile concatenated 64 times.
 
-Mid-test "cross-engine" touches (VPU VMOV, XLU transpose, MXU0/MXU1
+Mid-test "cross-engine" touches (VPU VMOV, XLU transpose, MXU1
 push/pop) rewrite some MREG banks, but the assembly RELOADS every
 bank from the source before the VSTORE sweep, so those intermediate
 rewrites do not affect the oracle. Their purpose is purely to make

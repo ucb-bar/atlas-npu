@@ -8,7 +8,6 @@
         "Target subsystem combinations that the analyzer explicitly marks as absent or shallowly covered.",
         "Prefer tests that exercise at least one data-movement stage, one compute stage, and one control or validation stage in the same program.",
         "Prioritize combinations that force realistic producer-consumer flows such as DMA -> VMEM -> VPU/MXU -> DMA store-back.",
-        "Use both MXU0 and MXU1 when concurrency or dual-pipeline behavior is a meaningful differentiator.",
         "Favor dataflows where the output of one functional unit becomes the direct input of another, such as DMA -> VLOAD -> VPU transform -> MXU consume -> VSTORE/DMA."
       ]
     },

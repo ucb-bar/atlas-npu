@@ -6,14 +6,14 @@
 # Coverage intent:
 #   - XLU transpose result is reused by multiple downstream consumers.
 #   - Scalar branch predicate comes from a stored transpose result.
-#   - Common follow-on path uses the transposed tile as MXU0 weight.
+#   - Common follow-on path uses the transposed tile as MXU1 weight.
 #   - End-to-end DMA -> VLOAD -> XLU -> VSTORE/scalar read -> branch -> MXU -> DMA.
 #
 # DRAM byte layout:
 #   [0x0000 .. 0x03FF]  A_fp8 activation tile                (1024 B)
 #   [0x0400 .. 0x07FF]  B_fp8 raw tile                       (1024 B)
 #   [0x1000 .. 0x13FF]  transposed B_fp8 tile               (1024 B)
-#   [0x1800 .. 0x1FFF]  MXU0 BF16 result tile               (2048 B)
+#   [0x1800 .. 0x1FFF]  MXU1 BF16 result tile               (2048 B)
 #
 # VMEM word layout:
 #   0      A fp8
@@ -74,12 +74,12 @@
     BEQ   x21, x0, fail
     ADDI  x29, x0, 7
 
-    # Use the same transposed bank as MXU0 weight.
-    vmatpush.weight.mxu0 w0, m8
+    # Use the same transposed bank as MXU1 weight.
+    vmatpush.weight.mxu1 w0, m8
     DELAY 31
-    vmatmul.mxu0 acc0, m0, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m12, acc0
+    vmatmul.mxu1 acc0, m0, w0
+    DELAY 34
+    vmatpop.bf16.acc.mxu1 m12, acc0
     DELAY 31
 
     # Store BF16 result pair.

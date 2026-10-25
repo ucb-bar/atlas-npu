@@ -3,11 +3,11 @@
 gen_triple_unit_concurrent.py
 
 Generate test vectors for triple_unit_concurrent.S which exercises
-concurrent MXU0 + MXU1 + VPU execution.
+concurrent MXU1 (both accumulators) + VPU execution.
 
 Computations:
-    MXU0 (SA):  C0 = X0 @ W0          (32×32 BF16)
-    MXU1 (IPT): C1 = X1 @ W1          (32×32 BF16)
+    MXU1 acc1:  C0 = X0 @ W0          (32×32 BF16)
+    MXU1 acc0:  C1 = X1 @ W1          (32×32 BF16)
     VPU:        D  = vadd(A, B)        (32×32 BF16)
                 E  = vmul(A, B)        (32×32 BF16)
                 F  = vadd(C0, C1)      (cross-unit post-process)
@@ -40,7 +40,6 @@ from vpu_gen_utils import (
     pack_u16_le,
     run_binary_rows,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
@@ -152,11 +151,6 @@ def emit_bf16_rows_preload(preloads, byte_off, rows: list[list[int]]):
 # Functional models
 # ------------------------------------------------------------------
 
-sa_bf16 = SARTLLinearFunction(
-    rows=32, cols=32,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
-
 ipt_bf16 = IPTLinearRTLFunction(
     vec_len=32, num_lanes=32, pipeline_depth=1,
     out_fmt_sel=OutputFmtSel.OutBF16,
@@ -188,17 +182,17 @@ B_vpu_b1_rows = float_matrix_to_bf16_rows(B_vpu_float[:, 16:])
 zero_bias = np.zeros((TILE, TILE), dtype=np.float32)
 
 # ------------------------------------------------------------------
-# Reference: MXU0 (SA) — C0 = X0 @ W0
+# Reference: MXU1 acc1 — C0 = X0 @ W0
 # ------------------------------------------------------------------
 
 X0_t = torch.from_numpy(X0)
 W0_t = torch.from_numpy(W0.T.copy())  # F.linear: y = x @ w^T → pass W0^T
 b0_t = torch.zeros(TILE)
 
-C0 = sa_bf16(X0_t, W0_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
+C0 = ipt_bf16(X0_t, W0_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
 
 # ------------------------------------------------------------------
-# Reference: MXU1 (IPT) — C1 = X1 @ W1
+# Reference: MXU1 acc0 — C1 = X1 @ W1
 # ------------------------------------------------------------------
 
 X1_t = torch.from_numpy(X1)
@@ -254,10 +248,10 @@ emit_bf16_rows_preload(preloads, A_VPU_B1_BASE, A_vpu_b1_rows)
 emit_bf16_rows_preload(preloads, B_VPU_B0_BASE, B_vpu_b0_rows)
 emit_bf16_rows_preload(preloads, B_VPU_B1_BASE, B_vpu_b1_rows)
 
-# MXU0 result check (BF16 split into lo/hi banks)
+# C0 result check (BF16 split into lo/hi banks)
 emit_bf16_split_check(checks, C0_LO_BASE, C0_HI_BASE, C0)
 
-# MXU1 result check
+# C1 result check
 emit_bf16_split_check(checks, C1_LO_BASE, C1_HI_BASE, C1)
 
 # VPU add result check

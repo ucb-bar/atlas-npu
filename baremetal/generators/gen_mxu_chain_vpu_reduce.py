@@ -5,9 +5,9 @@ gen_mxu_chain_vpu_reduce.py
 Generate test vectors for mxu_chain_vpu_reduce.S.
 
 Attention-like pipeline:
-    Phase A: MXU0 → Q = X @ WQ  (FP8 pop)
+    Phase A: MXU1 → Q = X @ WQ  (FP8 pop)
     Phase B: MXU1 → K = X @ WK  (FP8 pop)
-    Phase C: MXU0 → S = Q @ K^T (BF16 pop)
+    Phase C: MXU1 → S = Q @ K^T (BF16 pop)
     Phase D: VPU  → biased = S + bias_vpu
 
 Also: VPU vmin(A, B) runs during Phase A→B transition.
@@ -41,7 +41,6 @@ from vpu_gen_utils import (
     pack_u16_le,
     run_binary_rows,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
@@ -127,10 +126,9 @@ def emit_bf16_rows_check(checks, byte_off_b0, byte_off_b1, rows_b0, rows_b1):
 
 
 # ------------------------------------------------------------------
-# BF16 → E4M3 conversion (models VMATPOP.FP8 stage for MXU0 SA)
+# BF16 → E4M3 conversion (models the VMATPOP.FP8 stage)
 #
-# Reuse the same conversion logic from gen_mxu1_qk_scores.py,
-# as the FP8 pop hardware is shared between MXU0 and MXU1.
+# Reuse the same conversion logic from gen_mxu1_qk_scores.py.
 # ------------------------------------------------------------------
 
 def round_right_shift_4_rne(x: int) -> int:
@@ -200,11 +198,6 @@ def bf16_tile_to_scaled_fp8(tile_bf16, scale_e8m0):
 # Functional models
 # ------------------------------------------------------------------
 
-sa_bf16 = SARTLLinearFunction(
-    rows=32, cols=32,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
-
 ipt_bf16 = IPTLinearRTLFunction(
     vec_len=32, num_lanes=32, pipeline_depth=1,
     out_fmt_sel=OutputFmtSel.OutBF16,
@@ -233,9 +226,9 @@ bias_vpu_b1_rows = float_matrix_to_bf16_rows(bias_vpu[:, 16:])
 zero_bias = np.zeros((TILE, TILE), dtype=np.float32)
 
 # ------------------------------------------------------------------
-# Phase A: MXU0 → Q = X @ WQ (BF16 acc → FP8 pop)
+# Phase A: MXU1 → Q = X @ WQ (BF16 acc → FP8 pop)
 #
-# MXU0 (SA) uses F.linear: y = x @ w^T. Pass w = WQ^T.
+# MXU1 (IPT) uses F.linear: y = x @ w^T. Pass w = WQ^T.
 # Accumulate in BF16, then pop as FP8 with identity scale.
 # ------------------------------------------------------------------
 
@@ -243,7 +236,7 @@ X_t  = torch.from_numpy(X)
 WQ_t = torch.from_numpy(WQ.T.copy())
 b0_t = torch.zeros(TILE)
 
-Q_bf16 = sa_bf16(X_t, WQ_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
+Q_bf16 = ipt_bf16(X_t, WQ_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
 Q_fp8  = bf16_tile_to_scaled_fp8(Q_bf16, SCALE_E8M0)
 
 # ------------------------------------------------------------------
@@ -256,16 +249,16 @@ K_bf16 = ipt_bf16(X_t, WK_t, scale_exp=0).numpy().astype(np.float32)
 K_fp8  = bf16_tile_to_scaled_fp8(K_bf16, SCALE_E8M0)
 
 # ------------------------------------------------------------------
-# Phase C: MXU0 → S = Q @ K^T (BF16 pop)
+# Phase C: MXU1 → S = Q @ K^T (BF16 pop)
 #
-# K is pushed directly as weights (no transpose) so MXU0 computes
+# K is pushed directly as weights (no transpose) so MXU1 computes
 # Q @ K^T. F.linear: y = x @ w^T, pass w = K (32×32) → Q @ K^T.
 # ------------------------------------------------------------------
 
 Q_t = torch.from_numpy(Q_fp8.astype(np.float32))
 K_t = torch.from_numpy(K_fp8.astype(np.float32))
 
-scores = sa_bf16(Q_t, K_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
+scores = ipt_bf16(Q_t, K_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
 
 # ------------------------------------------------------------------
 # Phase D: VPU → biased = vadd(scores, bias_vpu)

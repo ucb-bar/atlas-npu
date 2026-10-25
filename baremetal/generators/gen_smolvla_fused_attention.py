@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Generate test vectors for `smolvla_fused_attention.S` (dual-MXU).
+"""Generate test vectors for `smolvla_fused_attention.S` (MXU1).
 
-Port of npu-model/npu_model/configs/programs/smolvla_fused_attention.py,
-phase-split across both MXU engines:
+Port of npu-model/npu_model/configs/programs/smolvla_fused_attention.py:
 
     for each K tile:
-        scores  = Q @ K^T              (MXU0 / SA — K-chain accumulator over
+        scores  = Q @ K^T              (MXU1 / IPT — K-chain accumulator over
                                          head_dim=64, BF16 inputs quantized
                                          to FP8 on-chip via acc roundtrip)
         scaled  = scores * scale       (VPU pair op)
@@ -13,8 +12,7 @@ phase-split across both MXU engines:
         exp_diff= exp(m_prev - m_new)
         O      *= exp_diff
         exp_s   = exp(scaled - m_new)
-        exp_s_q = quantize(exp_s) BF16→FP8 (MXU0 acc roundtrip, idle at
-                                             this point)
+        exp_s_q = quantize(exp_s) BF16→FP8 (MXU1 acc roundtrip on acc1)
         O      += exp_s_q @ V_left | V_right (MXU1 / IPT — two passes)
         l       = exp_diff * l + rowsum(exp_s)
         m_prev  = m_new
@@ -26,12 +24,9 @@ Atlas's MXU computes A @ W^T natively. Q @ K^T pushes K as W (no XLU).
 exp_s @ V_left pushes V_mlir[:32, :] as W (since V_left = V_mlir[:32, :]^T).
 
 Golden mirrors atlas hardware, routed per-phase through the matching
-software model so each engine's rounding path is bit-exact:
-  - SARTLLinearFunction (MXU0 / SA) handles Q @ K^T: K-chain FP32
-    accumulator + final BF16 truncation, with internal FP8 quantization
-    of BF16-valued FP32 inputs via `float_to_e4m3_bytes_c`. Matches
-    VMATPUSH.ACC.BF16 + VMATPOP.FP8 with scale_exp=0.
-  - IPTLinearRTLFunction (MXU1 / IPT) handles exp_s_q @ V_left|V_right:
+software model so each rounding path is bit-exact:
+  - IPTLinearRTLFunction (MXU1 / IPT) handles Q @ K^T (a K-chain with a
+    BF16 accumulator between the two K tiles) and exp_s_q @ V_left|V_right:
     aligned-tree accumulation with a single RNE rounding at the tree
     output. IPT requires FP32 inputs, so raw E4M3 bytes are decoded via
     `e4m3_bytes_to_float`.
@@ -68,7 +63,6 @@ from vpu_gen_utils import (
     run_row_reduce_tensor,
     run_unary_rows,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import (
@@ -178,10 +172,6 @@ def main():
     V0_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
     V1_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
 
-    # MXU0 (SA) for Q @ K^T; MXU1 (IPT) for probs @ V_left|V_right.
-    sa_bf16 = SARTLLinearFunction(
-        rows=Q_ROWS, cols=Q_ROWS, out_fmt_sel=OutputFmtSel.OutBF16
-    )
     ipt_bf16 = IPTLinearRTLFunction(
         vec_len=Q_ROWS, num_lanes=Q_ROWS, pipeline_depth=1,
         out_fmt_sel=OutputFmtSel.OutBF16,
@@ -209,8 +199,8 @@ def main():
     # ── Per K-tile flash-attention body ──
     for K_RAW, V_MLIR in [(K0_RAW, V0_MLIR), (K1_RAW, V1_MLIR)]:
         K_FP8 = bf16_tile_to_e4m3_bytes(K_RAW)
-        scores_bf16 = sa_bf16(
-            Q_FP8, K_FP8, scale_exp=0
+        scores_bf16 = ipt_bf16(
+            e4m3_bytes_to_float(Q_FP8), e4m3_bytes_to_float(K_FP8), scale_exp=0
         ).to(torch.bfloat16)
         scores_low, scores_high = bf16_tile_to_bank_rows(scores_bf16)
         scores_rows = scores_low + scores_high
@@ -242,8 +232,7 @@ def main():
         V_top_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[:Q_ROWS, :].contiguous())
         V_bot_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[Q_ROWS:, :].contiguous())
 
-        # probs @ V on MXU1 (IPT): decode E4M3 bytes to FP32 since IPT
-        # doesn't accept uint8 directly the way SA does.
+        # probs @ V: decode E4M3 bytes to FP32 since IPT doesn't accept uint8.
         exp_s_fp32 = e4m3_bytes_to_float(exp_s_fp8)
         V_top_fp32 = e4m3_bytes_to_float(V_top_fp8)
         V_bot_fp32 = e4m3_bytes_to_float(V_bot_fp8)

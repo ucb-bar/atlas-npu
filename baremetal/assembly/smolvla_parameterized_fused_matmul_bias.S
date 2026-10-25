@@ -1,9 +1,7 @@
-# smolvla_parameterized_fused_matmul_bias.S — dual-MXU tiled
-#   (A_bf16 @ B_fp8) + bias_bf16
-# Column-split across engines: output tiles with n_tile=0 run on MXU0
-# (SA); tiles with n_tile=1 run on MXU1 (IPT). The BF16→FP8 quantize
-# roundtrip for A stays on MXU0's acc[1] (idle at that point); both
-# matmul engines read the same quantized FP8 mreg.
+# smolvla_parameterized_fused_matmul_bias.S — tiled
+#   (A_bf16 @ B_fp8) + bias_bf16 on MXU1
+# The BF16→FP8 quantize roundtrip for A uses MXU1's acc[1]; the matmul
+# uses acc[0] and reads the quantized FP8 mreg.
 #
 # Port of jrmills20 parameterized_fused_matmul_bias.py + the stock
 # smolvla_fused_matmul_bias per-tile body.
@@ -128,36 +126,19 @@ output_tile_loop:
     DELAY 64
 
     # ── Quantize A bf16 (m0,m1) → m8 fp8 via acc[1] roundtrip ──
-    vmatpush.acc.bf16.mxu0 acc1, m0
+    vmatpush.acc.bf16.mxu1 acc1, m0
     DELAY 31
     seli e0, 0x7F
-    vmatpop.fp8.acc.mxu0 m8, acc1, e0
+    vmatpop.fp8.acc.mxu1 m8, acc1, e0
     DELAY 31
 
-    # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
-    BNE   x13, x0, matmul_mxu1
-    NOP
-
-    # ── MXU0 path: (m10,m11) = m8 @ m5 (= A @ B) ──
-    vmatpush.weight.mxu0 w0, m5
-    DELAY 31
-    vmatmul.mxu0 acc0, m8, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m10, acc0
-    DELAY 31
-    BEQ   x0, x0, matmul_done
-    NOP
-
-matmul_mxu1:
-    # ── MXU1 path ──
+    # ── MXU1: (m10,m11) = m8 @ m5 (= A @ B) ──
     vmatpush.weight.mxu1 w0, m5
     DELAY 31
     vmatmul.mxu1 acc0, m8, w0
     DELAY 34
     vmatpop.bf16.acc.mxu1 m10, acc0
     DELAY 31
-
-matmul_done:
 
     # ── Bias add: (m12, m13) = (m10, m11) + (m6, m7) ──
     vadd.bf16 m12, m10, m6

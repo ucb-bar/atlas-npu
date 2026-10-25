@@ -31,7 +31,7 @@
 #   5. Cross-engine passes on the known-weak banks {32, 34, 35, 49, 51}:
 #        - VPU VMOV pair ops read/write these banks
 #        - XLU transpose uses them as source/dest
-#        - MXU0/MXU1 push/pop uses them as weight / accumulator sources
+#        - MXU1 push/pop uses them as weight / accumulator sources
 #      These touches don't extend the oracle (they re-stage into banks
 #      we never check), but they do exercise the tracker from multiple
 #      non-LSU engines on those specific banks.
@@ -210,7 +210,7 @@
 #     m34 <- xlu(m35)   (single bank)
 #     m49 <- xlu(m51)
 #
-#   MXU0 weight push from m34, acc seed from m3, matmul on m32,
+#   MXU1 weight push from m34, acc seed from m3, matmul on m32,
 #   pop back into m36. This exercises the tracker seeing MXU-sourced
 #   reads/writes on mid-range banks.
 # ----------------------------------------------------------------------
@@ -234,15 +234,15 @@
     vtrpose.xlu m49, m51
     DELAY 64
 
-    # MXU0 touch on weak banks: push weight from m34, zero-seed acc from m3,
+    # MXU1 touch on weak banks: push weight from m34, zero-seed acc from m3,
     # compute using m32 as activation, pop back into m36.
-    vmatpush.weight.mxu0 w0, m34
+    vmatpush.weight.mxu1 w0, m34
     DELAY 31
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31
-    vmatmul.mxu0 acc0, m32, w0
-    DELAY 95
-    vmatpop.fp8.acc.mxu0 m36, acc0, e0
+    vmatmul.mxu1 acc0, m32, w0
+    DELAY 34
+    vmatpop.fp8.acc.mxu1 m36, acc0, e0
     DELAY 31
 
     # MXU1 touch: push weight from m49, acc seed from m3, matmul with m51, pop to m53.

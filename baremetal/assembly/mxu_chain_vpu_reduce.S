@@ -1,13 +1,13 @@
-# mxu_chain_vpu_reduce.S — MXU0→FP8→MXU1 chain + VPU post-process
+# mxu_chain_vpu_reduce.S — MXU1 → FP8 → MXU1 chain + VPU post-process
 # @TIMEOUT 1000000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_mxu_chain_vpu_reduce.py 333
 #
 # Attention-like pipeline exercising all three functional units:
 #
-#   Phase A: MXU0 computes Q = X @ WQ   (32×32, BF16 acc → FP8 pop)
+#   Phase A: MXU1 computes Q = X @ WQ   (32×32, BF16 acc → FP8 pop)
 #   Phase B: MXU1 computes K = X @ WK   (32×32, BF16 acc → FP8 pop)
-#   Phase C: MXU0 computes S = Q @ K^T  (32×32, BF16 pop — final scores)
+#   Phase C: MXU1 computes S = Q @ K^T  (32×32, BF16 pop — final scores)
 #   Phase D: VPU computes bias_add = S + bias_vpu  (BF16 element-wise)
 #
 # VPU ops run interleaved during DMA/transpose stalls:
@@ -15,12 +15,12 @@
 #   VPU-2: vadd(S, bias) after Phase C (cross-unit dependency)
 #
 # Overlap patterns:
-#   [a] MXU0 w-push + acc-push (Phase A prologue)
-#   [b] MXU0 compute + MXU0 w-push (not used — single k-tile)
+#   [a] MXU1 w-push + acc-push (Phase A prologue)
+#   [b] MXU1 compute + MXU1 w-push (not used — single k-tile)
 #   [c] MXU1 w-push + acc-push (Phase B prologue)
-#   [d] MXU0 FP8 pop + VPU vmin (concurrent pop + VPU, Phase A→B)
+#   [d] MXU1 FP8 pop + VPU vmin (concurrent pop + VPU, Phase A→B)
 #   [e] MXU1 FP8 pop + DMA store (pop while storing Q, Phase B→C)
-#   [f] MXU0 compute (Phase C) + DMA load (K for wbuf)
+#   [f] MXU1 compute (Phase C) + DMA load (K for wbuf)
 #   [g] 4-channel DMA parallel (initial load)
 #   [h] VPU vadd + DMA store (storing scores while VPU processes)
 #
@@ -29,9 +29,9 @@
 #   m1    weight raw scratch (XLU input)
 #   m2    weight transposed (XLU output)
 #   m3    zero bias (persistent)
-#   m4    Q pop result (FP8, from MXU0)
+#   m4    Q pop result (FP8, from MXU1)
 #   m5    K pop result (FP8, from MXU1)
-#   m6,7  BF16 scores pop (from MXU0 Phase C)
+#   m6,7  BF16 scores pop (from MXU1 Phase C)
 #   m8,9  VPU input A (BF16, for vmin)
 #   m10,11 VPU input B (BF16, for vmin)
 #   m12,13 VPU vmin output / VPU vadd output
@@ -140,7 +140,7 @@
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE A: MXU0 computes Q = X @ WQ → acc 0 → FP8 pop → m4
+# PHASE A: MXU1 computes Q = X @ WQ → acc 0 → FP8 pop → m4
 # ═══════════════════════════════════════════════════════════════
 
     # Load WQ → m1 → XLU → m2
@@ -154,9 +154,9 @@
     vtrpose.xlu m2, m1
     DELAY 64
 
-    # ── [a] MXU0 w-push + acc-push ──
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    # ── [a] MXU1 w-push + acc-push ──
+    vmatpush.weight.mxu1 w0, m2
+    vmatpush.acc.fp8.mxu1 acc0, m3
 
     # Load X → m0
     ADDI  x6, x0, 0
@@ -167,14 +167,14 @@
     vload m0, 0(x6)
     DELAY 33
 
-    # MXU0 compute Q
-    vmatmul.acc.mxu0 acc0, m0, w0
-    DELAY 95
+    # MXU1 compute Q
+    vmatmul.acc.mxu1 acc0, m0, w0
+    DELAY 34
 
-    # ── [d] MXU0 FP8 pop + VPU vmin (concurrent) ──
-    # MXU0 pops acc 0 → m4 (FP8). VPU computes vmin on m8,m10 → m12.
+    # ── [d] MXU1 FP8 pop + VPU vmin (concurrent) ──
+    # MXU1 pops acc 0 → m4 (FP8). VPU computes vmin on m8,m10 → m12.
     # Different functional units, different TRF banks. Safe.
-    vmatpop.fp8.acc.mxu0 m4, acc0, e0
+    vmatpop.fp8.acc.mxu1 m4, acc0, e0
     vminimum.bf16 m12, m8, m10
     DELAY 64
 
@@ -241,7 +241,7 @@
     dma.wait ch2
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE C: MXU0 computes S = Q @ K^T → acc 0 → BF16 pop → m6,m7
+# PHASE C: MXU1 computes S = Q @ K^T → acc 0 → BF16 pop → m6,m7
 #
 # K is pushed directly as weights (no transpose) to get Q @ K^T.
 # This mirrors the attention score computation.
@@ -256,10 +256,10 @@
     vload m1, 0(x6)
     DELAY 33
 
-    vmatpush.weight.mxu0 w0, m1    # K directly as weights
-    vmatpush.acc.fp8.mxu0 acc0, m3    # zero bias → acc 0
+    vmatpush.weight.mxu1 w0, m1    # K directly as weights
+    vmatpush.acc.fp8.mxu1 acc0, m3    # zero bias → acc 0
 
-    # ── [f] Load Q from DRAM (DMA) while MXU0 push completes ──
+    # ── [f] Load Q from DRAM (DMA) while MXU1 push completes ──
     ADDI  x6, x0, 0
     LI    x10, 0x90002800
     dma.load x6, x10, x12, ch1     # ch1 for Q load
@@ -268,12 +268,12 @@
     vload m0, 0(x6)                 # m0 ← Q (activations)
     DELAY 33
 
-    # MXU0 compute S = Q @ K^T
-    vmatmul.acc.mxu0 acc0, m0, w0
-    DELAY 95
+    # MXU1 compute S = Q @ K^T
+    vmatmul.acc.mxu1 acc0, m0, w0
+    DELAY 34
 
     # BF16 pop → m6,m7
-    vmatpop.bf16.acc.mxu0 m6, acc0
+    vmatpop.bf16.acc.mxu1 m6, acc0
     DELAY 31
 
     # Store scores m6,m7 → DRAM

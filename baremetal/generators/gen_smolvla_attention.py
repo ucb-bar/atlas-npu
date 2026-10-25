@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Generate test vectors for `smolvla_attention.S` (dual-MXU).
+"""Generate test vectors for `smolvla_attention.S` (MXU1).
 
-Port of npu-model/npu_model/configs/programs/smolvla_attention.py,
-phase-split across both MXU engines:
+Port of npu-model/npu_model/configs/programs/smolvla_attention.py:
 
-    scores = Q @ K                 (MXU0 / SA)
+    scores = Q @ K                 (MXU1 / IPT)
     probs  = softmax(scores * scale)
     packed = VFP8PACK(probs)       (atlas 2→1 phased layout, not row-preserving)
     out    = packed @ V            (MXU1 / IPT)
@@ -17,9 +16,8 @@ Atlas's VFP8PACK does NOT produce npu-model's row-preserving
 bank then 0..31 of the high bank through a 2-row pack lane box, so
 packed row i = concat(fp8(src[2i]), fp8(src[2i+1])). The second matmul
 therefore does NOT compute probs@V in the PyTorch attention sense. The
-golden routes each matmul through the matching software model
-(SARTLLinearFunction for MXU0 scores, IPTLinearRTLFunction for MXU1
-out) so RTL matches bit-exactly per phase.
+golden routes both matmuls through IPTLinearRTLFunction, so RTL matches
+bit-exactly per phase.
 """
 
 import math
@@ -48,7 +46,6 @@ from vpu_gen_utils import (
     tensor_checks,
     tensor_preloads,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
@@ -92,10 +89,9 @@ def packed_rows_to_fp8_bytes(packed_rows: list[list[int]]) -> torch.Tensor:
     """Reassemble VFP8PACK output (32 rows × 16 UInt16 slots) into raw
     (32, 32) FP8 E4M3 bytes.
 
-    Feed these bytes directly to SARTLLinearFunction so the golden
-    uses the same already-quantized activations that hardware feeds
-    into the second matmul, instead of going through the float32
-    quantization shim again.
+    Decode these bytes for IPTLinearRTLFunction so the golden uses the
+    same already-quantized activations that hardware feeds into the
+    second matmul.
     """
     if len(packed_rows) != TILE:
         raise ValueError(f"expected {TILE} packed rows, got {len(packed_rows)}")
@@ -113,10 +109,6 @@ def packed_rows_to_fp8_bytes(packed_rows: list[list[int]]) -> torch.Tensor:
 
 
 def main():
-    # MXU0 (SA) for scores = Q @ K; MXU1 (IPT) for out = packed @ V.
-    sa_bf16 = SARTLLinearFunction(
-        rows=TILE, cols=TILE, out_fmt_sel=OutputFmtSel.OutBF16
-    )
     ipt_bf16 = IPTLinearRTLFunction(
         vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
         out_fmt_sel=OutputFmtSel.OutBF16,
@@ -138,8 +130,11 @@ def main():
     v_u8_t = V.view(torch.uint8).T.contiguous()
 
     # scores = Q @ K.  Atlas MXU does A @ W^T, so push K^T as weight:
-    # sa_bf16(Q, K.T) computes Q @ K.
-    scores_bf16 = sa_bf16(q_u8, k_u8_t, scale_exp=0).to(torch.bfloat16)
+    # ipt_bf16(Q, K.T) computes Q @ K. IPT needs FP32, so decode the FP8
+    # bytes first.
+    scores_bf16 = ipt_bf16(
+        e4m3_bytes_to_float(q_u8), e4m3_bytes_to_float(k_u8_t), scale_exp=0
+    ).to(torch.bfloat16)
 
     scores_low, scores_high = bf16_tile_to_bank_rows(scores_bf16)
     scale_low, scale_high = bf16_tile_to_bank_rows(scale_tile)
@@ -163,8 +158,7 @@ def main():
     )
     packed_u8 = packed_rows_to_fp8_bytes(packed_rows)
 
-    # out = packed @ V on MXU1 (IPT).  Again push V^T so MXU computes
-    # packed @ V. IPT needs FP32, so decode the FP8 bytes first.
+    # out = packed @ V.  Again push V^T so MXU computes packed @ V.
     packed_fp32 = e4m3_bytes_to_float(packed_u8)
     v_fp32_t = e4m3_bytes_to_float(v_u8_t)
     out_bf16 = ipt_bf16(packed_fp32, v_fp32_t, scale_exp=0).to(torch.bfloat16)

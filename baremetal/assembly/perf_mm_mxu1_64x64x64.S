@@ -49,8 +49,6 @@
 # (32 cyc, post-w0LastCycle collapse — POP→POP stride 32, was 33) + POP
 # C11 dispatch + CSRR = 291.
 #
-# Tiling, MREG allocation, DRAM layout — same as MXU0 perf test.
-#
 # MREG allocation (m0–m11, all in distinct physical banks):
 #   m0  A00   m4  B00_T   m8   C00 (final pop dest)
 #   m1  A01   m5  B01_T   m9   C01
@@ -146,7 +144,7 @@
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — snapshot start cycle right before first PUSH
-# (matches MXU0 perf-test convention; first PUSH is part of timed region)
+# (matches the MXU1 perf-test convention; first PUSH is part of timed region)
 # ═══════════════════════════════════════════════════════════════
     csrrs x20, 0xC00, x0                # cycle 0
 
@@ -202,7 +200,7 @@
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
 # Note: CSRR x21 fires right after POP C11 issue, NOT after POP C11 fully
-# drains to MREG. Convention matches MXU0 perf test.
+# drains to MREG. Convention matches the MXU1 K=128 perf test.
 # ═══════════════════════════════════════════════════════════════
     csrrs x21, 0xC00, x0                # cyc 291
     SUB   x22, x21, x20

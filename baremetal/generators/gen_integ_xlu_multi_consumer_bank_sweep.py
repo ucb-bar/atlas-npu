@@ -9,7 +9,7 @@ from gen_utils import (
     checks_from_words_packed,
     bf16_bits_to_words,
     matrix_to_fp8_words,
-    mxu0_sa_bf16_bits,
+    mxu1_bf16_bits,
     quantize_fp8,
     rand_matrix_fp8_safe,
 )
@@ -23,8 +23,7 @@ A1 = quantize_fp8(rand_matrix_fp8_safe(32, 32, seed=103)).astype(np.float32)
 B1 = quantize_fp8(rand_matrix_fp8_safe(32, 32, seed=104)).astype(np.float32)
 
 # Assembly transposes B before pushing as MXU weight, so result is A0 @ B0.
-# Use the SA model because MXU0 rounds through the PE chain, not as one fp32 dot.
-C0_bits = mxu0_sa_bf16_bits(A0, B0)
+C0_bits = mxu1_bf16_bits(A0, B0)
 B1_t = quantize_fp8(B1.T).astype(np.float32)
 
 preloads = []

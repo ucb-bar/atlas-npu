@@ -1,10 +1,10 @@
-# smolvla_fused_attention.S — dual-MXU flash attention (MXU0 + MXU1)
+# smolvla_fused_attention.S — flash attention on MXU1
 # Tests: flash attention (online softmax) over a 2-K-tile attention block
 #   Q[32,64] BF16, K[32,64] BF16 (×2 tiles), V_mlir[64,32] BF16 (×2 tiles)
 #   head_dim = 64, k_seq = 64
 #
 #   for each K tile:
-#     scores  = Q @ K^T              (MXU0, FP8 → BF16, accumulator chain)
+#     scores  = Q @ K^T              (MXU1, FP8 → BF16, accumulator chain)
 #     scaled  = scores * scale       (VPU pair op)
 #     m_new   = max(m_prev, rowmax(scaled))
 #     exp_diff= exp(m_prev - m_new)
@@ -24,9 +24,9 @@
 # weight directly (no XLU): Q @ K^T uses K as weight; exp_s @ V_left
 # uses V_mlir[0:32,:] as weight (since V_left = V_mlir[0:32,:]^T).
 #
-# BF16 → FP8 quantization uses atlas's MXU0 acc-roundtrip path:
-# VMATPUSH.ACC.BF16.MXU0 acc, vs writes (m_vs, m_vs+1) BF16 directly
-# into accumulator buffer; VMATPOP.FP8.MXU0 vd, scaleReg, acc reads
+# BF16 → FP8 quantization uses atlas's MXU1 acc-roundtrip path:
+# VMATPUSH.ACC.BF16.MXU1 acc, vs writes (m_vs, m_vs+1) BF16 directly
+# into accumulator buffer; VMATPOP.FP8.MXU1 vd, scaleReg, acc reads
 # the same BF16 lanes and quantizes to E4M3 (unit scale via SELI 0x7F).
 # This preserves row order (unlike VFP8PACK which permutes 2→1).
 #
@@ -95,16 +95,16 @@
     DELAY 33
 
     # ── Quantize Q_lo (m0,m1) → m4 FP8 via acc[1] roundtrip ──
-    vmatpush.acc.bf16.mxu0 acc1, m0
+    vmatpush.acc.bf16.mxu1 acc1, m0
     DELAY 31
     seli e0, 0x7F                # E8M0 unit scale (2^0 = 1.0)
-    vmatpop.fp8.acc.mxu0 m4, acc1, e0
+    vmatpop.fp8.acc.mxu1 m4, acc1, e0
     DELAY 31
 
     # ── Quantize Q_hi (m2,m3) → m5 FP8 ──
-    vmatpush.acc.bf16.mxu0 acc1, m2
+    vmatpush.acc.bf16.mxu1 acc1, m2
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m5, acc1, e0
+    vmatpop.fp8.acc.mxu1 m5, acc1, e0
     DELAY 31
 
     # ────────────────────────────────────────────────────────────────────
@@ -141,13 +141,13 @@
     DELAY 33
 
     # ── Quantize K_lo, K_hi to FP8 ──
-    vmatpush.acc.bf16.mxu0 acc1, m16
+    vmatpush.acc.bf16.mxu1 acc1, m16
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m20, acc1, e0
+    vmatpop.fp8.acc.mxu1 m20, acc1, e0
     DELAY 31
-    vmatpush.acc.bf16.mxu0 acc1, m18
+    vmatpush.acc.bf16.mxu1 acc1, m18
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m21, acc1, e0
+    vmatpop.fp8.acc.mxu1 m21, acc1, e0
     DELAY 31
 
     # ── Load V0_mlir: DRAM[0x3000..0x3FFF] → VMEM[2048..3071] → m22..m25 ──
@@ -166,25 +166,25 @@
     DELAY 33
 
     # ── Quantize V_top, V_bot to FP8 ──
-    vmatpush.acc.bf16.mxu0 acc1, m22
+    vmatpush.acc.bf16.mxu1 acc1, m22
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m26, acc1, e0
+    vmatpop.fp8.acc.mxu1 m26, acc1, e0
     DELAY 31
-    vmatpush.acc.bf16.mxu0 acc1, m24
+    vmatpush.acc.bf16.mxu1 acc1, m24
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m27, acc1, e0
+    vmatpop.fp8.acc.mxu1 m27, acc1, e0
     DELAY 31
 
     # ── Q @ K^T: scores = Q_lo @ K_lo^T + Q_hi @ K_hi^T ──
-    vmatpush.weight.mxu0 w0, m20    # weight = K_lo FP8
+    vmatpush.weight.mxu1 w0, m20    # weight = K_lo FP8
     DELAY 31
-    vmatmul.mxu0 acc0, m4, w0     # acc[0] = Q_lo @ K_lo^T
-    DELAY 95
-    vmatpush.weight.mxu0 w0, m21    # weight = K_hi FP8
+    vmatmul.mxu1 acc0, m4, w0     # acc[0] = Q_lo @ K_lo^T
+    DELAY 34
+    vmatpush.weight.mxu1 w0, m21    # weight = K_hi FP8
     DELAY 31
-    vmatmul.acc.mxu0 acc0, m5, w0 # acc[0] += Q_hi @ K_hi^T
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m28, acc0  # (m28, m29) = scores BF16
+    vmatmul.acc.mxu1 acc0, m5, w0 # acc[0] += Q_hi @ K_hi^T
+    DELAY 34
+    vmatpop.bf16.acc.mxu1 m28, acc0  # (m28, m29) = scores BF16
     DELAY 31
 
     # ── Scale scores ──
@@ -218,9 +218,9 @@
     DELAY 64
 
     # ── Quantize exp_s BF16 → FP8 via acc[1] roundtrip ──
-    vmatpush.acc.bf16.mxu0 acc1, m22
+    vmatpush.acc.bf16.mxu1 acc1, m22
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m24, acc1, e0
+    vmatpop.fp8.acc.mxu1 m24, acc1, e0
     DELAY 31
 
     # ── exp_s @ V_left:  weight = m26 (V_top FP8) ──
@@ -276,13 +276,13 @@
     vload m19, 24(x6)
     DELAY 33
 
-    vmatpush.acc.bf16.mxu0 acc1, m16
+    vmatpush.acc.bf16.mxu1 acc1, m16
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m20, acc1, e0
+    vmatpop.fp8.acc.mxu1 m20, acc1, e0
     DELAY 31
-    vmatpush.acc.bf16.mxu0 acc1, m18
+    vmatpush.acc.bf16.mxu1 acc1, m18
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m21, acc1, e0
+    vmatpop.fp8.acc.mxu1 m21, acc1, e0
     DELAY 31
 
     # ── Load V1_mlir ──
@@ -300,24 +300,24 @@
     vload m25, 24(x6)
     DELAY 33
 
-    vmatpush.acc.bf16.mxu0 acc1, m22
+    vmatpush.acc.bf16.mxu1 acc1, m22
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m26, acc1, e0
+    vmatpop.fp8.acc.mxu1 m26, acc1, e0
     DELAY 31
-    vmatpush.acc.bf16.mxu0 acc1, m24
+    vmatpush.acc.bf16.mxu1 acc1, m24
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m27, acc1, e0
+    vmatpop.fp8.acc.mxu1 m27, acc1, e0
     DELAY 31
 
-    vmatpush.weight.mxu0 w0, m20
+    vmatpush.weight.mxu1 w0, m20
     DELAY 31
-    vmatmul.mxu0 acc0, m4, w0
-    DELAY 95
-    vmatpush.weight.mxu0 w0, m21
+    vmatmul.mxu1 acc0, m4, w0
+    DELAY 34
+    vmatpush.weight.mxu1 w0, m21
     DELAY 31
-    vmatmul.acc.mxu0 acc0, m5, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m28, acc0
+    vmatmul.acc.mxu1 acc0, m5, w0
+    DELAY 34
+    vmatpop.bf16.acc.mxu1 m28, acc0
     DELAY 31
 
     vmul.bf16 m30, m28, m6
@@ -341,9 +341,9 @@
     vexp.bf16 m22, m22
     DELAY 64
 
-    vmatpush.acc.bf16.mxu0 acc1, m22
+    vmatpush.acc.bf16.mxu1 acc1, m22
     DELAY 31
-    vmatpop.fp8.acc.mxu0 m24, acc1, e0
+    vmatpop.fp8.acc.mxu1 m24, acc1, e0
     DELAY 31
 
     vmatpush.weight.mxu1 w0, m26

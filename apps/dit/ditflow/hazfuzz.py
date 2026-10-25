@@ -17,8 +17,7 @@ Values stay finite: the generator tracks each register's type (FP8, BF16, FP32) 
 its magnitude, and only emits operations whose inputs have the right type and whose result
 stays far below the BF16 range. FP8 data never uses the NaN codes; NVFP4 scales stay small.
 
-    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1,mxu0     # default
-    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1          # ipt
+    python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1          # default
     python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1,nv       # ipt-nvfp4
     python standalone/host/run_tests.py --sim build/vl-default/atlas_sim -j 32 --out RES OUT/*.json
 """
@@ -67,7 +66,7 @@ class Gen:
         self.rng = random.Random(seed)
         self.gen = torch.Generator().manual_seed(seed)
         self.length = length
-        self.fp8_units = [u for u in units if u in ("mxu0", "mxu1")]
+        self.fp8_units = [u for u in units if u == "mxu1"]
         self.nv = "nv" in units
         self.spaced = spaced
         self.b = Builder(schedule=False)
@@ -445,7 +444,7 @@ def main(argv=None):
     ap.add_argument("--count", type=int, default=64)
     ap.add_argument("--length", type=int, default=400)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--units", default="mxu1", help="comma-separated: mxu0, mxu1, nv")
+    ap.add_argument("--units", default="mxu1", help="comma-separated: mxu1, nv")
     ap.add_argument("--spaced", action="store_true", help="DELAY 200 after every tensor instruction")
     ap.add_argument("--directed", action="store_true", help="also write the directed hazard tests")
     a = ap.parse_args(argv)

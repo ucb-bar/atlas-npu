@@ -12,7 +12,7 @@ Models the block-bank-safe schedule used by the assembly:
     Phase 4: VLOAD bias + scalar stores, then MXU compute + scalar chains
     Phase 5: Final VSTOREs + scalar readback overlap
 
-Plus VSTORE echo of tile_A and MXU0 C0 = tile_A @ tile_W.
+Plus VSTORE echo of tile_A and MXU1 C0 = tile_A @ tile_W.
 
 Usage:
     python3 gen_scalar_vector_concurrent.py [seed]
@@ -39,8 +39,8 @@ from gen_utils import (
     fp8_matmul_reference,
 )
 if torch is not None:
-    from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
     from software_models.mxu1_ipt.fp_formats import OutputFmtSel
+    from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 
 SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 TILE = 32
@@ -124,10 +124,7 @@ def word_val(w):
 # ── Functional model ──
 
 if torch is not None:
-    sa_bf16 = SARTLLinearFunction(
-        rows=32, cols=32,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 # ── Generate inputs ──
 
@@ -185,16 +182,16 @@ bank7_line0 = [
     0,       # word 7: untouched
 ]
 
-# ── Reference: MXU0 C0 = tile_A @ tile_W ──
+# ── Reference: MXU1 C0 = tile_A @ tile_W ──
 
 if torch is not None:
-    C0 = sa_bf16(
+    C0 = ipt_bf16(
         torch.from_numpy(tile_A),
         torch.from_numpy(tile_W.T.copy()),
         b_q=torch.zeros(TILE), scale_exp=0,
     ).numpy().astype(np.float32)
 else:
-    # Fallback for environments without torch: MXU0 BF16 output with FP8 inputs.
+    # Fallback for environments without torch: MXU1 BF16 output with FP8 inputs.
     C0 = fp8_matmul_reference(tile_A, tile_W).astype(np.float32)
 
 # ── Emit preloads ──
@@ -218,7 +215,7 @@ emit_staging_check(checks, STAGING1_BASE, bank5_line0)
 emit_staging_check(checks, STAGING2_BASE, bank6_line0)
 emit_staging_check(checks, STAGING3_BASE, bank7_line0)
 
-# MXU0 result
+# MXU1 result
 emit_bf16_split_check(checks, C0_LO_BASE, C0_HI_BASE, C0)
 
 # ── Summary ──

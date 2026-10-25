@@ -2,7 +2,7 @@
 # Tests: out = (A_fp8 @ B_fp8) + bias_bf16
 #   Both A and B are PRE-QUANTIZED FP8 tiles in DRAM (no on-chip quant).
 #   Matches the npu-model smolvla_fused_matmul_bias sketch and the
-#   existing smolvla_matmul_mxu0.S activation path.
+#   existing smolvla_matmul_mxu1.S activation path.
 #   Simpler than V1 but does NOT exercise the BF16->FP8 hardware quant.
 #
 # @TIMEOUT 30000

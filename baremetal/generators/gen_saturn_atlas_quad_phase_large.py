@@ -4,7 +4,7 @@
 Multi-tile Saturn<->Atlas pipeline with three Atlas phases interleaved with
 two Saturn RVV BF16 interludes. Two of the three Atlas phases are JAL chains
 across IMEM halves (lower-half kernel JALRs to upper-half kernel without
-halting); the middle phase is a single MXU0 matmul.
+halting); the middle phase is a single MXU1 matmul.
 
 Per tile (8 by default):
 
@@ -14,7 +14,7 @@ Per tile (8 by default):
   Interlude S1 (Saturn RVV BF16):
     Y1' = trunc_bf16(Y1 * SCALE1)  (per-row broadcast scale, write to fresh slot)
   Phase A2 (Atlas, single kernel):
-    smolvla_matmul_mxu0:           Y2 = A2_A_fp8 @ A2_B_fp8 (MXU0/SA)
+    smolvla_matmul_mxu1:           Y2 = A2_A_fp8 @ A2_B_fp8 (MXU1/IPT)
   Interlude S2 (Saturn RVV BF16):
     Y2' = trunc_bf16(Y2 * SCALE2)
   Phase A3 (Atlas, JAL chain):
@@ -24,8 +24,7 @@ Per tile (8 by default):
 Per-tile counts: 3 ECALL boundaries, 2 in-IMEM JALR transitions, 2 Saturn
 intervals.  N_TILES = 8 default → 24 ECALLs + 16 JALRs.
 
-Both MXUs covered: MXU1 (IPT, single-round aligned tree) in A1 + A3,
-MXU0 (SA, per-PE rounding) in A2.
+MXU1 (IPT, single-round aligned tree) runs the matmuls of A1, A2 and A3.
 
 DRAM layout per tile (host re-stages between phases):
   Lower-half kernel I/O (matches stock smolvla_*):
@@ -42,7 +41,7 @@ DRAM layout per tile (host re-stages between phases):
 
 All tiles use pseudo-random seeds intentionally. BF16 truncation edge cases
 are covered by gen_saturn_atlas_tri_phase_large.py; this test focuses on
-multi-MXU and repeated JAL-chain coverage.
+multi-phase and repeated JAL-chain coverage.
 """
 
 from __future__ import annotations
@@ -62,7 +61,6 @@ from gen_utils import (
     fp8_e4m3_bits_to_float,
     float_to_bf16_bits,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 from software_models.vpu.bf16_utils import (
@@ -185,13 +183,6 @@ def mxu1_matmul(a_fp8_q: np.ndarray, b_fp8_q: np.ndarray) -> np.ndarray:
     return ipt(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
 
 
-def mxu0_matmul(a_fp8_q: np.ndarray, b_fp8_q: np.ndarray) -> np.ndarray:
-    sa = SARTLLinearFunction(rows=TILE_ROWS, cols=TILE_ROWS, out_fmt_sel=OutputFmtSel.OutBF16)
-    a_t = torch.from_numpy(a_fp8_q)
-    w_t = torch.from_numpy(b_fp8_q.T.copy())
-    return sa(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
-
-
 # ── Header emission ────────────────────────────────────────────────────────
 
 
@@ -285,8 +276,8 @@ def main() -> int:
         a1_b_fp32 = rng.uniform(-1.25, 1.25, size=(TILE_ROWS, TILE_ROWS)).astype(np.float32)
         a1_a_q = quantize_fp8(a1_a_fp32).astype(np.float32)
         a1_b_q = quantize_fp8(a1_b_fp32).astype(np.float32)
-        # Match gen_smolvla_matmul_mxu{0,1}.py: DRAM holds raw B. The Atlas
-        # kernel VTRPOSE.XLUs B before push; mxu*_matmul() compensates for
+        # Match gen_smolvla_matmul_mxu1.py: DRAM holds raw B. The Atlas
+        # kernel VTRPOSE.XLUs B before push; mxu1_matmul() compensates for
         # F.linear by passing w = B.T to the software model.
         a1_b_preload = a1_b_q.copy()
 
@@ -323,8 +314,8 @@ def main() -> int:
         scale1_bits_tile = [int(v) & 0xFFFF for v in scale1_tile.view(torch.int16).tolist()]
         y1p_rows = saturn_interlude(y1_rows, scale1_bits_tile)
 
-        # A2: MXU0 matmul Y2 = A2_A @ A2_B (BF16 from SA model)
-        y2_fp32 = mxu0_matmul(a2_a_q, a2_b_preload)
+        # A2: MXU1 matmul Y2 = A2_A @ A2_B
+        y2_fp32 = mxu1_matmul(a2_a_q, a2_b_preload)
         y2_rows = fp32_to_bf16_bank_rows(y2_fp32)
 
         # S2: Saturn rescales Y2 by scale2 → Y2'
@@ -380,7 +371,7 @@ def main() -> int:
     header.append(f" * GOLDEN_N_TILES = {n_tiles}")
     header.append(f" * THROUGHPUT_BASE_SEED = {THROUGHPUT_BASE_SEED}")
     header.append(" * Pipeline: Atlas(A1=MXU1+reduce JAL chain) -> Saturn S1 ->")
-    header.append(" *           Atlas(A2=MXU0 single) -> Saturn S2 ->")
+    header.append(" *           Atlas(A2=MXU1 single) -> Saturn S2 ->")
     header.append(" *           Atlas(A3=add+MXU1 JAL chain)")
     header.append(" * Do not edit by hand. */")
     header.append("#ifndef SATURN_ATLAS_QUAD_PHASE_LARGE_GOLDEN_H")

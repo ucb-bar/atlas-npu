@@ -7,7 +7,7 @@
 #   [8LD]  8 DMA.LOAD commands queued back-to-back before any WAIT
 #   [8ST]  8 DMA.STORE commands queued back-to-back before any WAIT
 #   [ECHO] 4 tiles echoed through DMA LOAD→STORE to verify data integrity
-#   [COMP] MXU0 + VPU compute on DMA-loaded data verifies functional path
+#   [COMP] MXU1 + VPU compute on DMA-loaded data verifies functional path
 #
 # The DMA engine's circular command queue (8 slots) fills completely.
 # Commands process sequentially through requestIdx/responseIdx, but all
@@ -15,8 +15,8 @@
 # TileLinkAdapter prevents source-ID reuse across pipelined TileLink beats.
 #
 # DRAM layout — inputs (8 tiles, channels 0–7):
-#   0x0000  X         (1024B FP8) — MXU0 activations
-#   0x0400  W         (1024B FP8) — MXU0 weights
+#   0x0000  X         (1024B FP8) — MXU1 activations
+#   0x0400  W         (1024B FP8) — MXU1 weights
 #   0x0800  bias      (1024B FP8, all 0x00)
 #   0x0C00  A_vpu b0  (1024B BF16) — VPU input A lanes 0-15
 #   0x1000  A_vpu b1  (1024B BF16) — VPU input A lanes 16-31
@@ -25,8 +25,8 @@
 #   0x1C00  echo_tile (1024B FP8) — extra tile for echo verification
 #
 # DRAM layout — outputs:
-#   0x2000  C0 lo     (1024B BF16) — MXU0 result lanes 0-15
-#   0x2400  C0 hi     (1024B BF16) — MXU0 result lanes 16-31
+#   0x2000  C0 lo     (1024B BF16) — MXU1 result lanes 0-15
+#   0x2400  C0 hi     (1024B BF16) — MXU1 result lanes 16-31
 #   0x2800  add b0    (1024B BF16) — VPU vadd result lanes 0-15
 #   0x2C00  add b1    (1024B BF16) — VPU vadd result lanes 16-31
 #   0x3000  echo0     (1024B) — echo of A_vpu b1
@@ -48,7 +48,7 @@
 #   m0  X activations     m8,9   A_vpu pair
 #   m1  W raw staging     m10,11 B_vpu pair
 #   m2  W transposed      m12,13 VPU result
-#   m3  bias (zero)       m4,5   MXU0 pop result
+#   m3  bias (zero)       m4,5   MXU1 pop result
 
     LI    x5, 0x00000000
     dma.config x5, ch0
@@ -107,7 +107,7 @@
     dma.wait ch7
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 2: VLOAD data + MXU0 setup
+# PHASE 2: VLOAD data + MXU1 setup
 # ═══════════════════════════════════════════════════════════════
 
     # X → m0
@@ -127,9 +127,9 @@
     vload m3, 0(x6)
     DELAY 33
 
-    # Push MXU0 weights + bias
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    # Push MXU1 weights + bias
+    vmatpush.weight.mxu1 w0, m2
+    vmatpush.acc.fp8.mxu1 acc0, m3
 
     # A_vpu pair → m8,m9 (from VMEM[768], flag 0/8)
     LI    x6, 768
@@ -146,14 +146,14 @@
     DELAY 33
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 3: MXU0 + VPU compute
+# PHASE 3: MXU1 + VPU compute
 # ═══════════════════════════════════════════════════════════════
 
-    vmatmul.acc.mxu0 acc0, m0, w0
+    vmatmul.acc.mxu1 acc0, m0, w0
     vadd.bf16 m12, m8, m10
     DELAY 64
 
-    vmatpop.bf16.acc.mxu0 m4, acc0
+    vmatpop.bf16.acc.mxu1 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════

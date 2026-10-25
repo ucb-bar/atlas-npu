@@ -33,10 +33,8 @@ DRAM layout (must match perf_mm_mxu1_64x64x64.S):
     0x2C00  C11
 
 Golden model (mirrors gen_mxu1_qk_scores.py — a known-passing test):
-    1. IPT model in OutBF16 mode: MXU1 is an Inner Product Tree with
-       different accumulator rounding than MXU0's systolic array, so
-       IPTLinearRTLFunction (NOT SARTLLinearFunction) is required for
-       bit-exact match. Hardware accumulates in BF16 between K-tiles
+    1. IPT model in OutBF16 mode: IPTLinearRTLFunction gives the
+       bit-exact MXU1 result. Hardware accumulates in BF16 between K-tiles
        (VMATMUL → accbuf → VMATMUL.ACC → accbuf); OutE4M3 would feed
        FP8 bytes back as psum which get reinterpreted as BF16 garbage,
        so correct multi-K-tile math REQUIRES OutBF16.

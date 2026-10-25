@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Generate test vectors for `smolvla_parameterized_matmul.S` (dual-MXU, 64x32x64).
+"""Generate test vectors for `smolvla_parameterized_matmul.S` (MXU1, 64x32x64).
 
-Port of jrmills20 parameterized_matmul.py, column-split across engines:
-  n_tile == 0 → MXU0 (SA, SARTLLinearFunction)
-  n_tile == 1 → MXU1 (IPT, IPTLinearRTLFunction)
+Port of jrmills20 parameterized_matmul.py.
 
 Shape M=64, K=32, N=64 yields 4 output tiles (M_tiles=2, N_tiles=2) with a
-single K-tile each. Golden is routed per-tile through the engine that the
-.S dispatches to, so the BF16 outputs match each engine's RTL bit-exactly
-(SA rounds per-PE; IPT rounds once at the aligned-tree output).
+single K-tile each. Each tile's golden comes from IPTLinearRTLFunction, so
+the BF16 outputs match the MXU1 RTL bit-exactly.
 
 DRAM layout (tile-major, matches .S header):
   [0x0000..0x07FF]  A FP8 (2 tiles x 1024B)
@@ -30,7 +27,6 @@ from gen_utils import (
     pack_words_into_beats,
     emit_test_data,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 
@@ -57,9 +53,6 @@ OUT_BASE = 256                          # DRAM 0x2000
 
 
 def main():
-    sa_bf16 = SARTLLinearFunction(
-        rows=TILE, cols=TILE, out_fmt_sel=OutputFmtSel.OutBF16
-    )
     ipt_bf16 = IPTLinearRTLFunction(
         vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
         out_fmt_sel=OutputFmtSel.OutBF16,
@@ -106,21 +99,17 @@ def main():
             })
         b_offset += BEATS_PER_FP8_TILE
 
-    # ── Golden: per-output-tile matmul routed through the engine the .S uses ──
-    # .S dispatches n_tile==0 to MXU0 (SA) and n_tile==1 to MXU1 (IPT).
+    # ── Golden: per-output-tile matmul ──
     checks: list = []
     c_offset = OUT_BASE
     for m in range(M_TILES):
         for n in range(N_TILES):
             a_tile = a_q[m * TILE:(m + 1) * TILE, 0:TILE]
             b_tile = b_q[0:TILE, n * TILE:(n + 1) * TILE]
-            # Both engines compute y = x @ w^T, so pass w = B_tile^T.
+            # The MXU computes y = x @ w^T, so pass w = B_tile^T.
             a_t = torch.from_numpy(a_tile)
             w_t = torch.from_numpy(b_tile.T.copy())
-            if n == 0:
-                c_tile = sa_bf16(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
-            else:
-                c_tile = ipt_bf16(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
+            c_tile = ipt_bf16(a_t, w_t, scale_exp=0).numpy().astype(np.float32)
 
             low_words, high_words = [], []
             for r in range(TILE):

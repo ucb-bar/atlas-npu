@@ -8,10 +8,10 @@
 #   [RW-BP] DMA.STORE pre-reads + VSTORE → shared 1RW port backpressure
 #   [RR-BP] DMA.STORE pre-reads + VLOAD → shared 1RW port backpressure
 #   [PIPE]  4 DMA channels queued back-to-back before any WAIT
-#   [3WAY]  MXU0 + MXU1 + VPU compute during DMA quiescence
-#   [CHAIN] MXU0 result popped, stored to VMEM, DMA-stored to DRAM,
+#   [3WAY]  two MXU1 matmuls + VPU compute during DMA quiescence
+#   [CHAIN] MXU1 acc1 result popped, stored to VMEM, DMA-stored to DRAM,
 #           new data DMA-loaded and VLOAD-ed during contention,
-#           then re-computed on MXU0 → end-to-end pipeline
+#           then re-computed on MXU1 acc1 → end-to-end pipeline
 #
 # VMEM bank conflict analysis (6 banks, 256 KiB / 65 536-word banking):
 #   Each aligned 1024-byte tile occupies one tensor slot inside a single bank.
@@ -22,17 +22,17 @@
 #   lower-priority DMA client to stall.
 #
 # TRF bank map (all 16 used):
-#   m0    activations for MXU0 (reloaded: X0, then X2)
+#   m0    activations for acc1 (reloaded: X0, then X2)
 #   m1    weight raw staging (XLU input, reused)
-#   m2    weight transposed for MXU0 (XLU output)
+#   m2    weight transposed for w1 (XLU output)
 #   m3    zero bias (FP8, persistent)
-#   m4,5  MXU0 BF16 result (C0, then C2)
-#   m6    activations for MXU1 (X1)
-#   m7    weight transposed for MXU1
+#   m4,5  acc1 BF16 result (C0, then C2)
+#   m6    activations for acc0 (X1)
+#   m7    weight transposed for w0
 #   m8,9  VPU input A (BF16 pair)
 #   m10,11 VPU input B (BF16 pair)
 #   m12,13 VPU result (BF16 pair, vadd output)
-#   m14,15 MXU1 BF16 result (C1)
+#   m14,15 acc0 BF16 result (C1)
 #
 # VMEM word-address regions (256 words = 1024 bytes per slot):
 #   [0..255]       slot 0 — multi-purpose staging
@@ -149,7 +149,7 @@
     dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 2: VLOAD data + set up MXU0 and MXU1 weights
+# PHASE 2: VLOAD data + set up both MXU1 weight slots
 # ═══════════════════════════════════════════════════════════════
 
     # X0 → m0
@@ -164,11 +164,11 @@
     vtrpose.xlu m2, m1
     DELAY 64
 
-    # MXU0: push weights + zero bias.
+    # MXU1 w1/acc1: push weights + zero bias.
     # Use non-accumulating MATMUL for this single-tile op so the compute
     # always starts from a fresh accum buffer.
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    vmatpush.weight.mxu1 w1, m2
+    vmatpush.acc.fp8.mxu1 acc1, m3
 
     # X1 → m6
     LI    x8, 512
@@ -182,34 +182,34 @@
     vtrpose.xlu m7, m1
     DELAY 64
 
-    # MXU1: push weights + zero bias.
+    # MXU1 w0/acc0: push weights + zero bias.
     # As above, the compute itself uses non-accumulating MATMUL.
     vmatpush.weight.mxu1 w0, m7
     vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31 
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 3: Triple-unit compute — MXU0 + MXU1 + VPU concurrent
-#          [3WAY] All three functional units fire on independent
+# PHASE 3: MXU1 + VPU concurrent compute
+#          [3WAY] Two matmuls and the VPU fire on independent
 #          TRF banks with no resource conflicts.
 #
-#   MXU0: acc0 = X0 (m0) @ W0_t (wbuf0)
+#   MXU1: acc1 = X0 (m0) @ W0_t (wbuf1)
 #   MXU1: acc0 = X1 (m6) @ W1_t (wbuf0)
 #   VPU:  m12,m13 = vadd(m8,m10) = vadd(A_vpu, B_vpu)
 # ═══════════════════════════════════════════════════════════════
 
-    vmatmul.mxu0 acc0, m0, w0
+    vmatmul.mxu1 acc1, m0, w1
     vmatmul.mxu1 acc0, m6, w0
     vadd.bf16 m12, m8, m10
     DELAY 64
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 4: Pop MXU results
-#   MXU0 → m4,m5 (C0)
-#   MXU1 → m14,m15 (C1)
+#   acc1 → m4,m5 (C0)
+#   acc0 → m14,m15 (C1)
 # ═══════════════════════════════════════════════════════════════
 
-    vmatpop.bf16.acc.mxu0 m4, acc0
+    vmatpop.bf16.acc.mxu1 m4, acc1
     vmatpop.bf16.acc.mxu1 m14, acc0
     DELAY 31
 
@@ -322,7 +322,7 @@
     dma.wait ch3
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE 8: Second MXU0 compute — C2 = X2 @ W2  [CHAIN]
+# PHASE 8: Second MXU1 acc1 compute — C2 = X2 @ W2  [CHAIN]
 #          X2 now in m0 (VLOAD-ed during contention).
 #          W2 raw in m1, needs transpose + push.
 # ═══════════════════════════════════════════════════════════════
@@ -331,19 +331,19 @@
     vtrpose.xlu m2, m1
     DELAY 64
 
-    # MXU0: push new weights + zero bias.
+    # MXU1 w1/acc1: push new weights + zero bias.
     # The chained second pass also uses non-accumulating MATMUL so it cannot
     # inherit stale psums from the earlier C0 run.
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    vmatpush.weight.mxu1 w1, m2
+    vmatpush.acc.fp8.mxu1 acc1, m3
     DELAY 31 
 
-    # MXU0 compute C2 = X2 @ W2
-    vmatmul.mxu0 acc0, m0, w0
-    DELAY 95
+    # MXU1 compute C2 = X2 @ W2
+    vmatmul.mxu1 acc1, m0, w1
+    DELAY 34
 
     # Pop C2 → m4,m5
-    vmatpop.bf16.acc.mxu0 m4, acc0
+    vmatpop.bf16.acc.mxu1 m4, acc1
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════

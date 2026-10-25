@@ -2,12 +2,10 @@
 """Generate test vectors for `smolvla_fused_attention_mxu1.S`.
 
 MXU1 (IPT) sibling of stock gen_smolvla_fused_attention.py. Routes the
-matmul golden through software_models.mxu1_ipt.IPTLinearRTLFunction
-instead of SARTLLinearFunction — SA and IPT produce different BF16
-accumulator outputs (per-PE rounding vs single-rounding-at-end), so MXU1
-needs its own IPT-derived goldens. The uint8 FP8 bytes emitted by
-bf16_tile_to_e4m3_bytes are decoded to FP32 via software_models'
-decode_e4m3 before the IPT call (IPT doesn't accept raw uint8, unlike SA).
+matmul golden through software_models.mxu1_ipt.IPTLinearRTLFunction. The
+uint8 FP8 bytes emitted by bf16_tile_to_e4m3_bytes are decoded to FP32
+via software_models' decode_e4m3 before the IPT call (IPT doesn't accept
+raw uint8).
 
 Single-tile flash attention over 2 K-tiles (k_seq=64), head_dim=64:
 
@@ -78,8 +76,7 @@ from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 def fp8_uint8_to_fp32(tile_uint8: torch.Tensor) -> torch.Tensor:
     """Decode E4M3 uint8 bytes → FP32 via software_models decode_e4m3.
 
-    IPTLinearRTLFunction expects float-typed inputs (unlike SARTLLinearFunction
-    which accepts uint8). Keeping the conversion inside software_models
+    IPTLinearRTLFunction expects float-typed inputs. Keeping the conversion inside software_models
     rather than going through torch.float8_e4m3fn's native cast.
     """
     arr = tile_uint8.numpy().astype(np.uint8)

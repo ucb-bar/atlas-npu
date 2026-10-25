@@ -1,18 +1,13 @@
-# smolvla_parameterized_matmul.S — dual-MXU tiled C = A @ B for 64x32x64
-# Column-split across engines: output tiles with n_tile=0 run on MXU0
-# (SA); tiles with n_tile=1 run on MXU1 (IPT). Per-engine accumulators
-# are independent, so the two paths don't alias. The shared tile loop
-# dispatches via a BNE on the inner n_tile index.
+# smolvla_parameterized_matmul.S — tiled C = A @ B for 64x32x64 on MXU1
 #
 # Port of jrmills20 parameterized_matmul.py. First parameterization step:
 # scale M and N to 64 (4 output tiles); keep K=32 (single K-tile per
 # output, no VMATMUL.ACC accumulation).
 #
-# Both MXU engines load weights in transposed orientation (y = x @ w^T),
-# so each B tile is VTRPOSE.XLU'd once before VMATPUSH.W regardless of
-# which engine consumes it. gen_smolvla_parameterized_matmul.py routes
-# per-tile goldens through SARTLLinearFunction or IPTLinearRTLFunction
-# depending on which engine ran that tile.
+# The MXU loads weights in transposed orientation (y = x @ w^T), so each
+# B tile is VTRPOSE.XLU'd once before VMATPUSH.W.
+# gen_smolvla_parameterized_matmul.py computes the per-tile goldens with
+# IPTLinearRTLFunction.
 #
 # @TIMEOUT 400000
 # @DRAM_BASE 0x90000000
@@ -89,30 +84,13 @@ output_tile_loop:
     vtrpose.xlu m5, m4
     DELAY 64
 
-    # ── Dispatch to MXU0 (n_tile=0) or MXU1 (n_tile=1) ──
-    BNE   x13, x0, matmul_mxu1
-    NOP
-
-    # ── MXU0 path: push weight + matmul + pop ──
-    vmatpush.weight.mxu0 w0, m5
-    DELAY 31
-    vmatmul.mxu0 acc0, m0, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m2, acc0
-    DELAY 31
-    BEQ   x0, x0, matmul_done
-    NOP
-
-matmul_mxu1:
-    # ── MXU1 path ──
+    # ── MXU1: push weight + matmul + pop ──
     vmatpush.weight.mxu1 w0, m5
     DELAY 31
     vmatmul.mxu1 acc0, m0, w0
     DELAY 34
     vmatpop.bf16.acc.mxu1 m2, acc0
     DELAY 31
-
-matmul_done:
 
     # ── Store m2 (cols 0-15) → VMEM[512], m3 (cols 16-31) → VMEM[768] ──
     LI    x8, 512

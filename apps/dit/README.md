@@ -249,7 +249,7 @@ the golden as its DRAM checks, so `standalone/host/run_tests.py --sim/--board` c
 `flow run` also reads the performance counters (docs/perf-counters.md) after the halt and stores
 them, with each unit's utilization, in `board.pt` / `sim.pt` and `report.json`.
 
-`python -m ditflow.hazfuzz OUT --units mxu1,mxu0` writes randomized hazard-test bundles for
+`python -m ditflow.hazfuzz OUT --units mxu1,nv` writes randomized hazard-test bundles for
 `run_tests.py`: random dependent tensor-instruction streams without `DELAY`, checked against the
 functional model (docs/interlock.md, "Randomized hazard test").
 

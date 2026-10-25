@@ -5,8 +5,8 @@
 #
 # Iteration 0:
 #   A0 fp8 at DRAM 0x0000 -> VMEM 0      -> m0
-#   B0 raw fp8 at DRAM 0x0400 -> VMEM 256 -> m4 -> XLU m8 -> MXU0 weight
-#   MXU0 result BF16 -> m12/m13 -> VMEM 4096/4352 -> DRAM 0x2000/0x2400
+#   B0 raw fp8 at DRAM 0x0400 -> VMEM 256 -> m4 -> XLU m8 -> MXU1 weight
+#   MXU1 result BF16 -> m12/m13 -> VMEM 4096/4352 -> DRAM 0x2000/0x2400
 #
 # Iteration 1:
 #   A1 fp8 at DRAM 0x0800 -> VMEM 65536   -> m16
@@ -22,7 +22,7 @@
     LI    x14, 1024
     LI    x15, 2048
 
-    # -------- Iteration 0: transpose -> MXU0 consumer --------
+    # -------- Iteration 0: transpose -> MXU1 consumer --------
     LI    x10, 0x90000000  # A0 src
     ADDI  x11, x0, 0        # VMEM word 0
     dma.load x11, x10, x14, ch0
@@ -40,11 +40,11 @@
     vtrpose.xlu m8, m4
     DELAY 64
 
-    vmatpush.weight.mxu0 w0, m8
+    vmatpush.weight.mxu1 w0, m8
     DELAY 31
-    vmatmul.mxu0 acc0, m0, w0
-    DELAY 95
-    vmatpop.bf16.acc.mxu0 m12, acc0
+    vmatmul.mxu1 acc0, m0, w0
+    DELAY 34
+    vmatpop.bf16.acc.mxu1 m12, acc0
     DELAY 31
 
     LI    x11, 4096

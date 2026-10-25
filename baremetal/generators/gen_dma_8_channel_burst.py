@@ -5,7 +5,7 @@ gen_dma_8chan_burst.py
 Generate test vectors for dma_8chan_burst.S — 8-channel DMA burst test.
 
 8 tiles loaded via 8 simultaneous DMA channels, then:
-    MXU0 (SA):  C0 = X @ W + bias  (32×32 BF16)
+    MXU1 (IPT): C0 = X @ W + bias  (32×32 BF16)
     VPU:        D  = vadd(A, B)    (32×32 BF16)
 
 4 tiles echo-tested through LOAD→STORE, 4 tiles are compute results.
@@ -36,8 +36,8 @@ from vpu_gen_utils import (
     pack_u16_le,
     run_binary_rows,
 )
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
+from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
 
 SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 TILE = 32
@@ -131,10 +131,7 @@ def emit_echo_checks(checks, src_preloads, src_byte_off, dst_byte_off, num_beats
 
 # ── Functional model ──
 
-sa_bf16 = SARTLLinearFunction(
-    rows=32, cols=32,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 # ── Generate inputs ──
 
@@ -151,9 +148,9 @@ A_vpu_b1_rows = float_matrix_to_bf16_rows(A_vpu[:, 16:])
 B_vpu_b0_rows = float_matrix_to_bf16_rows(B_vpu[:, :16])
 B_vpu_b1_rows = float_matrix_to_bf16_rows(B_vpu[:, 16:])
 
-# ── Reference: C0 = X @ W (MXU0 SA, zero bias) ──
+# ── Reference: C0 = X @ W (MXU1 IPT, zero bias) ──
 
-C0 = sa_bf16(
+C0 = ipt_bf16(
     torch.from_numpy(X),
     torch.from_numpy(W.T.copy()),
     b_q=torch.zeros(TILE), scale_exp=0,

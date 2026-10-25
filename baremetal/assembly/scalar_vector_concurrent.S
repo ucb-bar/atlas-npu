@@ -148,11 +148,11 @@
     sw x24, 20(x18)             # stage3 word 5 = CAFE
     DELAY 29
 
-    vmatpush.weight.mxu0 w0, m2
-    vmatpush.acc.fp8.mxu0 acc0, m3
+    vmatpush.weight.mxu1 w0, m2
+    vmatpush.acc.fp8.mxu1 acc0, m3
     DELAY 31
 
-    vmatmul.acc.mxu0 acc0, m0, w0
+    vmatmul.acc.mxu1 acc0, m0, w0
     lw x21, 16(x16)             # read stage1 word 4 = DEAD
     DELAY 2
     sw x21, 24(x17)             # stage2 word 6 = DEAD
@@ -164,7 +164,7 @@
     sw x23, 24(x18)             # stage3 word 6 = tile_W word 0
     DELAY 95
 
-    vmatpop.bf16.acc.mxu0 m4, acc0
+    vmatpop.bf16.acc.mxu1 m4, acc0
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════

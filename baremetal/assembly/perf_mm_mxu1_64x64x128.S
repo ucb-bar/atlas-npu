@@ -244,7 +244,7 @@
 
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION BEGINS — snapshot start cycle right before first PUSH
-# (matches MXU0/MXU1 perf-test convention; first PUSH is part of timed region)
+# (matches the MXU1 perf-test convention; first PUSH is part of timed region)
 # ═══════════════════════════════════════════════════════════════
     csrrs x20, 0xC00, x0                # cycle 0
 
@@ -335,7 +335,7 @@
 # ═══════════════════════════════════════════════════════════════
 # MEASURED REGION ENDS — snapshot end cycle, bank delta in DBG1
 # Note: CSRR x21 fires right after POP C11 issue, NOT after POP C11 fully
-# drains to MREG. Convention matches MXU0/MXU1 K=64 perf tests.
+# drains to MREG. Convention matches the MXU1 K=64 perf test.
 # ═══════════════════════════════════════════════════════════════
     csrrs x21, 0xC00, x0                # cyc 547
     SUB   x22, x21, x20

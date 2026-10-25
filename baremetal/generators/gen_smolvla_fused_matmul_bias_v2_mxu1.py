@@ -4,7 +4,7 @@
 Alternative interpretation matching the npu-model reference file: A and
 B are BOTH pre-quantized FP8 tensors stored in DRAM, no on-chip
 quantization. Matches the npu-model smolvla_fused_matmul_bias sketch and the existing
-`smolvla_matmul_mxu0.S` activation path. Simpler than V1 but does NOT
+`smolvla_matmul_mxu1.S` activation path. Simpler than V1 but does NOT
 exercise the BF16->FP8 hardware quant roundtrip.
 
 Use this if V1 fails or if the tracker contract turns out to mean
