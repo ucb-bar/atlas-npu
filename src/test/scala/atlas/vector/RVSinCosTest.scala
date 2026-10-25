@@ -16,6 +16,7 @@ import org.scalatest.Outcome
 import atlas.common.VpuParams
 import sp26FPUnits.hardfloat._
 import sp26FPUnits._
+import VectorTestUtils._
 
 import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
@@ -103,8 +104,8 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     }
 
     behavior of s"VectorEngine (BF16) SinCos lanes=${16}"
-    it should "Verify the correctness of add" in {
-        PersistentVcsRVSinCosSimulator.simulate(new SinCos(p.BF16)) { module =>
+    it should "give sin(x) and cos(x) for x in [0, 2 pi)" in {
+        PersistentVcsRVSinCosSimulator.simulate(new SinCosVec(p.BF16)) { module =>
             val dut = module.wrapped
             // Test data
             val twoPi = (2 * Math.PI).toFloat
@@ -131,29 +132,20 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.reset.poke(false.B)
             dut.clock.step(1)
 
+            var checked = 0
+
             // Poke inputs for Sin
             dut.io.req.valid.poke(true.B)
-            dut.io.resp.ready.poke(true.B)
-            dut.io.req.bits.roundingMode.poke(0.U) 
-            dut.io.req.bits.tag.poke(1.U) 
-            dut.io.req.bits.whichBank.poke(2.U)
-            dut.io.req.bits.wRow.poke(3.U)
             dut.io.req.bits.cos.poke(false.B)
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.xVec(i).poke(BigInt(bits & 0xFFFF)) }
             for (i <- 0 to 5) {
                 println("Sin Test Begin")
-                val ir = dut.io.req.ready.peek().litValue
                 val iv = dut.io.req.valid.peek().litValue
-                val or = dut.io.resp.ready.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
-                val reqFire  = iv == 1 && ir == 1
-                val respFire = ov == 1 && or == 1
-                val tag = dut.io.resp.bits.tag.peek().litValue.toInt
-                val whichBank = dut.io.resp.bits.whichBank.peek().litValue.toInt
-                val wRow = dut.io.resp.bits.wRow.peek().litValue.toInt
-                println(f"[cycle=$i%2d] req: v=$iv%d r=$ir%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d r=$or%d f=${if(respFire)1 else 0}%d")
-                println(f"tag=$tag whichBank=$whichBank wRow=$wRow")
+                val reqFire  = iv == 1
+                val respFire = ov == 1
+                println(f"[cycle=$i%2d] req: v=$iv%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d f=${if(respFire)1 else 0}%d")
 
                 // Print values at after two cycles
                 if (respFire) {
@@ -164,38 +156,26 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         val expF = bfTofp(exp)
                         println(f"lane=$i%2d  act=0x$act%04x ($actF%f)  exp=0x$exp%04x ($expF%f)")
                     }
+                    checkVectorTolerance(actual.map(_.toShort).toArray, expectedSin.map(_.toShort).toArray) shouldBe true
+                    checked += 1
                 }
                 // Step to next cycle and turn off input validity
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
-                dut.io.req.bits.tag.poke(0.U) 
-                dut.io.req.bits.whichBank.poke(0.U)
-                dut.io.req.bits.wRow.poke(0.U)
             }
 
             // Poke inputs for Cos
             dut.io.req.valid.poke(true.B)
-            dut.io.resp.ready.poke(true.B)
-            dut.io.req.bits.roundingMode.poke(0.U) 
-            dut.io.req.bits.tag.poke(4.U) 
-            dut.io.req.bits.whichBank.poke(5.U)
-            dut.io.req.bits.wRow.poke(6.U)
             dut.io.req.bits.cos.poke(true.B)
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.xVec(i).poke(BigInt(bits & 0xFFFF)) }
             for (i <- 0 to 5) {
                 println("Cos Test Begin")
-                val ir = dut.io.req.ready.peek().litValue
                 val iv = dut.io.req.valid.peek().litValue
-                val or = dut.io.resp.ready.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
-                val reqFire  = iv == 1 && ir == 1
-                val respFire = ov == 1 && or == 1
-                val tag = dut.io.resp.bits.tag.peek().litValue.toInt
-                val whichBank = dut.io.resp.bits.whichBank.peek().litValue.toInt
-                val wRow = dut.io.resp.bits.wRow.peek().litValue.toInt
-                println(f"[cycle=$i%2d] req: v=$iv%d r=$ir%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d r=$or%d f=${if(respFire)1 else 0}%d")
-                println(f"tag=$tag whichBank=$whichBank wRow=$wRow")
+                val reqFire  = iv == 1
+                val respFire = ov == 1
+                println(f"[cycle=$i%2d] req: v=$iv%d f=${if(reqFire)1 else 0}%d | resp: v=$ov%d f=${if(respFire)1 else 0}%d")
 
                 // Print values at after two cycles
                 if (respFire) {
@@ -206,14 +186,14 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         val expF = bfTofp(exp)
                         println(f"lane=$i%2d  act=0x$act%04x ($actF%f)  exp=0x$exp%04x ($expF%f)")
                     }
+                    checkVectorTolerance(actual.map(_.toShort).toArray, expectedCos.map(_.toShort).toArray) shouldBe true
+                    checked += 1
                 }
                 // Step to next cycle and turn off input validity
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
-                dut.io.req.bits.tag.poke(0.U) 
-                dut.io.req.bits.whichBank.poke(0.U)
-                dut.io.req.bits.wRow.poke(0.U)
             }
+            checked shouldBe 2
         }.result
     }
 }
