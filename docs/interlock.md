@@ -96,6 +96,10 @@ instruction that depends on the measured work (for example the pop of the result
 
 ## Validation
 
+The results below date from 2026-10-21 to 2026-10-23 and name the configurations of that time:
+`default` had the systolic array (`mxu0`) too, and `ipt` was today's `default`
+(`standalone/README.md`).
+
 ### Randomized hazard test
 
 `apps/dit/ditflow/hazfuzz.py` generates random streams of dependent tensor instructions with no
@@ -107,7 +111,7 @@ order, the architectural meaning on an interlocked core. A `--spaced` copy of ea
 `DELAY 200` after every tensor instruction, so nothing overlaps there. A program that fails in
 both copies points at the model's arithmetic, not at the interlock.
 
-| Run (Verilator with all assertions, unless VCU118) | systolic array + IPT (removed) | `default` (IPT) | `ipt-nvfp4` (+ NVFP4) |
+| Run (Verilator with all assertions, unless VCU118) | `default` (MXU0 + MXU1) | `ipt` | `ipt-nvfp4` (+ NVFP4) |
 |---|---|---|---|
 | before (d6ef8b3), 64 MXU1 programs × 400 instructions | 0 / 64: 51 port, 15 pop-WAR, 8 push-RAW assertions | | |
 | now, 64 programs × 400 instructions + the directed test | 65 / 65 | 63 / 65 | 65 / 65 |
@@ -118,7 +122,7 @@ both copies points at the model's arithmetic, not at the interlock.
 
 Every failing program fails the same way in its spaced copy: same addresses, same values. So no
 program fails only without `DELAY`, over 963 programs and about 540,000 random tensor
-instructions. On `default`, two programs (seeds 1000 and 1028) were bisected, and they fail
+instructions. On `ipt`, two programs (seeds 1000 and 1028) were bisected, and they fail
 identically in both copies. Bisection puts the first difference at one instruction each: a
 `vsub.bf16` result one BF16 ULP from the RTL's, and a `vmatmul.acc.mxu1` onto a large BF16
 partial sum. npu_model's `RtlNumerics` and ditflow's fast numerics agree with each other there,

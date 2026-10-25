@@ -96,6 +96,9 @@ DRAM (`DRAM_LINE_W=21`).
 
 ## Results (2026-10-22)
 
+Results dated before 2026-10-25 name the configurations of that time: `default` had the systolic
+array (`mxu0`) too, and `ipt` was today's `default` (`standalone/README.md`).
+
 The program is 24,713 instructions; 100 steps execute 1,961,645 of them. It uses 3.75 MiB of
 DRAM (including the per-step velocity trace) and 754 KiB of VMEM.
 
@@ -111,7 +114,7 @@ its golden, and the chunk is 1.45% from FP32, against 1.29% for fake quant.
 The first steps of the same schedule also run in the Verilator model with every RTL assertion
 enabled, via `run_tests.py` on `bundle_checked.json`:
 
-| Steps | Verilator `ipt-nvfp4` | Verilator, systolic array + IPT | VCU118 `ipt-nvfp4` |
+| Steps | Verilator `ipt-nvfp4` | Verilator `default` (both MXUs) | VCU118 `ipt-nvfp4` |
 |---|---|---|---|
 | 1 | PASS: 3,072 words equal the golden, 522,137 cycles | PASS, 522,137 cycles | PASS, 522,137 cycles |
 | 2 | PASS: 4,096 words, 966,632 cycles | PASS, 966,632 cycles | PASS, 966,632 cycles |
