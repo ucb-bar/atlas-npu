@@ -16,6 +16,8 @@ import sys
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 
+from npu_model.configs import cvt
+
 # ---------------------------------------------------------------------------
 # Global DRAM/DMA packing configuration
 # ---------------------------------------------------------------------------
@@ -53,34 +55,13 @@ def unpack_bf16_pair(word: int) -> Tuple[float, float]:
     return first, second
 
 # ---------------------------------------------------------------------------
-# FP8 E4M3 helpers (range ±240, no inf, NaN = 0x7F / 0xFF)
+# FP8 E4M3 helpers (range ±448, no inf, NaN = 0x7F / 0xFF)
 # ---------------------------------------------------------------------------
 
 def float_to_fp8_e4m3_bits(f: float) -> int:
-    """Convert float to FP8 E4M3 bit pattern (8 bits)."""
-    if f != f:  # NaN
-        return 0x7F
-    sign = 0
-    if f < 0:
-        sign = 1
-        f = -f
-    if f == 0.0:
-        return sign << 7
-    if f >= 240.0:
-        return (sign << 7) | 0x7E
-    exp = int(np.floor(np.log2(f))) if f > 0 else -7
-    exp = max(exp, -6)
-    exp = min(exp, 8)
-    biased_exp = exp + 7
-    if biased_exp <= 0:
-        mantissa = f / (2.0 ** (-6))
-        mantissa_bits = int(round(mantissa * 8)) & 0x07
-        biased_exp = 0
-    else:
-        mantissa = f / (2.0 ** exp) - 1.0
-        mantissa_bits = int(round(mantissa * 8)) & 0x07
-    result = (sign << 7) | ((biased_exp & 0xF) << 3) | mantissa_bits
-    return result & 0xFF
+    """Convert float to FP8 E4M3 bit pattern (8 bits): E4M3_RN_SATFINITE of f as FP32
+    (npu_model configs/cvt.py). Subnormals and -0 are kept; above 448 saturates to ±448."""
+    return int(cvt.e4m3_rn_satfinite(np.float32(f).view(np.uint32), 127))
 
 def fp8_e4m3_bits_to_float(bits: int) -> float:
     """Convert FP8 E4M3 bit pattern to float."""
