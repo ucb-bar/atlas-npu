@@ -694,21 +694,21 @@ class InnerProductTreesSequencer(
   }
 
   // ==========================================================================
-  // BF16 lockstep verification — debug-only assertions
+  // BF16 and FP32 lockstep verification — debug-only assertions
   //
-  //   By construction, both halves of a BF16 op enter and tick in lockstep
-  //   because both engines latch on the same accept cycle and both increment
-  //   on the same `!boundary` predicate. These assertions catch any future
-  //   regression that breaks the invariant.
+  //   By construction, both halves of a BF16 or FP32 op enter and tick in
+  //   lockstep because both engines latch on the same accept cycle and both
+  //   increment on the same `!boundary` predicate. These assertions catch any
+  //   future regression that breaks the invariant.
   // ==========================================================================
 
   when(p0IsDual && p1IsDual) {
-    assert(p0Row === p1Row,                "IPT: BF16 push p0/p1 row counters out of sync")
-    assert(p0Cmd.accSel === p1Cmd.accSel,  "IPT: BF16 push p0/p1 accSel mismatch")
+    assert(p0Row === p1Row,                "IPT: BF16/FP32 push p0/p1 row counters out of sync")
+    assert(p0Cmd.accSel === p1Cmd.accSel,  "IPT: BF16/FP32 push p0/p1 accSel mismatch")
   }
   when(w0CmdValid && w1CmdValid && (isBF16Pop(w0Cmd.op) || w0Cmd.op === MxuOp.PopAccFP32)) {
-    assert(w0Row === w1Row,                "IPT: BF16 pop w0/w1 row counters out of sync")
-    assert(w0Cmd.accSel === w1Cmd.accSel,  "IPT: BF16 pop w0/w1 accSel mismatch")
+    assert(w0Row === w1Row,                "IPT: BF16/FP32 pop w0/w1 row counters out of sync")
+    assert(w0Cmd.accSel === w1Cmd.accSel,  "IPT: BF16/FP32 pop w0/w1 accSel mismatch")
   }
 
   // ==========================================================================
