@@ -82,9 +82,7 @@ other VPU slot has read its last row, and `issueBusy` has one vector for each `v
 An instruction waits for a pending scalar load only on the x-registers that it names: rs1 and rs2
 when it reads them, and rd when it writes x[rd] (`dma.load` and `dma.store` read x[rd]). The decode
 column `xr` gives these fields. They are the x operands of the ISA table, and `ScalarDecoderTest`
-checks this. Before 2026-10-25, every instruction that was not a tensor instruction compared rs1,
-rs2 and rd with the pending load. So `seli`, `delay`, `lui`, `vload` and others, whose bits in these
-fields hold an immediate or an e- or m-register, could wait for no reason (`interlock_xreg.S`).
+checks this. `interlock_xreg.S` tests the rule.
 
 ### Jump targets
 
@@ -118,8 +116,8 @@ The results below date from 2026-10-21 to 2026-10-23 and name the configurations
 
 `apps/dit/ditflow/hazfuzz.py` generates random streams of dependent tensor instructions with no
 `DELAY`: `vload`, `vstore`, VPU arithmetic (with the `.vx` and `.vr` forms; a `.vx` often reads x4
-right after a scalar load writes it) and row reductions, MXU push, matmul and pop, XLU transposes,
-and the NVFP4 2- and 4-register transfers. They run over 20 registers, including
+right after a scalar load writes it), `vgelu.bf16` and row reductions, MXU push, matmul and pop, XLU
+transposes, and the NVFP4 2- and 4-register transfers. They run over 20 registers, including
 ones that share a physical bank. Each next instruction is biased to read or overwrite what the
 previous ones touched. The expected DRAM comes from the functional model, which runs in program
 order, the architectural meaning on an interlocked core. A `--spaced` copy of each program puts
