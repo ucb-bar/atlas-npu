@@ -9,7 +9,7 @@
 #   3. Load BF16 bias lo (all 8.0) into TRF m6 (lanes 0–15)
 #   4. Load BF16 bias hi (all 8.0) into TRF m7 (lanes 16–31)
 #   5. Push weights into MXU1 weight FIFO
-#   6. Push bias as BF16 accumulator seed via VMATPUSH.ACC.BF16.MXU1
+#   6. Push the BF16 bias into the FP32 accumulator via VMATPUSH.ACC.BF16.MXU1
 #      (reads both m6 and m7 to fill all 32 accumulator lanes)
 #   7. VMATMUL.ACC: result = act × wgt^T + bias = 32.0 + 8.0 = 40.0
 #   8. Pop as FP8 with SELI scale 0x7C → 2^(124-127) = 2^(-3) = 0.125

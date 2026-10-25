@@ -146,9 +146,8 @@ def main():
 
     def mxu_matmul(a_u8: torch.Tensor, w_u8: torch.Tensor,
                    scale_exp: int = 0) -> torch.Tensor:
-        """Drop-in replacement for stock `sa_bf16(a_u8, w_u8, scale_exp=...)`
-        that routes through IPTLinearRTLFunction. Decodes uint8 FP8 bytes
-        to FP32 via software_models before the call."""
+        """An mxu1 matmul with a BF16 pop, through IPTLinearRTLFunction.
+        Decodes uint8 FP8 bytes to FP32 via software_models before the call."""
         a_fp32 = e4m3_bytes_to_float(a_u8)
         w_fp32 = e4m3_bytes_to_float(w_u8)
         return ipt_bf16(a_fp32, w_fp32, scale_exp=scale_exp)

@@ -83,8 +83,8 @@
     csrrw x0, 0x801, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
 
 # ═══════════════════════════════════════════════════════════════
-# DONE — host reads the mcycles delta from CSR_DBG1 @ 0x14 and the
-#        mxu1_busy counter (docs/perf-counters.md)
+# DONE — host reads the mcycles delta from CSR_DBG1 @ 0x14. The mxu1_busy
+#        counter (docs/perf-counters.md) counts the whole run, not this window.
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
     csrrw x0, 0x800, x30

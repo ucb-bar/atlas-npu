@@ -8,8 +8,8 @@ dtype/device.
 
 Design notes:
 
-- The model has no persistent weights — unlike the IPT / SA linear
-  adapters, nothing needs to be cached across calls. Every method is
+- The model has no persistent weights — unlike the IPT linear
+  adapter, nothing needs to be cached across calls. Every method is
   a pure function of its inputs.
 - All inputs are first cast to `torch.float32`, then to BF16 bits via
   `torch_float_to_bf16_bits` (RNE, matching
