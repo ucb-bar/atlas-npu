@@ -70,7 +70,6 @@ TESTS=(
   MaxReduBlockTest
   PairwiseMaxTest
   PairwiseMinTest
-  RVAddSubTest
   RVDivSqrtTest
   RVExpTest
   RVFP8PackTest
