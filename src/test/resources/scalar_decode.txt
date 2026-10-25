@@ -1,76 +1,81 @@
 # The ScalarDecoder control vector of each ISA table entry, checked by ScalarDecoderTest.
 # A line has the entry's name and each field that is not 0, by its ScalarISA name (ALU_SUB:
-# alu=SUB); rd_wen, jal and jalr if set; mxu1= or nv= and the MXU command (funct7[3:0]).
+# alu=SUB); rd_wen, jal, jalr, rd_x, rs1_ren and rs2_ren if set; mxu1= or nv= and the MXU
+# command (funct7[3:0]).
 # Write it again after a change of IDecode, and review the diff:
 #   ATLAS_DECODE_GOLDEN=write ./mill atlas.test.testOnly atlas.scalar.ScalarDecoderTest
-ADD rd_wen
-SUB alu=SUB rd_wen
-SLL alu=SLL rd_wen
-SLT alu=SLT rd_wen
-SLTU alu=SLTU rd_wen
-XOR alu=XOR rd_wen
-SRL alu=SRL rd_wen
-SRA alu=SRA rd_wen
-OR alu=OR rd_wen
-AND alu=AND rd_wen
-ADDI op2=IMM rd_wen
-SLTI alu=SLT op2=IMM rd_wen
-SLTIU alu=SLTU op2=IMM rd_wen
-XORI alu=XOR op2=IMM rd_wen
-ORI alu=OR op2=IMM rd_wen
-ANDI alu=AND op2=IMM rd_wen
-SLLI alu=SLL op2=IMM rd_wen
-SRLI alu=SRL op2=IMM rd_wen
-SRAI alu=SRA op2=IMM rd_wen
-BEQ br=EQ imm=B
-BNE br=NE imm=B
-BLT br=LT imm=B
-BGE br=GE imm=B
-BLTU br=LTU imm=B
-BGEU br=GEU imm=B
-JAL op1=PC op2=IMM imm=J rd_wen jal
-JALR op2=IMM rd_wen jalr
-LUI alu=PASS_B op2=IMM imm=U rd_wen
-AUIPC op1=PC op2=IMM imm=U rd_wen
-CSRRW csr=RW rd_wen
-CSRRS csr=RS rd_wen
-CSRRC csr=RC rd_wen
-CSRRWI imm=Z csr=RWI rd_wen
-CSRRSI imm=Z csr=RSI rd_wen
-CSRRCI imm=Z csr=RCI rd_wen
+ADD rd_wen rd_x rs1_ren rs2_ren
+SUB alu=SUB rd_wen rd_x rs1_ren rs2_ren
+SLL alu=SLL rd_wen rd_x rs1_ren rs2_ren
+SLT alu=SLT rd_wen rd_x rs1_ren rs2_ren
+SLTU alu=SLTU rd_wen rd_x rs1_ren rs2_ren
+XOR alu=XOR rd_wen rd_x rs1_ren rs2_ren
+SRL alu=SRL rd_wen rd_x rs1_ren rs2_ren
+SRA alu=SRA rd_wen rd_x rs1_ren rs2_ren
+OR alu=OR rd_wen rd_x rs1_ren rs2_ren
+AND alu=AND rd_wen rd_x rs1_ren rs2_ren
+ADDI op2=IMM rd_wen rd_x rs1_ren
+SLTI alu=SLT op2=IMM rd_wen rd_x rs1_ren
+SLTIU alu=SLTU op2=IMM rd_wen rd_x rs1_ren
+XORI alu=XOR op2=IMM rd_wen rd_x rs1_ren
+ORI alu=OR op2=IMM rd_wen rd_x rs1_ren
+ANDI alu=AND op2=IMM rd_wen rd_x rs1_ren
+SLLI alu=SLL op2=IMM rd_wen rd_x rs1_ren
+SRLI alu=SRL op2=IMM rd_wen rd_x rs1_ren
+SRAI alu=SRA op2=IMM rd_wen rd_x rs1_ren
+BEQ br=EQ imm=B rs1_ren rs2_ren
+BNE br=NE imm=B rs1_ren rs2_ren
+BLT br=LT imm=B rs1_ren rs2_ren
+BGE br=GE imm=B rs1_ren rs2_ren
+BLTU br=LTU imm=B rs1_ren rs2_ren
+BGEU br=GEU imm=B rs1_ren rs2_ren
+JAL op1=PC op2=IMM imm=J rd_wen jal rd_x
+JALR op2=IMM rd_wen jalr rd_x rs1_ren
+LUI alu=PASS_B op2=IMM imm=U rd_wen rd_x
+AUIPC op1=PC op2=IMM imm=U rd_wen rd_x
+CSRRW csr=RW rd_wen rd_x rs1_ren
+CSRRS csr=RS rd_wen rd_x rs1_ren
+CSRRC csr=RC rd_wen rd_x rs1_ren
+CSRRWI imm=Z csr=RWI rd_wen rd_x
+CSRRSI imm=Z csr=RSI rd_wen rd_x
+CSRRCI imm=Z csr=RCI rd_wen rd_x
 ECALL
 EBREAK
 FENCE
-LB op2=IMM mem=LB
-LH op2=IMM mem=LH
-LW op2=IMM mem=LW
-LBU op2=IMM mem=LBU
-LHU op2=IMM mem=LHU
-SB op2=IMM imm=S mem=SB
-SH op2=IMM imm=S mem=SH
-SW op2=IMM imm=S mem=SW
-SELD op2=ZERO mem=SELD
+LB op2=IMM mem=LB rd_x rs1_ren
+LH op2=IMM mem=LH rd_x rs1_ren
+LW op2=IMM mem=LW rd_x rs1_ren
+LBU op2=IMM mem=LBU rd_x rs1_ren
+LHU op2=IMM mem=LHU rd_x rs1_ren
+SB op2=IMM imm=S mem=SB rs1_ren rs2_ren
+SH op2=IMM imm=S mem=SH rs1_ren rs2_ren
+SW op2=IMM imm=S mem=SW rs1_ren rs2_ren
+SELD op2=ZERO mem=SELD rs1_ren
 SELI sc=SELI
 DELAY sc=DELAY
-VLOAD op2=IMM imm=VLS lsu=VLOAD
-VSTORE op2=IMM imm=VLS lsu=VSTORE
-VLOAD_SCALE op2=IMM imm=VLS lsu=VLOAD_SCALE
-VSTORE_SCALE op2=IMM imm=VLS lsu=VSTORE_SCALE
-DMA_LOAD dma=LD
-DMA_STORE dma=ST
-DMA_CONFIG dma=CONFIG
+VLOAD op2=IMM imm=VLS lsu=VLOAD rs1_ren
+VSTORE op2=IMM imm=VLS lsu=VSTORE rs1_ren
+VLOAD_SCALE op2=IMM imm=VLS lsu=VLOAD_SCALE rs1_ren
+VSTORE_SCALE op2=IMM imm=VLS lsu=VSTORE_SCALE rs1_ren
+DMA_LOAD dma=LD rd_x rs1_ren rs2_ren
+DMA_STORE dma=ST rd_x rs1_ren rs2_ren
+DMA_CONFIG dma=CONFIG rs1_ren
 DMA_WAIT dma=WAIT
 VMATPUSH_WEIGHT_MXU1 mxu1=PUSH_WEIGHT
 VMATPUSH_ACC_FP8_MXU1 mxu1=PUSH_ACC_FP8
 VMATPUSH_ACC_BF16_MXU1 mxu1=PUSH_ACC_BF16
+VMATPUSH_ACC_FP32_MXU1 mxu1=PUSH_ACC_FP32
 VMATPOP_FP8_ACC_MXU1 mxu1=POP_FP8
 VMATPOP_BF16_ACC_MXU1 mxu1=POP_BF16
+VMATPOP_BF16_SCALED_ACC_MXU1 mxu1=POP_BF16_SCALED
+VMATPOP_FP32_ACC_MXU1 mxu1=POP_FP32
 VMATMUL_MXU1 mxu1=MATMUL
 VMATMUL_ACC_MXU1 mxu1=MATMUL_ACC
 VMATPUSH_WEIGHT_NV nv=PUSH_WEIGHT
 VMATPUSH_ACC_BF16_NV nv=PUSH_ACC_BF16
 VMATPUSH_ACC_FP32_NV nv=PUSH_ACC_FP32
 VMATPOP_BF16_ACC_NV nv=POP_BF16
+VMATPOP_BF16_SCALED_ACC_NV nv=POP_BF16_SCALED
 VMATPOP_FP32_ACC_NV nv=POP_FP32
 VMATMUL_NV nv=MATMUL
 VMATMUL_ACC_NV nv=MATMUL_ACC
@@ -79,6 +84,16 @@ VSUB_BF16 vpu=SUB
 VMUL_BF16 vpu=MUL
 VMINIMUM_BF16 vpu=PAIRMIN
 VMAXIMUM_BF16 vpu=PAIRMAX
+VADD_BF16_VX vpu=ADD src=XREG rs2_ren
+VSUB_BF16_VX vpu=SUB src=XREG rs2_ren
+VMUL_BF16_VX vpu=MUL src=XREG rs2_ren
+VMINIMUM_BF16_VX vpu=PAIRMIN src=XREG rs2_ren
+VMAXIMUM_BF16_VX vpu=PAIRMAX src=XREG rs2_ren
+VADD_BF16_VR vpu=ADD src=ROW0
+VSUB_BF16_VR vpu=SUB src=ROW0
+VMUL_BF16_VR vpu=MUL src=ROW0
+VMINIMUM_BF16_VR vpu=PAIRMIN src=ROW0
+VMAXIMUM_BF16_VR vpu=PAIRMAX src=ROW0
 VREDSUM_BF16 vpu=CSUM
 VREDMIN_BF16 vpu=CMIN
 VREDMAX_BF16 vpu=CMAX
@@ -99,6 +114,7 @@ VCOS_BF16 vpu=COS
 VTANH_BF16 vpu=TANH
 VLOG2_BF16 vpu=LOG
 VSQRT_BF16 vpu=SQRT
+VGELU_BF16 vpu=GELU
 VLI_ALL vpu=LI_ALL
 VLI_ROW vpu=LI_ROW
 VLI_COL vpu=LI_COL

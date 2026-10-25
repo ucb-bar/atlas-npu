@@ -29,7 +29,8 @@ class ScalarDecoderTest extends AnyFlatSpec {
   private val header = Seq(
     "# The ScalarDecoder control vector of each ISA table entry, checked by ScalarDecoderTest.",
     "# A line has the entry's name and each field that is not 0, by its ScalarISA name (ALU_SUB:",
-    "# alu=SUB); rd_wen, jal and jalr if set; mxu1= or nv= and the MXU command (funct7[3:0]).",
+    "# alu=SUB); rd_wen, jal, jalr, rd_x, rs1_ren and rs2_ren if set; mxu1= or nv= and the MXU",
+    "# command (funct7[3:0]).",
     "# Write it again after a change of IDecode, and review the diff:",
     "#   ATLAS_DECODE_GOLDEN=write ./mill atlas.test.testOnly atlas.scalar.ScalarDecoderTest")
 
@@ -62,8 +63,8 @@ class ScalarDecoderTest extends AnyFlatSpec {
   private val fields = Seq[(String, String, DecodedInstr => UInt)](
     ("alu", "ALU_", _.alu_fn), ("br", "BR_", _.br_type), ("op1", "OP1_", _.op1_sel),
     ("op2", "OP2_", _.op2_sel), ("imm", "IMM_", _.imm_sel), ("csr", "CSR_", _.csr_cmd),
-    ("dma", "DMA_", _.dma_cmd), ("vpu", "VPU_", _.vpu_cmd), ("xlu", "XLU_", _.xlu_cmd),
-    ("mem", "MEM_", _.mem_cmd), ("lsu", "LSU_", _.lsu_cmd)
+    ("dma", "DMA_", _.dma_cmd), ("vpu", "VPU_", _.vpu_cmd), ("src", "VSRC_", _.vpu_src),
+    ("xlu", "XLU_", _.xlu_cmd), ("mem", "MEM_", _.mem_cmd), ("lsu", "LSU_", _.lsu_cmd)
   ).map { case (key, prefix, field) => (key, names(prefix), field) }
   private val mxuNames = names("MXU_")
 
@@ -75,7 +76,8 @@ class ScalarDecoderTest extends AnyFlatSpec {
         val v = field(d).peek().litValue
         s"$key=${n.getOrElse(v, v.toString)}"
     }
-    val flags = Seq("rd_wen" -> d.rd_wen, "jal" -> d.is_jal, "jalr" -> d.is_jalr)
+    val flags = Seq("rd_wen" -> d.rd_wen, "jal" -> d.is_jal, "jalr" -> d.is_jalr, "rd_x" -> d.rd_x,
+      "rs1_ren" -> d.rs1_ren, "rs2_ren" -> d.rs2_ren)
       .collect { case (f, b) if set(b) => f }
     val mxu = Option.when(set(d.is_mxu)) {
       val cmd = d.mxu_cmd.peek().litValue
