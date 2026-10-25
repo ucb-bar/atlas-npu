@@ -49,7 +49,7 @@ class VectorInput(val p: VpuParams) extends Bundle {
   val instWriteBank   = UInt(6.W)
   val imm             = SInt(16.W)
   val packScaleE8M0   = UInt(8.W)   // E8M0 scale for VPACK_BF16_FP8
-  val unpackScaleE8M0 = UInt(8.W)   // E8M0 scale for VFP8UNPACK
+  val unpackScaleE8M0 = UInt(8.W)   // E8M0 scale for VUNPACK_FP8_BF16
 }
 
 class RegData extends Bundle {
