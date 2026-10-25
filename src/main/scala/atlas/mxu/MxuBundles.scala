@@ -26,9 +26,11 @@ import chisel3.util._
 object MxuOp extends ChiselEnum {
   val PushWeight       = Value(0.U)  // mreg → weight slot.
   val PushAccBF16      = Value(1.U)  // mreg (BF16) → accum buffer.
+  val PushAccFP32      = Value(2.U)  // 4 mregs (FP32) → accum buffer, a copy.
   val PushAccFP8       = Value(3.U)  // mreg (FP8)  → accum buffer (converted to accumFmt).
   val PopAccBF16       = Value(4.U)  // accum buffer → mreg (BF16).
   val PopAccBF16Scaled = Value(5.U)  // accum buffer × 2^(scaleE8M0 - 127) → mreg (BF16).
+  val PopAccFP32       = Value(6.U)  // accum buffer → 4 mregs (FP32), a copy.
   val PopAccFP8        = Value(7.U)  // accum buffer → mreg (quant to FP8).
   val Matmul           = Value(8.U)  // compute, result overwrites accum buffer.
   val MatmulAcc        = Value(9.U)  // compute, result accumulates into accum buffer.
@@ -104,6 +106,7 @@ class AccBufLoadReq(p: MxuParams) extends Bundle {
   val accSel = Bool()                                                       // Target buffer.
   val rowIdx = UInt(p.rowIdxBits.W)                                         // Target row.
   val data   = Vec(p.accumBufferColsBF16, UInt(p.accumFmt.ieeeWidth.W))     // Row data.
+  val mask   = Vec(p.accumBufferColsBF16, Bool())                           // Columns to write.
 }
 
 /** Address an accum-buffer row for store/pop read-out (pre-quantization). */

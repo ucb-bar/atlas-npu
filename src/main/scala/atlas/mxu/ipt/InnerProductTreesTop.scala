@@ -57,8 +57,8 @@ class InnerProductTreesTop(
     val feeding     = Output(Bool())
 
     // ── Active mreg bank reports for direction-aware TRF tracking ──
-    val activeReads  = Output(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
-    val activeWrites = Output(Vec(2, Valid(UInt(mregP.mregIdBits.W))))
+    val activeReads  = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
+    val activeWrites = Output(Vec(4, Valid(UInt(mregP.mregIdBits.W))))
   })
 
   // ==========================================================================

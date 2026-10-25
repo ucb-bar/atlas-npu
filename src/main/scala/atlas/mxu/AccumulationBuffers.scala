@@ -124,8 +124,13 @@ class AccumulationBuffers(p: MxuParams) extends Module {
                        io.computeWriteReq.bits.data,
                        io.loadReq.bits.data)
 
-  when(write0En) { buffer0.write(write0Addr, write0Data) }
-  when(write1En) { buffer1.write(write1Addr, write1Data) }
+  // A compute write covers the row; a load writes its masked columns.
+  private val allColumns = VecInit.fill(numCols)(true.B)
+  val write0Mask = Mux(write0IsCompute, allColumns, io.loadReq.bits.mask)
+  val write1Mask = Mux(write1IsCompute, allColumns, io.loadReq.bits.mask)
+
+  when(write0En) { buffer0.write(write0Addr, write0Data, write0Mask) }
+  when(write1En) { buffer1.write(write1Addr, write1Data, write1Mask) }
 
   // ==========================================================================
   // Unified read selection — one read request per buffer per cycle

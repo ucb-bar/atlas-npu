@@ -247,8 +247,9 @@ class AtlasCore(
   // ==========================================================================
 
   private val numBanks = 64
-  // Reporters 0, 1 (and 10, 11 for the NVFP4 MXU's 4-register transfers) are MXU slot 0.
-  val mregTracker = Module(new MregBankTracker(numBanks, numReaders = 12, numWriters = 12))
+  // Reporters 0, 1 (and 10, 11 for the NVFP4 MXU's 4-register transfers) are MXU slot 0;
+  // 2, 3 (and 12, 13) are mxu1.
+  val mregTracker = Module(new MregBankTracker(numBanks, numReaders = 14, numWriters = 14))
   private val noBank = 0.U.asTypeOf(Valid(UInt(mregP.mregIdBits.W)))
   private def slot0Reads: Seq[Valid[UInt]] =
     nv.map(n => n.io.activeReads.toSeq).getOrElse(Seq.fill(4)(noBank))
@@ -261,6 +262,8 @@ class AtlasCore(
   mregTracker.io.readers(11) := slot0Reads(3)
   mregTracker.io.readers(2) := mxu1.io.activeReads(0)
   mregTracker.io.readers(3) := mxu1.io.activeReads(1)
+  mregTracker.io.readers(12) := mxu1.io.activeReads(2)
+  mregTracker.io.readers(13) := mxu1.io.activeReads(3)
   mregTracker.io.readers(4) := xlu.io.activeMregRead
   mregTracker.io.readers(5) := vpu.io.activeReads(0)
   mregTracker.io.readers(6) := vpu.io.activeReads(1)
@@ -274,6 +277,8 @@ class AtlasCore(
   mregTracker.io.writers(11) := slot0Writes(3)
   mregTracker.io.writers(2) := mxu1.io.activeWrites(0)
   mregTracker.io.writers(3) := mxu1.io.activeWrites(1)
+  mregTracker.io.writers(12) := mxu1.io.activeWrites(2)
+  mregTracker.io.writers(13) := mxu1.io.activeWrites(3)
   mregTracker.io.writers(4) := xlu.io.activeMregWrite
   mregTracker.io.writers(5) := vpu.io.activeWrites(0)
   mregTracker.io.writers(6) := vpu.io.activeWrites(1)
