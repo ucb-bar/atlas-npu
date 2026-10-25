@@ -1112,6 +1112,6 @@ class VETUnitTesting extends AnyFlatSpec with Matchers with PeekPokeAPI {
             // val allResults = results1 ++ results2 ++ results3 ++ results4
             // allResults.foreach { case (name, pass) =>if (!pass) println(s"$name failed") }
             // assert(allResults.forall(_._2), "One or more matrices failed")
-        }
+        }.result
     }
 }

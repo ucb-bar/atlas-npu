@@ -155,6 +155,6 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
-        }
+        }.result
     }
 }

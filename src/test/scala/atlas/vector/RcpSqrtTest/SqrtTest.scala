@@ -106,6 +106,6 @@ class SqrtTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekP
           println("")
         }
       }
-    }
+    }.result
   }
 }

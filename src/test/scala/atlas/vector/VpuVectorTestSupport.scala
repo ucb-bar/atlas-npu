@@ -492,6 +492,6 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
       )
       println(s"Family '$family': $passed passed, $failed failed out of ${vectors.length}")
       failed shouldBe 0
-    }
+    }.result
   }
 }

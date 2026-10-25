@@ -148,7 +148,7 @@ class DivSqrtBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         // BF16 ~2-3 decimal digits of precision; loose tolerance.
         math.abs(actual - expected) should be < 0.05
       }
-    }
+    }.result
   }
 
   it should "compute vectorized square root" in {
@@ -181,6 +181,6 @@ class DivSqrtBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         println(f"Lane $i: sqrt(${aValues(i)}) = $actual%.4f (Expected: $expected%.4f)")
         math.abs(actual - expected) should be < 0.05
       }
-    }
+    }.result
   }
 }

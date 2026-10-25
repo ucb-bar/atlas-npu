@@ -143,6 +143,6 @@ class FSMDouble extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 )
                 dut.clock.step(1)
             }
-        }
+        }.result
     }
 }

@@ -332,7 +332,7 @@ class VectorEngineTopTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       runAliasedBinaryOp("Test 6: Vector mul with aliased source pair", VPUOp.mul, BF16_1, BF16_4)
       runAliasedBinaryOp("Test 7: Vector min with aliased source pair", VPUOp.pairmin, BF16_1, BF16_2)
       runAliasedBinaryOp("Test 8: Vector max with aliased source pair", VPUOp.pairmax, BF16_1, BF16_2)
-    }
+    }.result
   }
 
   "VectorEngineTop" should "pass all functional checks" in {

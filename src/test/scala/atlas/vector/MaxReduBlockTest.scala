@@ -166,6 +166,6 @@ class MaxReduBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       resultsFound should be (requests.length)
       println(f"\n>>> TEST COMPLETE: Found $resultsFound results in $cycles cycles.")
-    }
+    }.result
   }
 }

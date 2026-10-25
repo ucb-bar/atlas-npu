@@ -197,6 +197,6 @@ class ReluBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       
       if (cycles >= timeout) fail("Test timed out!")
       
-    }
+    }.result
   }
 }

@@ -98,6 +98,6 @@ class SqrtLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pe
 
         printBF16Array(bf16Shorts, false)
       }
-    }
+    }.result
   }
 }

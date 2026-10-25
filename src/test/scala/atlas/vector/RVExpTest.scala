@@ -113,6 +113,6 @@ class RVExpTest extends AnyFlatSpec with HasSinCosParams with Matchers with Peek
           println("")
         }
       }
-    }
+    }.result
   }
 }

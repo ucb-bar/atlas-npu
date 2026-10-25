@@ -164,6 +164,6 @@ class RVTanhTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.bits.wRow.poke(0.U)
             }
             failed shouldBe 0
-        }
+        }.result
     }
 }

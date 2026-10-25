@@ -106,6 +106,6 @@ class RcpTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPo
           println("")
         }
       }
-    }
+    }.result
   }
 }

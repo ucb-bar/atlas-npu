@@ -112,6 +112,6 @@ class PairwiseMaxTest extends AnyFlatSpec with HasSinCosParams with Matchers wit
           println("")
         }
       }
-    }
+    }.result
   }
 }

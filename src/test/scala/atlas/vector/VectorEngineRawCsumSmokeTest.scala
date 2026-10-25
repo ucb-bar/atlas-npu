@@ -169,6 +169,6 @@ class VectorEngineRawCsumSmokeTest extends AnyFlatSpec with Matchers with PeekPo
       val expected  = 0x4200 // 32.0 in BF16
 
       row0Lane0 shouldBe expected
-    }
+    }.result
   }
 }

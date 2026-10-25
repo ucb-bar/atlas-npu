@@ -162,6 +162,6 @@ println(s"\n>>> STIMULATING TANH PIPELINE")
       }
 
       resultsFound should be (2)
-      println(f"\n>>> PIPELINE TEST COMPLETE: Found $resultsFound results in $cycles cycles.")    }
+      println(f"\n>>> PIPELINE TEST COMPLETE: Found $resultsFound results in $cycles cycles.")    }.result
   }
 }

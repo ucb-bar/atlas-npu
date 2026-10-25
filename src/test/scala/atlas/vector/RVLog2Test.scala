@@ -147,7 +147,7 @@ class RVLog2Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.valid.poke(false.B)
             }
             failed shouldBe 0
-        }
+        }.result
        
     }
 }

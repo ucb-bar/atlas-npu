@@ -64,6 +64,10 @@ TESTS=(
   DivSqrtBlockTest
   FSMDouble
   FSMDoubleTransition
+  FSMOverlapTracking1
+  FSMOverlapTracking2
+  FSMOverlapTracking3
+  FSMOverlapTracking4
   FSMSingle
   FSMSingleTransition
   LogLUTTest

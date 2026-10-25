@@ -97,6 +97,6 @@ class LogLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
 
         printBF16Array(bf16Shorts, false)
       }
-    }
+    }.result
   }
 }

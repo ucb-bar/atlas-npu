@@ -214,6 +214,6 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.bits.whichBank.poke(0.U)
                 dut.io.req.bits.wRow.poke(0.U)
             }
-        }
+        }.result
     }
 }

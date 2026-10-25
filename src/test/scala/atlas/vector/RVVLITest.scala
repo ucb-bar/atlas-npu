@@ -128,7 +128,7 @@ class RVVLITest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       val outRow3 = readOut(dut)
       outRow3.foreach(_ shouldBe 0)
-    }
+    }.result
   }
 
   it should "do vliCol and vliOne correctly" in {
@@ -168,7 +168,7 @@ class RVVLITest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       val outOne5 = readOut(dut)
       outOne5.foreach(_ shouldBe 0)
-    }
+    }.result
   }
 
   it should "only write row 0 for vliRow and zero all other rows" in {
@@ -205,6 +205,6 @@ class RVVLITest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
         dut.clock.step(1)
       }
-    }
+    }.result
   }
 }

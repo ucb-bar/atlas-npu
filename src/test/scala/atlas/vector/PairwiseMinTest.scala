@@ -112,6 +112,6 @@ class PairwiseMinTest extends AnyFlatSpec with HasSinCosParams with Matchers wit
           println("")
         }
       }
-    }
+    }.result
   }
 }

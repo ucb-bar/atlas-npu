@@ -131,6 +131,6 @@ class FSMOverlapTracking3 extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut.io.out.activeWrites(2).bits.expect(6.U)
       dut.io.out.activeWrites(3).valid.expect(true.B)
       dut.io.out.activeWrites(3).bits.expect(7.U)
-    }
+    }.result
   }
 }

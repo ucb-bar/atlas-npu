@@ -106,6 +106,6 @@ class FSMOverlapTracking4 extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
       dut.io.in.instType.poke(VPUOp.tanh)
       dut.io.out.VEReady.expect(true.B)
-    }
+    }.result
   }
 }

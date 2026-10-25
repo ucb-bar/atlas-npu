@@ -106,6 +106,6 @@ class RowMinTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
           println("")
         }
       }
-    }
+    }.result
   }
 }
