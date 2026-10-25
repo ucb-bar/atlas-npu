@@ -26,8 +26,9 @@ passes only if the core stops at an illegal instruction.
 
 `atlas_asm.py --disasm FILE` prints the assembly of a program: hex text (one word per line) or, for
 a `.bin` file, raw binary. The disassembler (`npu_model.isa.disasm`) decodes the words with the ISA
-table and puts labels at branch and jump targets. Its output assembles to the same words, except an
-illegal word, which it prints as `.word`.
+table and puts labels at branch and jump targets. Its output assembles to the same words. It prints
+an illegal word as `.word`. The assembler takes `.word` only for a word that is no instruction, so
+that a test can run it (for example `illegal_word_v1.S`).
 
 3) Build:
 
