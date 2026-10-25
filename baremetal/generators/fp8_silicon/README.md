@@ -19,7 +19,7 @@ model's docstring states it.
   (`cuobjdump -sass`). This is the native FP8 tensor-core path, not HMMA. On B200,
   `mma.sync` FP8 goes through FP16 HMMA (Khattak and Mikaitis, arXiv 2512.07004), so B200
   `mma.sync` results are not this contract.
-- The two kinds gave the same output on all 850,126 vectors. The files keep one column,
+- The two kinds gave the same output on all 850,129 vectors. The files keep one column,
   `rtx5090`, from kind 0.
 - No Jetson Thor or other tcgen05 GPU (sm_100, sm_110) is reachable from this workspace, so there
   is no `tcgen05.mma` `kind::f8f6f4` column. The `thor` column of `../nvfp4_silicon` came from a
@@ -31,7 +31,7 @@ model's docstring states it.
 
 | File | Vectors | Full set | Content |
 |---|---|---|---|
-| `directed.vec.gz` | 126 | 126 | one rule each; header `names` gives the rule (`fp8_vectors.py`, `directed()`) |
+| `directed.vec.gz` | 129 | 129 | one rule each; header `names` gives the rule (`fp8_vectors.py`, `directed()`) |
 | `bits_s1.vec.gz` | 15,000 | 100,000 | random bytes for a and b (NaN codes included), random 32-bit C |
 | `normal_s2.vec.gz` | 20,000 | 150,000 | E4M3 exponent fields from N(7, 2); C from N(0, 8) |
 | `wide_s3.vec.gz` | 20,000 | 150,000 | E4M3 exponent fields 0 to 15; C from 2^-40 to 2^34, or zero |
@@ -40,8 +40,8 @@ model's docstring states it.
 | `sparse_s6.vec.gz` | 15,000 | 100,000 | 60% signed-zero elements; C small or zero |
 | `subnormal_s7.vec.gz` | 15,000 | 100,000 | 60% subnormal elements; C small or zero |
 
-`fp8_vectors.py gen` writes the full sets. The model equals the RTX 5090 on all 850,126 vectors of
-the full sets and on all 140,126 stored vectors. A separate check, not stored here, ran chains of 4
+`fp8_vectors.py gen` writes the full sets. The model equals the RTX 5090 on all 850,129 vectors of
+the full sets and on all 140,129 stored vectors. A separate check, not stored here, ran chains of 4
 dependent `mma.sync` (K = 128, D fed back as C): the chained model equals silicon on 240,000 of
 240,000 outputs (60,000 records).
 
@@ -60,7 +60,7 @@ the full-set index of every vector (`indices`).
 Each alternative rule makes one change to the contract. The table gives the number of vectors
 whose RTX 5090 output rejects the change, that is, where the changed model gives other bits:
 
-| Alternative rule | Full sets (850,126) | Stored (140,126) |
+| Alternative rule | Full sets (850,129) | Stored (140,129) |
 |---|---|---|
 | F = 24 | 114,982 | 16,955 |
 | F = 26 | 68,943 | 10,496 |
@@ -70,7 +70,7 @@ whose RTX 5090 output rejects the change, that is, where the changed model gives
 | C not cut; only the sum is rounded | 131,076 | 20,462 |
 | Two fused sums of 16 elements, the first cut to FP32 | 147,988 | 21,808 |
 | FP32 output rounded to nearest even, not toward zero | 169,949 | 23,889 |
-| IEEE signs of zero (C = -0 with only -0 products gives -0) | 1 | 1 |
+| IEEE signs of zero (C = -0 with only -0 products gives -0) | 4 | 4 |
 
 ## Format
 
