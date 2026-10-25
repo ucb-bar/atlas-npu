@@ -8,7 +8,8 @@ velocity when tracing.
 
 Numbers on Atlas:
 - Matmul inputs are FP8 E4M3 with the per-tensor power-of-two scales of a QuantPlan; mxu1
-  accumulates in BF16 (one rounding per 32-element K tile). Everything else is BF16 on the VPU.
+  accumulates in FP32 over all K tiles and rounds once at the BF16 pop. Everything else is BF16
+  on the VPU.
 - adaLN is linear in cat(SiLU(time), SiLU(cond)), so its conditioning half (and its bias,
   with the +1 of `x * (1 + scale)` folded in) is computed once before the loop.
 - Vectors that scale token rows (adaLN outputs) are kept replicated over the 32 rows of a tile.

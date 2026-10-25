@@ -13,9 +13,9 @@ reference model is `npu-model/npu_model/configs/fp8_mma.py`. The silicon vectors
 | Weight slots `w0`, `w1` | 2 x 32 x 32 E4M3 | row j: output column j's 32 elements |
 | Accumulators `acc0`, `acc1` | 2 x 32 x 32 FP32 (4 KiB each) | |
 
-The 7 instructions keep their v1 encodings. A BF16 tile T is the register pair {m[r], m[r+1]}:
-m[r] holds columns 0-15 of each row, m[r+1] columns 16-31. G(e) = 2^(e - 127), with e the
-8-bit value of the e-register (e = 255 is 2^128).
+The 7 instructions have the ISA 2.0 encodings of `npu-model/npu_model/isa/atlas_isa.toml`. A
+BF16 tile T is the register pair {m[r], m[r+1]}: m[r] holds columns 0-15 of each row, m[r+1]
+columns 16-31. G(e) = 2^(e - 127), with e the 8-bit value of the e-register (e = 255 is 2^128).
 
 | Instruction | Operation | Steps |
 |---|---|---|

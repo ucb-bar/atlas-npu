@@ -1,7 +1,7 @@
 """Tile kernels for the DiT on Atlas: each emits straight-line code into a Builder.
 
-Every matmul runs on mxu1, the inner-product-tree MXU that all three Atlas configurations have,
-as FP8 x FP8 with BF16 accumulation. A Linear's output tile is
+Every matmul runs on mxu1, the inner-product-tree MXU that both Atlas configurations have,
+as FP8 x FP8 with FP32 accumulation. A Linear's output tile is
     acc = sum_k X_q(k) @ W_q(k)^T          (vmatmul.mxu1, then vmatmul.acc.mxu1 over K tiles)
     y   = acc * 2**(a_x + a_w) + bias      (vmatpop.bf16, vmul, vadd)
 and an epilogue consumes y while it is still in registers. BF16 -> FP8 conversion goes through
