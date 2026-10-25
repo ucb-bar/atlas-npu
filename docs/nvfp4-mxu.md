@@ -45,20 +45,24 @@ A BF16 tile uses a register pair like the other MXUs: columns 0-15 in `m[r]`, 16
 
 ## Instructions
 
-MXU instructions use opcode `0x77` (VR format: funct7, vs2, vs1, vd); the scale transfers use the
-VLS format of `vload`/`vstore` (opcode `0x07`).
+MXU instructions use opcode custom-0 (`0x0B`, VR format: funct7, vs2, vs1, vd) with funct7
+`0b110_oooo`, the MXU command `oooo` in slot 0; the scale transfers use the VLS format of
+`vload`/`vstore` (opcode custom-2, `0x5B`).
 
 | Mnemonic | Encoding | Operation |
 |---|---|---|
-| `vmatpush.weight.nv w(vd), m(vs1)` | `77/0E` | `w[vd] = m[vs1]` and its scales |
-| `vmatpush.acc.bf16.nv acc(vd), m(vs1)` | `77/0F` | `acc[vd] = {m[vs1], m[vs1+1]}` (BF16, exact in FP32) |
-| `vmatpush.acc.fp32.nv acc(vd), m(vs1)` | `77/10` | `acc[vd] = m[vs1 .. vs1+3]` (FP32) |
-| `vmatpop.bf16.acc.nv m(vd), acc(vs2)` | `77/11` | `{m[vd], m[vd+1]} = BF16(acc[vs2])`, round to nearest even |
-| `vmatpop.fp32.acc.nv m(vd), acc(vs2)` | `77/12` | `m[vd .. vd+3] = acc[vs2]` |
-| `vmatmul.nv acc(vd), m(vs1), w(vs2)` | `77/13` | `acc[vd] = A @ W^T`, A = `m[vs1]` with its scales |
-| `vmatmul.acc.nv acc(vd), m(vs1), w(vs2)` | `77/14` | `acc[vd] += A @ W^T` |
-| `vload.scale m(vd), imm(x(rs1))` | VLS funct2 `10` | `m[vd]`'s scales = 128 B of VMEM, 128 B aligned |
-| `vstore.scale m(vd), imm(x(rs1))` | VLS funct2 `11` | 128 B of VMEM = `m[vd]`'s scales |
+| `vmatpush.weight.nv w(vd), m(vs1)` | `0B/60` | `w[vd] = m[vs1]` and its scales |
+| `vmatpush.acc.bf16.nv acc(vd), m(vs1)` | `0B/61` | `acc[vd] = {m[vs1], m[vs1+1]}` (BF16, exact in FP32) |
+| `vmatpush.acc.fp32.nv acc(vd), m(vs1)` | `0B/62` | `acc[vd] = m[vs1 .. vs1+3]` (FP32) |
+| `vmatpop.bf16.acc.nv m(vd), acc(vs2)` | `0B/64` | `{m[vd], m[vd+1]} = BF16(acc[vs2])`, round to nearest even |
+| `vmatpop.fp32.acc.nv m(vd), acc(vs2)` | `0B/66` | `m[vd .. vd+3] = acc[vs2]` |
+| `vmatmul.nv acc(vd), m(vs1), w(vs2)` | `0B/68` | `acc[vd] = A @ W^T`, A = `m[vs1]` with its scales |
+| `vmatmul.acc.nv acc(vd), m(vs1), w(vs2)` | `0B/69` | `acc[vd] += A @ W^T` |
+| `vload.scale m(vd), imm(x(rs1))` | `5B/2` | `m[vd]`'s scales = 128 B of VMEM, 128 B aligned |
+| `vstore.scale m(vd), imm(x(rs1))` | `5B/3` | 128 B of VMEM = `m[vd]`'s scales |
+
+The green card (`npu-model/npu_spec/06_instruction_set/README.md`) gives the match and mask of
+each word. A pair register `r` is even and an FP32 base `r` a multiple of 4.
 
 `npu-model` assembles these instructions and defines their semantics
 (`npu_model/configs/isa_definition.py`, arithmetic in `npu_model/configs/nvfp4.py`). Its timing

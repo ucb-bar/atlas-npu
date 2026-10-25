@@ -17,7 +17,7 @@ import chisel3.util._
 // Command opcode & sequencer command
 // ============================================================================
 
-/** MXU command opcodes of the mxu1 sequencer.
+/** MXU command opcodes of the mxu1 sequencer: funct7[3:0] of the instruction.
   *
   * Push/Pop move data between the matrix register file (mreg) and the MXU's
   * internal weight slots or accumulation buffers.  Matmul launches a
@@ -25,12 +25,12 @@ import chisel3.util._
   */
 object MxuOp extends ChiselEnum {
   val PushWeight  = Value(0.U)  // mreg → weight slot.
-  val PushAccFP8  = Value(1.U)  // mreg (FP8)  → accum buffer (dequant to BF16).
-  val PushAccBF16 = Value(2.U)  // mreg (BF16) → accum buffer.
-  val PopAccFP8   = Value(3.U)  // accum buffer → mreg (quant to FP8).
+  val PushAccBF16 = Value(1.U)  // mreg (BF16) → accum buffer.
+  val PushAccFP8  = Value(3.U)  // mreg (FP8)  → accum buffer (dequant to BF16).
   val PopAccBF16  = Value(4.U)  // accum buffer → mreg (BF16).
-  val Matmul      = Value(5.U)  // compute, result overwrites accum buffer.
-  val MatmulAcc   = Value(6.U)  // compute, result accumulates into accum buffer.
+  val PopAccFP8   = Value(7.U)  // accum buffer → mreg (quant to FP8).
+  val Matmul      = Value(8.U)  // compute, result overwrites accum buffer.
+  val MatmulAcc   = Value(9.U)  // compute, result accumulates into accum buffer.
 }
 
 /** Sequencer command issued by the scalar core.

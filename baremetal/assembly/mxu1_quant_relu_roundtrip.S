@@ -60,7 +60,7 @@
 
     # Load scale register from VMEM byte address 0x0800.
     LI    x7, 2048
-    seld e0, 0(x7)
+    seld e0, x7
     DELAY 2
 
     # ------------------------------------------------------------------

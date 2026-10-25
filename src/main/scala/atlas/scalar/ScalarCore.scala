@@ -126,14 +126,16 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   private def vpuIssueBusy(cmd: UInt): Bool =
     io.vpu_status.issueBusy(cmd)
 
+  /** The instruction is an MXU instruction with one of these commands (either slot). */
+  private def mxuOp(d: DecodedInstr, ops: UInt*): Bool = d.is_mxu && ops.map(_ === d.mxu_cmd).reduce(_ || _)
+
   private def instrMregReadHazard(dec: DecodedInstr): Bool = {
     val wb = io.mregWriteBusy
     val h  = WireDefault(false.B)
-    when(dec.mxu_cmd === MXU_PUSH_WEIGHT || dec.mxu_cmd === MXU_PUSH_ACC_FP8 ||
-         dec.mxu_cmd === MXU_MATMUL      || dec.mxu_cmd === MXU_MATMUL_ACC) {
+    when(mxuOp(dec, MXU_PUSH_WEIGHT, MXU_PUSH_ACC_FP8, MXU_MATMUL, MXU_MATMUL_ACC)) {
       h := wb(dec.vs1)
     }
-    when(dec.mxu_cmd === MXU_PUSH_ACC_BF16) {
+    when(mxuOp(dec, MXU_PUSH_ACC_BF16)) {
       h := wb(dec.vs1) || wb(dec.vs1 + 1.U)
     }
     when(dec.is_lsu && dec.lsu_cmd === LSU_VSTORE) {
@@ -157,10 +159,10 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     val rb = io.mregReadBusy
     val wb = io.mregWriteBusy
     val h  = WireDefault(false.B)
-    when(dec.mxu_cmd === MXU_POP_FP8) {
+    when(mxuOp(dec, MXU_POP_FP8)) {
       h := rb(dec.vd) || wb(dec.vd)
     }
-    when(dec.mxu_cmd === MXU_POP_BF16) {
+    when(mxuOp(dec, MXU_POP_BF16)) {
       h := rb(dec.vd) || wb(dec.vd) || rb(dec.vd + 1.U) || wb(dec.vd + 1.U)
     }
     when(dec.is_lsu && dec.lsu_cmd === LSU_VLOAD) {
@@ -176,32 +178,16 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     h
   }
 
+  // Pushes and matmuls name m[vs1] and acc or w in vd; pops name m[vd] and acc in vs2. A matmul
+  // names its weight slot in vs2.
   private def buildMxuCmd(d: DecodedInstr): MxuCmd = {
     val cmd = Wire(new MxuCmd)
-    cmd.op := d.mxu_cmd
-    cmd.mregBank := d.vs1
-    cmd.accSel := d.vd(0)
-    cmd.weightSlot := d.vd(0)
-    cmd.scaleE8M0 := 0.U
-    switch(d.mxu_cmd) {
-      is(MXU_PUSH_WEIGHT)   { cmd.mregBank := d.vs1; cmd.weightSlot := d.vd(0) }
-      is(MXU_PUSH_ACC_FP8)  { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
-      is(MXU_PUSH_ACC_BF16) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
-      is(MXU_POP_FP8) {
-        cmd.mregBank := d.vd; cmd.accSel := d.vs2(0)
-        cmd.scaleE8M0 := scaleRF.io.regs(d.vs1(4, 0))
-      }
-      is(MXU_POP_BF16) { cmd.mregBank := d.vd; cmd.accSel := d.vs2(0) }
-      is(MXU_MATMUL)     { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
-      is(MXU_MATMUL_ACC) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
-      is(MXU_NV_PUSH_WEIGHT)   { cmd.mregBank := d.vs1; cmd.weightSlot := d.vd(0) }
-      is(MXU_NV_PUSH_ACC_BF16) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
-      is(MXU_NV_PUSH_ACC_FP32) { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0) }
-      is(MXU_NV_POP_BF16)      { cmd.mregBank := d.vd;  cmd.accSel := d.vs2(0) }
-      is(MXU_NV_POP_FP32)      { cmd.mregBank := d.vd;  cmd.accSel := d.vs2(0) }
-      is(MXU_NV_MATMUL)        { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
-      is(MXU_NV_MATMUL_ACC)    { cmd.mregBank := d.vs1; cmd.accSel := d.vd(0); cmd.weightSlot := d.vs2(0) }
-    }
+    val pop = mxuOp(d, MXU_POP_BF16, MXU_POP_FP32, MXU_POP_FP8)
+    cmd.op         := d.mxu_cmd
+    cmd.mregBank   := Mux(pop, d.vd, d.vs1)
+    cmd.accSel     := Mux(pop, d.vs2(0), d.vd(0))
+    cmd.weightSlot := Mux(mxuOp(d, MXU_MATMUL, MXU_MATMUL_ACC), d.vs2(0), d.vd(0))
+    cmd.scaleE8M0  := Mux(mxuOp(d, MXU_POP_FP8), scaleRF.io.regs(d.vs1(4, 0)), 0.U)
     cmd
   }
 
@@ -244,7 +230,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // ==============================================================
 
   // Instructions of a unit this configuration does not have are illegal.
-  val isNvCmd    = dec.mxu_cmd =/= MXU_NONE && dec.mxu_sel === MXUSEL_0
+  val isNvCmd    = dec.is_mxu && dec.mxu_sel === MXUSEL_0
   val isScaleLsu = dec.is_lsu && (dec.lsu_cmd === LSU_VLOAD_SCALE || dec.lsu_cmd === LSU_VSTORE_SCALE)
   val unitAbsent = !hasNvfp4.B && (isNvCmd || isScaleLsu)
   // A two-source VPU instruction streams both source pairs in the same cycles. Two different
@@ -313,7 +299,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val isVstore  = dec.is_lsu && (dec.lsu_cmd === LSU_VSTORE || dec.lsu_cmd === LSU_VSTORE_SCALE)
   val isDmaXfer = dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST
 
-  val mxuNotReady = dec.mxu_cmd =/= MXU_NONE && Mux(isNvCmd, !io.nvReady, !io.mxu1Ready)
+  val mxuNotReady = dec.is_mxu && Mux(isNvCmd, !io.nvReady, !io.mxu1Ready)
   val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)
   val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
   val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
@@ -334,26 +320,21 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val physWriteBusy = io.mregWriteBusy(nPhys - 1, 0) | io.mregWriteBusy(2 * nPhys - 1, nPhys)
   private def phys(b: UInt): UInt = b(log2Ceil(nPhys) - 1, 0)
 
-  val mxuReadsVs1 = dec.mxu_cmd === MXU_PUSH_WEIGHT || dec.mxu_cmd === MXU_PUSH_ACC_FP8 ||
-                    dec.mxu_cmd === MXU_PUSH_ACC_BF16 ||
-                    dec.mxu_cmd === MXU_MATMUL || dec.mxu_cmd === MXU_MATMUL_ACC
   val vpuSrc1 = vpuPrimaryReadBank(dec)
-  // NVFP4: push/matmul read m[vs1] and its scales; acc pushes read 2 or 4
-  // registers, pops write 2 or 4.
-  val nvReadsVs1 = dec.mxu_cmd === MXU_NV_PUSH_WEIGHT || dec.mxu_cmd === MXU_NV_MATMUL ||
-                   dec.mxu_cmd === MXU_NV_MATMUL_ACC ||
-                   dec.mxu_cmd === MXU_NV_PUSH_ACC_BF16 || dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
-  val nvReadsPair = dec.mxu_cmd === MXU_NV_PUSH_ACC_BF16 || dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
-  val nvReadsQuad = dec.mxu_cmd === MXU_NV_PUSH_ACC_FP32
-  val nvWritesPair = dec.mxu_cmd === MXU_NV_POP_BF16 || dec.mxu_cmd === MXU_NV_POP_FP32
-  val nvWritesQuad = dec.mxu_cmd === MXU_NV_POP_FP32
+  // MXU pushes and matmuls read m[vs1] (NVFP4: and its scales); acc pushes read 2 (BF16) or 4
+  // (FP32) registers. Pops write m[vd], 2 or 4 registers.
+  val mxuReadsVs1   = mxuOp(dec, MXU_PUSH_WEIGHT, MXU_PUSH_ACC_BF16, MXU_PUSH_ACC_FP32, MXU_PUSH_ACC_FP8,
+                            MXU_MATMUL, MXU_MATMUL_ACC)
+  val mxuReadsPair  = mxuOp(dec, MXU_PUSH_ACC_BF16, MXU_PUSH_ACC_FP32)
+  val mxuReadsQuad  = mxuOp(dec, MXU_PUSH_ACC_FP32)
+  val mxuWritesVd   = mxuOp(dec, MXU_POP_BF16, MXU_POP_FP32, MXU_POP_FP8)
+  val mxuWritesPair = mxuOp(dec, MXU_POP_BF16, MXU_POP_FP32)
+  val mxuWritesQuad = mxuOp(dec, MXU_POP_FP32)
   val mregReads: Seq[(Bool, UInt)] = Seq(
     (mxuReadsVs1,                                              dec.vs1),
-    (dec.mxu_cmd === MXU_PUSH_ACC_BF16,                        dec.vs1 + 1.U),
-    (nvReadsVs1,                                               dec.vs1),
-    (nvReadsPair,                                              dec.vs1 + 1.U),
-    (nvReadsQuad,                                              dec.vs1 + 2.U),
-    (nvReadsQuad,                                              dec.vs1 + 3.U),
+    (mxuReadsPair,                                             dec.vs1 + 1.U),
+    (mxuReadsQuad,                                             dec.vs1 + 2.U),
+    (mxuReadsQuad,                                             dec.vs1 + 3.U),
     (isVstore,                                                 dec.vd),
     (dec.xlu_cmd =/= XLU_NONE,                                 dec.vs1),
     (dec.vpu_cmd =/= VPU_NONE && !vpuIsVli(dec.vpu_cmd),       vpuSrc1),
@@ -361,12 +342,10 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2),
     (vpuReadsSecondaryPair(dec.vpu_cmd),                       dec.vs2 + 1.U))
   val mregWrites: Seq[(Bool, UInt)] = Seq(
-    (dec.mxu_cmd === MXU_POP_FP8 || dec.mxu_cmd === MXU_POP_BF16, dec.vd),
-    (dec.mxu_cmd === MXU_POP_BF16,                                dec.vd + 1.U),
-    (nvWritesPair,                                                dec.vd),
-    (nvWritesPair,                                                dec.vd + 1.U),
-    (nvWritesQuad,                                                dec.vd + 2.U),
-    (nvWritesQuad,                                                dec.vd + 3.U),
+    (mxuWritesVd,                                                 dec.vd),
+    (mxuWritesPair,                                               dec.vd + 1.U),
+    (mxuWritesQuad,                                               dec.vd + 2.U),
+    (mxuWritesQuad,                                               dec.vd + 3.U),
     (isVload,                                                     dec.vd),
     (dec.xlu_cmd =/= XLU_NONE,                                    dec.vd),
     (dec.vpu_cmd =/= VPU_NONE,                                    dec.vd),
@@ -411,7 +390,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val xLoadWb      = memLoadRespValid && memLoadRespCmd =/= MEM_SELD
   private def xPending(r: UInt): Bool = r =/= 0.U &&
     ((xLoadPending && memLoadRd === r) || (xLoadWb && memLoadRespRd === r))
-  val tensorOp = dec.mxu_cmd =/= MXU_NONE || dec.vpu_cmd =/= VPU_NONE || dec.xlu_cmd =/= XLU_NONE
+  val tensorOp = dec.is_mxu || dec.vpu_cmd =/= VPU_NONE || dec.xlu_cmd =/= XLU_NONE
   val xRegHazard = (!tensorOp && (xPending(dec.rs1) || xPending(dec.rs2) || xPending(dec.rd))) ||
                    (memLoadRespValid && dec.rd_wen && dec.rd =/= 0.U)
 
@@ -420,7 +399,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val seldPending = (memLoadPending && memLoadCmd === MEM_SELD) ||
                     (memLoadRespValid && memLoadRespCmd === MEM_SELD)
   val readsScale  = (dec.vpu_cmd =/= VPU_NONE && vpuIsPackUnpack(dec.vpu_cmd)) ||
-                    dec.mxu_cmd === MXU_POP_FP8
+                    mxuOp(dec, MXU_POP_FP8)
   val scaleHazard = (seldPending && readsScale) || (dec.is_seli && (seldPending || memLoadRespValid))
 
   val interlock = s1_valid && (mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady ||
@@ -500,7 +479,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   when(reset.asBool || halt_now || hostStart) {
     delayCounter := 0.U
   }.elsewhen(s1_fire && dec.is_delay) {
-    delayCounter := dec.imm(11, 0).asUInt
+    delayCounter := dec.vi_imm(11, 0)
   }.elsewhen(delayCounter =/= 0.U) {
     delayCounter := delayCounter - 1.U
   }
@@ -596,7 +575,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
       val b = (memWord >> (memLoadRespByteOff ## 0.U(3.W)))(7, 0)
       memLoadResult := Cat(Fill(24, b(7)), b)
     }
-    is(MEM_LBU) {
+    is(MEM_LBU, MEM_SELD) {
       val b = (memWord >> (memLoadRespByteOff ## 0.U(3.W)))(7, 0)
       memLoadResult := Cat(0.U(24.W), b)
     }
@@ -609,7 +588,6 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
       memLoadResult := Cat(0.U(16.W), h)
     }
     is(MEM_LW)   { memLoadResult := memWord }
-    is(MEM_SELD) { memLoadResult := memWord }
   }
 
   // ==============================================================
@@ -640,7 +618,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val seldWriteEn = memRespArrived && memLoadRespCmd === MEM_SELD
   scaleRF.io.writeEn   := (s1_fire && dec.is_seli) || seldWriteEn
   scaleRF.io.writeIdx  := Mux(seldWriteEn, memLoadRespRd, dec.rd)
-  scaleRF.io.writeData := Mux(seldWriteEn, memLoadResult(7, 0), dec.imm(7, 0))
+  scaleRF.io.writeData := Mux(seldWriteEn, memLoadResult(7, 0), dec.vi_imm(7, 0))
 
   val isMemLoadWB = memRespArrived && memLoadRespCmd =/= MEM_SELD
   val wb_data = Mux(isMemLoadWB, memLoadResult,
@@ -667,7 +645,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
 
   val is_dma_launch  = s1_fire && (dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST)
   val is_dma_config  = s1_fire && (dec.dma_cmd === DMA_CONFIG)
-  val is_mxu1_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && (dec.mxu_sel === MXUSEL_1)
+  val is_mxu1_launch = s1_fire && dec.is_mxu && dec.mxu_sel === MXUSEL_1
   val is_nv_launch   = s1_fire && isNvCmd
   val is_vpu_launch  = s1_fire && (dec.vpu_cmd =/= VPU_NONE)
   val is_xlu_launch  = s1_fire && (dec.xlu_cmd =/= XLU_NONE)

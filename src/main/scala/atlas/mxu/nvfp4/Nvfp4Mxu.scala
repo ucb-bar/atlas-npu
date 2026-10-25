@@ -51,8 +51,15 @@ class Fp4Fedp extends BlackBox with HasBlackBoxResource {
     .foreach(f => addResource(s"/vsrc/nvfp4/$f"))
 }
 
+/** NVFP4 MXU commands: funct7[3:0] of the instruction. */
 object NvOp extends ChiselEnum {
-  val PushWeight, PushAccBF16, PushAccFP32, PopBF16, PopFP32, Matmul, MatmulAcc = Value
+  val PushWeight  = Value(0.U)
+  val PushAccBF16 = Value(1.U)
+  val PushAccFP32 = Value(2.U)
+  val PopBF16     = Value(4.U)
+  val PopFP32     = Value(6.U)
+  val Matmul      = Value(8.U)
+  val MatmulAcc   = Value(9.U)
 }
 
 class NvCmd(mregIdBits: Int) extends Bundle {

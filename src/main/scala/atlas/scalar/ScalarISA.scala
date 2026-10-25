@@ -93,29 +93,20 @@ object ScalarISA {
   val LSU_VSTORE_SCALE = 4.U(3.W)  // m[vd] scale sidecar -> 128 B VMEM
   val LSU_X            = 0.U(3.W)
 
-  // ── MXU command (4-bit) ────────────────────────────────────────────
-  val MXU_NONE          = 0.U(4.W)
-  val MXU_PUSH_WEIGHT   = 1.U(4.W)
-  val MXU_PUSH_ACC_FP8  = 2.U(4.W)
-  val MXU_PUSH_ACC_BF16 = 3.U(4.W)
-  val MXU_POP_FP8       = 4.U(4.W)
-  val MXU_POP_BF16      = 5.U(4.W)
-  val MXU_MATMUL        = 6.U(4.W)
-  val MXU_MATMUL_ACC    = 7.U(4.W)
-  // NVFP4 MXU (configs with AtlasParams.nvfp4).
-  val MXU_NV_PUSH_WEIGHT    = 8.U(4.W)
-  val MXU_NV_PUSH_ACC_BF16  = 9.U(4.W)
-  val MXU_NV_PUSH_ACC_FP32  = 10.U(4.W)
-  val MXU_NV_POP_BF16       = 11.U(4.W)
-  val MXU_NV_POP_FP32       = 12.U(4.W)
-  val MXU_NV_MATMUL         = 13.U(4.W)
-  val MXU_NV_MATMUL_ACC     = 14.U(4.W)
-  val MXU_X             = 0.U(4.W)
+  // ── MXU command (4-bit): funct7[3:0] of an MXU instruction ─────────
+  val MXU_PUSH_WEIGHT   = 0.U(4.W)
+  val MXU_PUSH_ACC_BF16 = 1.U(4.W)
+  val MXU_PUSH_ACC_FP32 = 2.U(4.W)
+  val MXU_PUSH_ACC_FP8  = 3.U(4.W)
+  val MXU_POP_BF16      = 4.U(4.W)
+  val MXU_POP_FP32      = 6.U(4.W)
+  val MXU_POP_FP8       = 7.U(4.W)
+  val MXU_MATMUL        = 8.U(4.W)
+  val MXU_MATMUL_ACC    = 9.U(4.W)
 
-  // ── MXU slot (1-bit) ───────────────────────────────────────────────
+  // ── MXU slot (1-bit): funct7[4] of an MXU instruction ──────────────
   val MXUSEL_0 = 0.U(1.W)   // the NVFP4 MXU
   val MXUSEL_1 = 1.U(1.W)   // the inner-product-tree MXU (mxu1)
-  val MXUSEL_X = 0.U(1.W)
 
 // ── VPU command (5-bit) ────────────────────────────────────────────
   val VPU_NONE       =  0.U(5.W)  
@@ -151,6 +142,12 @@ object ScalarISA {
   val VPU_LI_ALL     = 30.U(5.W)  // VPUOp.vliAll     = 30
   val VPU_X          =  0.U(5.W)  // don't-care
   val NUM_VPU_STATUS_OPS = 31     // status bit i matches VPU_* encoding i; bit 0 = VPU_NONE
+
+  // ── Scalar-core command (2-bit) ────────────────────────────────────
+  val SC_NONE  = 0.U(2.W)
+  val SC_SELI  = 1.U(2.W)
+  val SC_DELAY = 2.U(2.W)
+  val SC_X     = 0.U(2.W)
 
   // ── XLU command (2-bit) ────────────────────────────────────────────
   val XLU_NONE    = 0.U(1.W)

@@ -86,7 +86,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val imemFetch     = new ImemFetchPort
   val dmaCmd        = Valid(new DmaCmd)
   val mxu1Cmd       = Valid(new MxuCmd)
-  val nvCmd         = Valid(new MxuCmd)   // NVFP4 MXU (MXU_NV_* in op)
+  val nvCmd         = Valid(new MxuCmd)   // NVFP4 MXU (MXU slot 0)
   val vpuCmd        = Valid(new VpuCmd)
   val xluCmd        = Valid(new XluCmd)
   val lsuCmd        = Valid(new LsuCmd(spP))

@@ -2,7 +2,8 @@
 # @TIMEOUT 2000
 #
 # DBG1 = the ISA CSR (0xCC0). DBG0 = 1 if all checks pass, else the number of the failed check:
-#   2  ISA CSR: version 1.0, hardware-interlock and inner-product-tree bits set, bits 15:4 zero
+#   2  ISA CSR: version 2.0, hardware-interlock and inner-product-tree bits set, bit 1 and bits 15:4
+#      zero
 #   3  csrrc with x0, csrrsi and csrrci with 0 read the ISA CSR as csrrs with x0 does
 #   4  PERF_NUM (0xCC1) is 27
 #   5  two back-to-back csrrs of cycle (0xC00) differ by 1: a read with x0 does not write
@@ -19,10 +20,10 @@
     ADDI  x28, x0, 2
     CSRRS x1, 0xCC0, x0
     SRLI  x2, x1, 16
-    LI    x3, 0x0100
+    LI    x3, 0x0200
     BNE   x2, x3, fail
     NOP
-    ANDI  x2, x1, 5
+    ANDI  x2, x1, 7
     ADDI  x3, x0, 5
     BNE   x2, x3, fail
     NOP

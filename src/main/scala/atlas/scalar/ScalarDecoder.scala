@@ -20,8 +20,9 @@ class DecodedInstr extends Bundle {
   val is_jalr  = Bool()
   val csr_cmd  = UInt(3.W)
   val dma_cmd  = UInt(3.W)
-  val mxu_cmd  = UInt(4.W)
-  val mxu_sel  = UInt(1.W)
+  val is_mxu   = Bool()
+  val mxu_cmd  = UInt(4.W)   // funct7[3:0]
+  val mxu_sel  = UInt(1.W)   // funct7[4]: the MXU slot
   val vpu_cmd  = UInt(5.W)
   val xlu_cmd  = UInt(1.W)
   val mem_cmd  = UInt(4.W)   // scalar load/store type
@@ -111,12 +112,13 @@ class ScalarDecoder extends Module {
   dec.is_jalr  := cs(8).asBool
   dec.csr_cmd  := cs(9)
   dec.dma_cmd  := cs(10)
-  dec.mxu_cmd  := cs(11)
-  dec.mxu_sel  := cs(12)
-  dec.vpu_cmd  := cs(13)
-  dec.xlu_cmd  := cs(14)
-  dec.mem_cmd  := cs(15)
-  dec.lsu_cmd  := cs(16)
+  dec.is_mxu   := cs(11).asBool
+  dec.mxu_cmd  := funct7(3, 0)
+  dec.mxu_sel  := funct7(4)
+  dec.vpu_cmd  := cs(12)
+  dec.xlu_cmd  := cs(13)
+  dec.mem_cmd  := cs(14)
+  dec.lsu_cmd  := cs(15)
 
   dec.rd      := rd
   dec.rs1     := rs1
@@ -142,11 +144,7 @@ class ScalarDecoder extends Module {
   dec.is_csr  := dec.csr_cmd =/= CSR_NONE
   dec.illegal := !dec.legal
 
-  // seli: opcode=0000011, funct3=111
-  dec.is_seli := dec.legal &&
-    io.instr(6, 0) === "b0000011".U && funct3 === "b111".U
-
-  // seld: opcode=0000011, funct3=110  (decoded as MEM_SELD)
+  dec.is_seli := cs(16) === SC_SELI
   dec.is_seld := dec.mem_cmd === MEM_SELD
 
   // Derived convenience flags
@@ -160,9 +158,7 @@ class ScalarDecoder extends Module {
   dec.is_ecall  := dec.legal && io.instr === "h00000073".U
   // ebreak: fixed encoding 0x00100073
   dec.is_ebreak := dec.legal && io.instr === "h00100073".U
-  // delay:  opcode=1100111, funct3=001
-  dec.is_delay  := dec.legal &&
-    io.instr(6, 0) === "b1100111".U && funct3 === "b001".U
+  dec.is_delay  := cs(16) === SC_DELAY
 
   io.decoded := dec
 }

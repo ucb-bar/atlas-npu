@@ -22,7 +22,8 @@ The assembler also accepts `--out-hex`, `--out-bin`, `--dram-base`, and `--beat-
 
 `atlas_asm.py --disasm FILE` prints the assembly of a program: hex text (one word per line) or, for
 a `.bin` file, raw binary. The disassembler (`npu_model.isa.disasm`) decodes the words with the ISA
-table and puts labels at branch and jump targets. Its output assembles to the same words.
+table and puts labels at branch and jump targets. Its output assembles to the same words, except an
+illegal word, which it prints as `.word`.
 
 3) Build:
 

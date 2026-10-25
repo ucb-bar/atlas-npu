@@ -89,7 +89,7 @@
 
     # Load pack scale from VMEM byte address 0x0800 into e0.
     LI    x18, 0x0800
-    seld e0, 0(x18)
+    seld e0, x18
     DELAY 2
 
     # packed = fp8pack(normalized, e0)

@@ -201,7 +201,7 @@ class AtlasCore(
 
   val nvCmdWire = Wire(new NvCmd(mregP.mregIdBits))
   val scn = scalar.io.nvCmd.bits
-  nvCmdWire.op         := NvOp.safe((scn.op - ScalarISA.MXU_NV_PUSH_WEIGHT)(2, 0))._1
+  nvCmdWire.op         := NvOp.safe(scn.op)._1
   nvCmdWire.mregId     := scn.mregBank
   nvCmdWire.accSel     := scn.accSel
   nvCmdWire.weightSlot := scn.weightSlot
@@ -212,7 +212,7 @@ class AtlasCore(
 
   val mxu1CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
   val sc1 = scalar.io.mxu1Cmd.bits
-  mxu1CmdWire.op         := MxuOp.safe((sc1.op - 1.U)(2, 0))._1
+  mxu1CmdWire.op         := MxuOp.safe(sc1.op)._1
   mxu1CmdWire.mregId     := sc1.mregBank
   mxu1CmdWire.accSel     := sc1.accSel
   mxu1CmdWire.weightSlot := sc1.weightSlot

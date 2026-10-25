@@ -83,7 +83,7 @@
     ADDI  x28, x28, 1       # x28 = 8
 
 # ── Test 8: SELD byte 0 -> e[3] (no crash) ──────────────
-    seld e3, 0(x8)
+    seld e3, x8
     DELAY 2
     ADDI  x28, x28, 1       # x28 = 9
 
