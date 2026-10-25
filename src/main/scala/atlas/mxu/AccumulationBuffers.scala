@@ -3,7 +3,7 @@
 //
 // Spec parameters (per buffer):
 //   ACCUM_BUFFER_ROWS      = 32   rows
-//   ACCUM_BUFFER_COLS_BF16 = 32   FP32 columns (MxuParams.accumFmt)
+//   ACCUM_BUFFER_COLS_FP32 = 32   FP32 columns (MxuParams.accumFmt)
 //   ACCUM_BUFFER_BYTES     = 4096 bytes (32 × 32 × 4)
 //
 // Two identically-sized buffers are selected by the `accSel` bit in each
@@ -42,7 +42,7 @@ import chisel3.util._
 class AccumulationBuffers(p: MxuParams) extends Module {
 
   // Shorthand for the row type used throughout this module.
-  private val numCols  = p.accumBufferColsBF16
+  private val numCols  = p.accumBufferColsFP32
   private val colWidth = p.accumFmt.ieeeWidth
   private type RowT    = Vec[UInt]
 

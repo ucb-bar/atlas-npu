@@ -3,7 +3,7 @@ MxuParams.scala — Architectural parameters of the FP8 MXU datapath.
 
 Naming follows the frozen system-parameter spec:
   MXU_ARRAY_ROWS, MXU_ARRAY_COLS, WEIGHT_SLOTS_PER_MXU,
-  ACCUM_BUFFER_ROWS, ACCUM_BUFFER_COLS_BF16, etc.
+  ACCUM_BUFFER_ROWS, ACCUM_BUFFER_COLS_FP32, etc.
 
 InnerProductTreeParams (mxu1) composes this case class and adds
 design-specific fields on top.
@@ -31,9 +31,9 @@ case class MxuParams(
   val accumFmt:  AtlasFPType = AtlasFPType.FP32    // accumulation buffer element format
 
   // ── Spec-derived constants ──
-  val accumBufferColsBF16: Int = arrayCols                                         // ACCUM_BUFFER_COLS_BF16
+  val accumBufferColsFP32: Int = arrayCols                                         // ACCUM_BUFFER_COLS_FP32
   val weightSlotBytes:     Int = arrayRows * arrayCols * (inputFmt.ieeeWidth / 8)  // WEIGHT_SLOT_BYTES
-  val accumBufferBytes:    Int = accumBufferRows * accumBufferColsBF16 *           // ACCUM_BUFFER_BYTES
+  val accumBufferBytes:    Int = accumBufferRows * accumBufferColsFP32 *           // ACCUM_BUFFER_BYTES
                                 (accumFmt.ieeeWidth / 8)
 
   // ── Derived bit-widths (used by bundles and modules) ──
@@ -41,6 +41,6 @@ case class MxuParams(
   val colIdxBits: Int = log2Ceil(arrayCols)
 
   override def toString: String =
-    s"MxuParams(${arrayRows}x${arrayCols}, accum=${accumBufferRows}x${accumBufferColsBF16}, " +
+    s"MxuParams(${arrayRows}x${arrayCols}, accum=${accumBufferRows}x${accumBufferColsFP32}, " +
     s"wSlots=$weightSlotsPerMxu, in=$inputFmt, acc=$accumFmt)"
 }

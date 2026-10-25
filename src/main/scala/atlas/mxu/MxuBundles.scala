@@ -92,7 +92,7 @@ class WeightWriteReq(p: MxuParams) extends Bundle {
 class AccBufWriteReq(p: MxuParams) extends Bundle {
   val accSel = Bool()                                                       // Target buffer.
   val rowIdx = UInt(p.rowIdxBits.W)                                         // Target row.
-  val data   = Vec(p.accumBufferColsBF16, UInt(p.accumFmt.ieeeWidth.W))     // Row data.
+  val data   = Vec(p.accumBufferColsFP32, UInt(p.accumFmt.ieeeWidth.W))     // Row data.
 }
 
 /** Address an accum-buffer row for compute-side partial-sum read. */
@@ -105,8 +105,8 @@ class AccBufReadAddr(p: MxuParams) extends Bundle {
 class AccBufLoadReq(p: MxuParams) extends Bundle {
   val accSel = Bool()                                                       // Target buffer.
   val rowIdx = UInt(p.rowIdxBits.W)                                         // Target row.
-  val data   = Vec(p.accumBufferColsBF16, UInt(p.accumFmt.ieeeWidth.W))     // Row data.
-  val mask   = Vec(p.accumBufferColsBF16, Bool())                           // Columns to write.
+  val data   = Vec(p.accumBufferColsFP32, UInt(p.accumFmt.ieeeWidth.W))     // Row data.
+  val mask   = Vec(p.accumBufferColsFP32, Bool())                           // Columns to write.
 }
 
 /** Address an accum-buffer row for store/pop read-out (pre-quantization). */
