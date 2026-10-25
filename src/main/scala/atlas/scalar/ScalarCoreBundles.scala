@@ -16,6 +16,8 @@ class CSRInternalPort extends Bundle {
   val wdata       = Input(UInt(32.W))
   val rdata       = Output(UInt(32.W))
   val valid       = Input(Bool())
+  val write       = Input(Bool())    // the instruction writes the CSR (csrrs / csrrc with x0 do not)
+  val illegal     = Output(Bool())   // addr is not mapped, or write is set and the CSR is read-only
   val halted      = Input(Bool())
   val set_illegal = Input(Bool())
   val set_ecall   = Input(Bool())
@@ -130,4 +132,16 @@ class ScalarPerfEvents extends Bundle {
   val stallData  = Bool()   // S1 holds an instruction for a data hazard: MREG, VMEM bank, scalar load, scale
   val stallDma   = Bool()   // dma.wait on a busy channel
   val stallDelay = Bool()   // a delay instruction counts down
+  // The causes of the stallUnit and stallData cycles; a cycle sets every cause that holds.
+  val stallUnitMxu0    = Bool()   // MXU slot 0 (systolic array or NVFP4 MXU) cannot take the command
+  val stallUnitMxu1    = Bool()   // MXU1 cannot take the command
+  val stallUnitVpu     = Bool()   // the VPU cannot take the command
+  val stallUnitXlu     = Bool()   // the XLU is busy
+  val stallUnitLsu     = Bool()   // the vload or vstore path is busy, or a scalar load is pending
+  val stallUnitDma     = Bool()   // the DMA channel or the next command slot is busy
+  val stallDataMreg    = Bool()   // MREG reservation or physical port
+  val stallDataVmem    = Bool()   // an LSU path holds the VMEM bank
+  val stallDataDmaVmem = Bool()   // a DMA transfer would overtake an LSU transfer on its banks
+  val stallDataXreg    = Bool()   // a scalar load result or the register write port is pending
+  val stallDataScale   = Bool()   // a seld result or the scale register write port is pending
 }

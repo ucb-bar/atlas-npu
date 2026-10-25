@@ -109,6 +109,7 @@ class AtlasCore(
   // ==========================================================================
 
   csrfile.io.csr <> scalar.io.csrPort
+  csrfile.io.features    := io.features
   scalar.io.execRun      := csrfile.io.execRun
   scalar.io.execRunWrite := csrfile.io.execRunWrite
 
@@ -389,7 +390,18 @@ class AtlasCore(
     run && lsu.io.vloadBusy,
     run && lsu.io.vstoreBusy,
     run && dma.io.channelBusy.asUInt.orR,
-    run && io.dmaTL.d.fire)
+    run && io.dmaTL.d.fire,
+    scalar.io.perf.stallUnitMxu0,
+    scalar.io.perf.stallUnitMxu1,
+    scalar.io.perf.stallUnitVpu,
+    scalar.io.perf.stallUnitXlu,
+    scalar.io.perf.stallUnitLsu,
+    scalar.io.perf.stallUnitDma,
+    scalar.io.perf.stallDataMreg,
+    scalar.io.perf.stallDataVmem,
+    scalar.io.perf.stallDataDmaVmem,
+    scalar.io.perf.stallDataXreg,
+    scalar.io.perf.stallDataScale)
   require(perfEvents.size == PerfCounters.num)
   csrfile.io.perfEvents := VecInit(perfEvents)
 

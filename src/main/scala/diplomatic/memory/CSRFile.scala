@@ -4,7 +4,7 @@ CSRFile.scala — TileLink-accessible CSR register file.
 Host reads/writes via TileLink.  Scalar core reads/writes via internal port.
 Scale registers are NOT here — see ScaleRegFile.
 
-TileLink byte-address map within the first 0x1C bytes of the CSR window:
+TileLink byte-address map within the first 0x20 bytes of the CSR window:
   0x00  cycle counter      (RW)
   0x04  instruction counter(RW)
   0x08  status             (RO — bit 0: halted, bits [2:1]: halt_reason)
@@ -12,8 +12,9 @@ TileLink byte-address map within the first 0x1C bytes of the CSR window:
   0x10  dbg0               (RW)
   0x14  dbg1               (RW)
   0x18  execControl        (RW — bit 0: 1=start, 0=stop; auto-clears on scalar halt)
+  0x1C  ISA                (RO — [31:24] major, [23:16] minor, [3:0] AtlasCore features)
 
-Performance counters (host only; the scheme of RISC-V mhpmcounter / mcountinhibit, on MMIO):
+Performance counters (the scheme of RISC-V mhpmcounter / mcountinhibit, on MMIO):
   0x100 PERF_RESET   (WO — write 1 to bit i to clear counter i; reads 0)
   0x104 PERF_INHIBIT (RW — bit i = 1 stops counter i; reset 0)
   0x108 PERF_NUM     (RO — number of counters)
@@ -22,6 +23,11 @@ Performance counters (host only; the scheme of RISC-V mhpmcounter / mcountinhibi
 Every counter counts its event in the cycles from a start until the core has halted and every
 unit is idle (a halt does not wait for units), so it stops when a kernel finishes and the host
 reads it afterwards; PerfCounters.names lists the events.
+
+The scalar core reads the same words as CSRs (ScalarISA): cycle 0xC00, instructions 0xC01,
+status 0xC02, illegal PC 0xC03, dbg0 0xC10, dbg1 0xC11, ISA 0xCC0, PERF_NUM 0xCC1, and counter i
+at 0xCC2 + 2i (bits 31:0) and 0xCC3 + 2i (bits 63:32). It can write only cycle, instructions,
+dbg0 and dbg1. An access to any other CSR, or a write to a read-only one, is illegal.
 
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
@@ -54,8 +60,21 @@ object PerfCounters {
     "vload_busy",   // the LSU's vload path is busy
     "vstore_busy",  // the LSU's vstore path is busy
     "dma_busy",     // some DMA channel is busy
-    "dma_beats")    // a 32-byte DMA beat completes on the memory port
+    "dma_beats",    // a 32-byte DMA beat completes on the memory port
+    // The causes of the stall_unit and stall_data cycles; a cycle counts in every cause that holds.
+    "stall_unit_mxu0",      // MXU slot 0 cannot take the command
+    "stall_unit_mxu1",      // MXU1 cannot take the command
+    "stall_unit_vpu",       // the VPU cannot take the command
+    "stall_unit_xlu",       // the XLU is busy
+    "stall_unit_lsu",       // the vload or vstore path is busy, or a scalar load is pending
+    "stall_unit_dma",       // the DMA channel or the next command slot is busy
+    "stall_data_mreg",      // MREG reservation or physical port
+    "stall_data_vmem",      // an LSU path holds the VMEM bank
+    "stall_data_dma_vmem",  // a DMA transfer would overtake an LSU transfer
+    "stall_data_xreg",      // a scalar load result or the register write port is pending
+    "stall_data_scale")     // a seld result or the scale register write port is pending
   val num: Int = names.size
+  val IsaOffset     = 0x1C
   val ResetOffset   = 0x100
   val InhibitOffset = 0x104
   val NumOffset     = 0x108
@@ -77,6 +96,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     val execRun      = Output(Bool())
     val execRunWrite = Output(Bool())
     val perfEvents   = Input(Vec(PerfCounters.num, Bool()))
+    val features     = Input(UInt(4.W))   // AtlasCore io.features, in the ISA word
   })
 
   // ── Registers ────────────────────────────────────────────────────
@@ -119,6 +139,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
       perfCnt(i) := perfCnt(i) + 1.U
     }
   }
+  private val isaIdx         = (PerfCounters.IsaOffset / 4).U
   private val perfResetIdx   = (PerfCounters.ResetOffset / 4).U
   private val perfInhibitIdx = (PerfCounters.InhibitOffset / 4).U
   private val perfNumIdx     = (PerfCounters.NumOffset / 4).U
@@ -136,22 +157,30 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     4.U -> reg_dbg0,
     5.U -> reg_dbg1,
     6.U -> Cat(0.U(31.W), reg_execRun),
+    isaIdx         -> Cat(ISA_MAJOR.U(8.W), ISA_MINOR.U(8.W), 0.U(12.W), io.features),
     perfInhibitIdx -> perfInhibit,
     perfNumIdx     -> nPerf.U
   ) ++ perfWords)
 
   // ── Internal (scalar-core) access ────────────────────────────────
-  // Map 12-bit CSR addresses to word indices
-  private def csrAddrToWordIdx(addr: UInt): UInt = MuxLookup(addr, 0.U)(Seq(
-    CSR_CYCLE_COUNTER -> 0.U,
-    CSR_INST_COUNTER  -> 1.U,
-    CSR_STATUS        -> 2.U,
-    CSR_ILLEGAL_INSTR -> 3.U,
-    CSR_DBG0          -> 4.U,
-    CSR_DBG1          -> 5.U
-  ))
+  // 12-bit CSR address -> (word index, writable). Any other address is illegal, and so is a
+  // write to a read-only CSR (RISC-V privileged spec).
+  private val csrMap = Seq(
+    CSR_CYCLE_COUNTER -> (0.U, true),
+    CSR_INST_COUNTER  -> (1.U, true),
+    CSR_STATUS        -> (2.U, false),
+    CSR_ILLEGAL_INSTR -> (3.U, false),
+    CSR_DBG0          -> (4.U, true),
+    CSR_DBG1          -> (5.U, true),
+    CSR_ISA           -> (isaIdx, false),
+    CSR_PERF_NUM      -> (perfNumIdx, false))
+  private def csrIn(m: Seq[(UInt, (UInt, Boolean))]): Bool = m.map(_._1 === io.csr.addr).reduce(_ || _)
+  private val perfCsr   = io.csr.addr - CSR_PERF_BASE
+  private val isPerfCsr = io.csr.addr >= CSR_PERF_BASE && perfCsr < (2 * nPerf).U
 
-  val intIdx   = csrAddrToWordIdx(io.csr.addr)
+  val intIdx = Mux(isPerfCsr, (PerfCounters.CounterBase / 4).U + perfCsr,
+    MuxLookup(io.csr.addr, 0.U)(csrMap.map { case (a, (w, _)) => a -> w }))
+  io.csr.illegal := !(isPerfCsr || csrIn(csrMap)) || (io.csr.write && !csrIn(csrMap.filter(_._2._2)))
   val intRdata = readWord(intIdx)
   io.csr.rdata := intRdata
 
@@ -166,11 +195,11 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     is(CSR_RCI) { newVal := intRdata & (~io.csr.wdata).asUInt }
   }
 
-  // Internal writes — lower priority (TL overwrites via last-connect)
-  when(io.csr.valid && io.csr.op =/= CSR_NONE) {
+  // Internal writes — lower priority (TL overwrites via last-connect). A write to a read-only
+  // CSR is illegal and never valid.
+  when(io.csr.valid && io.csr.write) {
     when(intIdx === 0.U) { reg_cycle := newVal }
     when(intIdx === 1.U) { reg_inst  := newVal }
-    // indices 2,3 are read-only (status, illegal)
     when(intIdx === 4.U) { reg_dbg0  := newVal }
     when(intIdx === 5.U) { reg_dbg1  := newVal }
   }

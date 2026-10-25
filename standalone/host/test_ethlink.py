@@ -29,12 +29,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atlas_host  # noqa: E402
-from atlas_host import (ATLS_ID, CSR_BASE, CSR_DBG0, CSR_DBG1, CSR_EXEC_CONTROL, CSR_STATUS, DRAM_BASE,  # noqa: E402
-                        ETH_BADCMD, ETH_CUT, ETH_DENIED, ETH_DROP, ETH_DUP, ETH_NOSYNC, ETH_OVERFLOW, ETH_PAYLOAD,
-                        ETH_PORT, ETH_REPLY_WORDS, ETH_SYNC, ETH_WRITE_WORDS, IMEM_BASE, M32, SYS_DRAM_BYTES,
-                        SYS_ETH_DROP, SYS_ETH_DUP, SYS_ETH_IP, SYS_ETH_PORT, SYS_ETH_RUN, SYS_ETH_STATUS,
-                        SYS_FEATURES, SYS_ID, SYS_LEDS, SYS_RUN_CYCLES, SYS_SCRATCH, VMEM_BASE, Atlas, EthLink,
-                        LinkError)
+from atlas_host import (ATLS_ID, CSR_BASE, CSR_DBG0, CSR_DBG1, CSR_EXEC_CONTROL, CSR_ISA, CSR_STATUS,  # noqa: E402
+                        DRAM_BASE, ETH_BADCMD, ETH_CUT, ETH_DENIED, ETH_DROP, ETH_DUP, ETH_NOSYNC, ETH_OVERFLOW,
+                        ETH_PAYLOAD, ETH_PORT, ETH_REPLY_WORDS, ETH_SYNC, ETH_WRITE_WORDS, IMEM_BASE, M32,
+                        SYS_DRAM_BYTES, SYS_ETH_DROP, SYS_ETH_DUP, SYS_ETH_IP, SYS_ETH_PORT, SYS_ETH_RUN,
+                        SYS_ETH_STATUS, SYS_FEATURES, SYS_ID, SYS_LEDS, SYS_RUN_CYCLES, SYS_SCRATCH, VMEM_BASE, Atlas,
+                        EthLink, LinkError)
 
 IMEM_BYTES = 128 << 10
 VMEM_BYTES = 1536 << 10
@@ -84,7 +84,7 @@ class MockBoard(threading.Thread):
         self.sys = {SYS_ID: ATLS_ID, SYS_DRAM_BYTES: dram_bytes, SYS_FEATURES: 0x7, SYS_ETH_IP: 0x7F00_0001,
                     SYS_ETH_STATUS: 1 << 20 | 1 << 19 | 1 << 18 | 1 << 16 | 1 << 12 | 2 << 10 | 3,
                     SYS_ETH_PORT: ETH_PORT}
-        self.csr = {}
+        self.csr = {CSR_ISA: 1 << 24 | 0x7}     # ISA 1.0, the units of SYS_FEATURES
         self.exec_log = []          # every value written to EXEC_CONTROL, in order
         self.session = None         # (peer, seq) of the SYNC that opened the session; None: no session
         self.expect = None          # next seq to run in the session

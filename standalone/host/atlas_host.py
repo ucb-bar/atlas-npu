@@ -37,6 +37,7 @@ CSR_ILLEGAL_PC = CSR_BASE + 0x0C
 CSR_DBG0 = CSR_BASE + 0x10
 CSR_DBG1 = CSR_BASE + 0x14
 CSR_EXEC_CONTROL = CSR_BASE + 0x18
+CSR_ISA = CSR_BASE + 0x1C             # [31:24] major, [23:16] minor, [3:0] units as SYS_FEATURES
 
 # Performance counters (CSRFile.scala, PerfCounters): 64-bit, counting while the core runs.
 CSR_PERF_RESET = CSR_BASE + 0x100     # write 1 to bit i: clear counter i
@@ -45,7 +46,11 @@ CSR_PERF_NUM = CSR_BASE + 0x108
 CSR_PERF_BASE = CSR_BASE + 0x200      # counter i at + 8 i (low word), + 8 i + 4 (high word)
 PERF_NAMES = ["cycles", "instret", "stall_unit", "stall_data", "stall_dma", "stall_delay",
               "mxu0_busy", "mxu0_feed", "mxu1_busy", "mxu1_feed", "vpu_busy", "xlu_busy",
-              "vload_busy", "vstore_busy", "dma_busy", "dma_beats"]
+              "vload_busy", "vstore_busy", "dma_busy", "dma_beats",
+              "stall_unit_mxu0", "stall_unit_mxu1", "stall_unit_vpu", "stall_unit_xlu", "stall_unit_lsu",
+              "stall_unit_dma", "stall_data_mreg", "stall_data_vmem", "stall_data_dma_vmem", "stall_data_xreg",
+              "stall_data_scale"]
+ISA_UNVERSIONED = (1, 0)              # the ISA of a bundle without "isa", or of a core without the ISA CSR
 
 SYS_ID = 0x00
 SYS_SCRATCH = 0x04
@@ -735,11 +740,11 @@ def runs(pairs):
 
 
 def read_perf(link):
-    """The performance counters by name, or {} on a bitstream without them (PERF_NUM reads 0)."""
-    if link.read_words(CSR_PERF_NUM, 1)[0] != len(PERF_NAMES):
-        return {}
-    w = link.read_words(CSR_PERF_BASE, 2 * len(PERF_NAMES))
-    return {n: w[2 * i] | w[2 * i + 1] << 32 for i, n in enumerate(PERF_NAMES)}
+    """The performance counters by name: the first PERF_NUM of PERF_NAMES (none on a bitstream without
+    them; an older one has fewer)."""
+    n = min(link.read_words(CSR_PERF_NUM, 1)[0], len(PERF_NAMES))
+    w = link.read_words(CSR_PERF_BASE, 2 * n)
+    return {name: w[2 * i] | w[2 * i + 1] << 32 for i, name in enumerate(PERF_NAMES[:n])}
 
 
 def utilization(perf):
@@ -781,6 +786,8 @@ class Atlas:
             raise LinkError("sys_regs ID is 0x%08x, not 0x%08x: not the standalone Atlas SoC" % (ident, ATLS_ID))
         self.dram_bytes = link.read_words(SYS_DRAM_BYTES, 1)[0]
         self.features = link.read_words(SYS_FEATURES, 1)[0]
+        self.isa = link.read_words(CSR_ISA, 1)[0]      # 0 on a bitstream without the ISA CSR
+        self.isa_version = (self.isa >> 24, self.isa >> 16 & 0xFF) if self.isa else ISA_UNVERSIONED
 
     def dram(self, addr):
         """DRAM is aliased: fold a 64-bit DMA address onto the 32-bit host window."""
@@ -788,8 +795,12 @@ class Atlas:
 
     def run(self, test, budget):
         """Run one bundled test (see make_bundle.py). budget: poll budget (cycles on SimLink, seconds on
-        TsiLink and EthLink)."""
+        TsiLink and EthLink). A test built for another ISA version than the core's is an ERROR."""
         link, name = self.link, test["name"]
+        built = tuple(test.get("isa", ISA_UNVERSIONED))
+        if built != self.isa_version:
+            return Result(name, "ERROR", variant=test.get("variant", ""),
+                          detail="built for ISA %d.%d, the core has ISA %d.%d" % (built + self.isa_version))
         for addr, words in test["preload"]:
             for a, w in runs([(self.dram(addr + 4 * i), x) for i, x in enumerate(words)]):
                 if getattr(link, "bulk", False):

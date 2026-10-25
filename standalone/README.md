@@ -44,8 +44,12 @@ host ─ UDP ─ PHY ─ eth_udp_stack ─ eth_tsi ─┴─ tl_arbiter ─ tl_x
 
 `--config=NAME` selects the Atlas configuration (docs/nvfp4-mxu.md): `default` (systolic array +
 inner-product trees), `ipt` (inner-product trees only) or `ipt-nvfp4` (inner-product trees + the
-NVFP4 MXU). `run_tests.py --config NAME` expects every test that needs a missing unit to stop with
-an illegal instruction and every other test to pass.
+NVFP4 MXU). `run_tests.py --config NAME` expects every test that needs a missing unit, or that has
+the line `# @EXPECT_ILLEGAL`, to stop with an illegal instruction, and every other test to pass.
+
+The ISA CSR (CSR block `+0x1C`, docs/perf-counters.md) gives the ISA version and the units. Each
+bundle has the ISA version of the assembler that built it. `Atlas.run` does not run a bundle
+built for another version than the core's: the status is ERROR.
 
 ## Build and run
 
@@ -288,6 +292,15 @@ IMEM writes work while the core runs. On the board, DRAM accesses before the DDR
 
 ## Performance counters
 
-The Atlas CSR block (`0x0004_0000`) has 16 64-bit counters: cycles, issued instructions, stall
-cycles by cause, and the busy cycles of each unit. Write 1 to bit i of PERF_RESET (`+0x100`) to
-clear counter i; counter i is at `+0x200 + 8i`. See docs/perf-counters.md.
+The Atlas CSR block (`0x0004_0000`) has 27 64-bit counters: cycles, issued instructions, stall
+cycles by kind, the busy cycles of each unit, and the stall cycles by unit and data cause. Write
+1 to bit i of PERF_RESET (`+0x100`) to clear counter i; counter i is at `+0x200 + 8i`. The scalar
+core reads them as CSRs `0xCC2 + 2i` and `0xCC3 + 2i`. See docs/perf-counters.md.
+
+Verilator, 2026-10-24: the suite has 129 tests (the 126 above, `csr_isa_perf` and the two
+`csr_illegal_*` tests). Every `DELAY` removed, `default` gives 129 / 129 as expected (122 pass, 7
+illegal), `ipt` 129 / 129 (94, 35) and `ipt-nvfp4` 129 / 129 (99, 30). The original kernels on
+`default` give 129 / 129. On `ipt-nvfp4` the 126 earlier tests keep their status and cycle count.
+`csr_isa_perf` reads the ISA CSR as `0x0100_0007`, `0x0100_0005` and `0x0100_000D`.
+`perf_mm_single` measures its window as 32 cycles (100% MXU utilization, 106% before: a `csrrw`
+to the unmapped CSR `0xC20` cleared the cycle counter).

@@ -22,6 +22,7 @@ from pathlib import Path
 BAREMETAL = Path(__file__).resolve().parents[2] / "baremetal"
 sys.path.insert(0, str(BAREMETAL))
 import atlas_asm  # noqa: E402
+from npu_model.isa import ISA_VERSION  # noqa: E402
 
 BRANCHES = {"beq", "bne", "blt", "bge", "bltu", "bgeu", "jal", "jalr", "j", "jr", "beqz", "bnez", "ret"}
 LABELS = re.compile(r"^(\s*(?:[A-Za-z_.$][\w.$]*:\s*)*)(.*)$")
@@ -118,6 +119,7 @@ def main():
         timeout = re.search(r"^\s*#\s*@TIMEOUT\s+(\d+)", source, re.M)
         bundle = {
             "name": t,
+            "isa": list(ISA_VERSION),
             "variant": "no-delay" if a.no_delay else "orig",
             "delays_removed": removed,
             "delays_as_nop": nops,

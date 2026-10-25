@@ -255,7 +255,9 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   // the instruction is illegal; the same pair twice is fine (one read serves both).
   val vpuSourceBankClash = dec.vpu_cmd =/= VPU_NONE && vpuReadsSecondaryPair(dec.vpu_cmd) &&
     dec.vs1(4, 0) === dec.vs2(4, 0) && dec.vs1 =/= dec.vs2
-  val is_illegal = s1_valid && (dec.illegal || unitAbsent || vpuSourceBankClash)
+  // A CSR instruction is illegal on an unmapped CSR, or when it writes a read-only one.
+  val csrIllegal = dec.is_csr && io.csrPort.illegal
+  val is_illegal = s1_valid && (dec.illegal || unitAbsent || vpuSourceBankClash || csrIllegal)
   val branch_in_delay_slot =
     pc_ctrl.io.in_delay_slot && (dec.br_type =/= BR_NONE || dec.is_jal || dec.is_jalr)
   val illegal_detected = is_illegal || (s1_valid && branch_in_delay_slot)
@@ -436,13 +438,27 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   val s1_fire = s1_valid && !stall && !halt_now
 
   // Performance events: one cause per stalled cycle, in this order.
-  val unitStall = mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady || dmaNotReady
+  val unitStall      = mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady || dmaNotReady
+  val interlockStall = !halted && !delay_stall && !dma_wait_stall && interlock
   io.perf.running    := !halted
   io.perf.issue      := s1_fire
   io.perf.stallDelay := !halted && delay_stall
   io.perf.stallDma   := !halted && !delay_stall && dma_wait_stall
-  io.perf.stallUnit  := !halted && !delay_stall && !dma_wait_stall && interlock && unitStall
-  io.perf.stallData  := !halted && !delay_stall && !dma_wait_stall && interlock && !unitStall
+  io.perf.stallUnit  := interlockStall && unitStall
+  io.perf.stallData  := interlockStall && !unitStall
+  // The causes of the stallUnit and stallData cycles: every cause that holds counts.
+  val mxuSlot0 = isNvCmd || dec.mxu_sel === MXUSEL_0
+  io.perf.stallUnitMxu0    := interlockStall && mxuNotReady && mxuSlot0
+  io.perf.stallUnitMxu1    := interlockStall && mxuNotReady && !mxuSlot0
+  io.perf.stallUnitVpu     := interlockStall && vpuNotReady
+  io.perf.stallUnitXlu     := interlockStall && xluNotReady
+  io.perf.stallUnitLsu     := interlockStall && lsuNotReady
+  io.perf.stallUnitDma     := interlockStall && dmaNotReady
+  io.perf.stallDataMreg    := interlockStall && mregHazard
+  io.perf.stallDataVmem    := interlockStall && vmemHazard
+  io.perf.stallDataDmaVmem := interlockStall && dmaVmemHazard
+  io.perf.stallDataXreg    := interlockStall && xRegHazard
+  io.perf.stallDataScale   := interlockStall && scaleHazard
 
   // ==============================================================
   // Software-scheduling assertions
@@ -607,6 +623,8 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
 
   io.csrPort.op    := Mux(s1_valid && dec.is_csr, dec.csr_cmd, CSR_NONE)
   io.csrPort.valid := s1_fire && dec.is_csr
+  // csrrs / csrrc with rs1 = x0 and csrrsi / csrrci with uimm = 0 only read (RISC-V).
+  io.csrPort.write := dec.csr_cmd === CSR_RW || dec.csr_cmd === CSR_RWI || dec.rs1 =/= 0.U
   io.csrPort.wdata := Mux(
     dec.csr_cmd === CSR_RWI || dec.csr_cmd === CSR_RSI || dec.csr_cmd === CSR_RCI,
     dec.imm.asUInt, rs1_data)

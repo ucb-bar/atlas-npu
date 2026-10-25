@@ -88,9 +88,8 @@
     DELAY 31
 
 # ═══════════════════════════════════════════════════════════════
-# MEASURED REGION BEGINS — reset perf counters, snapshot mcycles
+# MEASURED REGION BEGINS — snapshot mcycles
 # ═══════════════════════════════════════════════════════════════
-    csrrw x0, 0xC20, x0                # zero mxu0/mxu1 busy counters
     csrrs x20, 0xC00, x0                # x20 = cycle count at start
 
 # ── One VMATMUL per MXU, overwrite mode. Issues on consecutive scalar
@@ -115,8 +114,8 @@
     csrrw x0, 0xC11, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
 
 # ═══════════════════════════════════════════════════════════════
-# DONE — host reads busy0/busy1 from CSR_BASE + 0x1C/0x20 and the
-#        mcycles delta from CSR_DBG1 @ 0x14
+# DONE — host reads the mcycles delta from CSR_DBG1 @ 0x14 and the
+#        mxu0_busy / mxu1_busy counters (docs/perf-counters.md)
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
     csrrw x0, 0xC10, x30

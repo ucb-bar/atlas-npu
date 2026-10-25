@@ -122,7 +122,9 @@ def main():
                 where = link.port
             try:
                 atlas = Atlas(link)
-                print(f"board on {where}: DRAM {atlas.dram_bytes >> 20} MiB, features 0x{atlas.features:x}")
+                major, minor = atlas.isa_version
+                print(f"board on {where}: DRAM {atlas.dram_bytes >> 20} MiB, features 0x{atlas.features:x}, "
+                      f"ISA {major}.{minor}")
                 for i, p in enumerate(paths):
                     test = json.loads(Path(p).read_text())
                     t0 = time.time()
