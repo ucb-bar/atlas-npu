@@ -55,9 +55,10 @@ The MXU sequencers' accept logic now also waits for these, which were only asser
 - a pop or `vmatmul.acc` of `accN` in the cycle a push writes row 0 of `accN`;
 - a pop of `accN` while a `vmatmul.acc` still reads its partial sums, and the reverse (one read
   port);
-- on mxu1, a pop or `vmatmul.acc` of `accN` until an FP32 push has written row 0 in its second
-  phase, and a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase
-  (docs/fp8-mxu.md).
+- on mxu1, a pop of `accN` until an FP32 push has written row 0 in its second phase (T+34), and
+  a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase (T+33)
+  (docs/fp8-mxu.md). A matmul or `vmatmul.acc` of `accN` waits for the whole FP32 push (T+65),
+  because a matmul waits while a push to its accumulator is in flight.
 
 To let back-to-back commands on one register keep their 32-cycle stride, the MXUs now report a
 port to the tracker only while it will still access its bank after the current cycle. The MXU
