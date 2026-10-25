@@ -5,6 +5,7 @@
     python3 -I fp8_vectors.py records FILE.vec.gz OUT # the records of a stored set, for fp8_mma
     python3 -I fp8_vectors.py tiles OUT               # the tile chains, for fp8_tile
     python3 -I fp8_vectors.py pack-tiles GPU.out OUT  # tile chains + fp8_tile output -> OUT.tiles.gz
+    python3 -I fp8_vectors.py pack-directed K0 K1 OUT # directed() + fp8_mma kinds 0, 1 -> OUT.vec.gz
 
 Records are 68 bytes: a[32] b[32] c[4] (byte k is E4M3 element k; c is FP32, little-endian).
 A tile chain is c[32][32] (FP32) a[4][32][32] w[4][32][32] (E4M3; row j of w is output column j).
@@ -205,6 +206,9 @@ SETS = {  # name: (generator, seed, count)
 }
 
 
+MMA_SOURCE = ("NVIDIA GeForce RTX 5090 (sm_120, driver 595.99.02), CUDA 13.2 V13.2.78; fp8_mma.cu kind 0 "
+              "(mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 = SASS QMMA.16832.F32.E4M3.E4M3), run on "
+              "2026-10-24; kind 1 (kind::f8f6f4) gave the same output on every vector")
 TILE_STEPS = 4
 TILE_KINDS = (gen_normal, gen_wide, gen_cancel, gen_cspecial, gen_sparse, gen_subnormal, gen_bits)
 TILE_SET = ("chain_s8", 8, 14)  # name, seed, tiles
@@ -293,6 +297,16 @@ def main(argv):
         body = tile_records(*tiles(np.random.default_rng(seed), n)) + out.tobytes()
         with gzip.GzipFile(argv[2], "wb", mtime=0) as f:
             f.write(json.dumps(hdr).encode() + b"\n" + body)
+        return 0
+    if argv[:1] == ["pack-directed"] and len(argv) == 4:
+        names, a, b, c = directed()
+        k0, k1 = (np.fromfile(path, "<u4") for path in argv[1:3])
+        assert len(k0) == len(c) and (k0 == k1).all(), "the outputs do not match directed() or each other"
+        hdr = {"format": "fp8-vectors-v1", "name": "directed", "count": len(c), "columns": ["rtx5090"],
+               "description": "directed vectors, one rule each (fp8_vectors.py directed())", "source": MMA_SOURCE,
+               "names": names}
+        body = records(a, b, c) + k0.tobytes()
+        Path(argv[3]).write_bytes(gzip.compress(json.dumps(hdr).encode() + b"\n" + body, 9, mtime=0))
         return 0
     print(__doc__, file=sys.stderr)
     return 2

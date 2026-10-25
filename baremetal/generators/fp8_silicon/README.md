@@ -100,7 +100,13 @@ cuobjdump -sass fp8_mma | grep MMA                                   # QMMA.1683
 python3 -I fp8_vectors.py gen full                                   # full/<set>.bin
 ./fp8_mma 0 full/wide_s3.bin wide_s3.out                             # one uint32 per vector
 python3 -I fp8_vectors.py records wide_s3.vec.gz wide_s3.bin         # the records of a subset
+./fp8_mma 0 full/directed.bin directed.k0                            # and kind 1 to directed.k1
+python3 -I fp8_vectors.py pack-directed directed.k0 directed.k1 directed.vec.gz
 ```
+
+`pack-directed` checks that the two kinds agree and writes `directed.vec.gz`. The repository has
+no packer for the subsets of the random sets: their selection needs the alternative-rule models
+of the table above, which are not in the repository.
 
 CUDA 12 cannot target `sm_120a`. With CUDA 13.2, `-arch=sm_120a` also embeds `compute_120` PTX,
 and `ptxas` then rejects kind 1. Use `-gencode` as above.
@@ -229,7 +235,9 @@ cuobjdump -sass fp8_cvt | grep -E 'F2F|HADD2|FMUL'
 ./fp8_cvt vpack vpack.out                       # also vunpack, push, e4m3, bf16 and bf16x2
 python3 -I cvt_vectors.py gen in
 ./fp8_cvt pop in/pop.bin pop.out
+python3 -I cvt_vectors.py pack . .              # the *.cvt.gz files from the *.out files
 ```
 
 Each mode takes less than one second. `vpack.out`, `vunpack.out`, `push.out` and `pop.out` are
-the `rtx5090` columns. The runs modes write {uint32 x, uint32 d} records.
+the `rtx5090` columns. The runs modes write {uint32 x, uint32 d} records. `cvt_vectors.py pack`
+checks that the `bf16` and `bf16x2` runs agree and writes the six files.
