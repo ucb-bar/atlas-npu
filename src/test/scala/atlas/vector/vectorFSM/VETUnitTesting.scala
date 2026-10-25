@@ -1088,13 +1088,14 @@ class VETUnitTesting extends AnyFlatSpec with Matchers with PeekPokeAPI {
             // val numPass3 = results3.count(_._2)
             // val total3   = results3.length
 
+            // Exact checks: max and min select an operand, and the column sum is defined bit for bit.
             val results4 = Seq(
-                ("r50", checkMatrixTolerance(r50, expected50n51, "r50")),
-                ("r51", checkMatrixTolerance(r51, expected50n51, "r51")),
-                ("r52", checkMatrixTolerance(r52, expected52n53, "r52")),
-                ("r53", checkMatrixTolerance(r53, expected52n53, "r53")),
-                ("r54", checkMatrixTolerance(r54, expected54n55, "r54")),
-                ("r55", checkMatrixTolerance(r55, expected54n55, "r55"))
+                ("r50", checkMatrixTolerance(r50, expected50n51, "r50", 0f, 0f)),
+                ("r51", checkMatrixTolerance(r51, expected50n51, "r51", 0f, 0f)),
+                ("r52", checkMatrixTolerance(r52, expected52n53, "r52", 0f, 0f)),
+                ("r53", checkMatrixTolerance(r53, expected52n53, "r53", 0f, 0f)),
+                ("r54", checkMatrixTolerance(r54, expected54n55, "r54", 0f, 0f)),
+                ("r55", checkMatrixTolerance(r55, expected54n55, "r55", 0f, 0f))
             )
 
             // println(s"First  Round of Tests: Passed $numPass1 / $total1 tests")
