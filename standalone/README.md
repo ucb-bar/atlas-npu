@@ -321,3 +321,13 @@ With the original kernels and with every `DELAY` removed, `default` gives 125 / 
 (108 pass, 17 illegal) and `ipt-nvfp4` 125 / 125 (114, 11). The other 115 tests keep their
 status, cycle count and performance counters on both configurations. 16 of them load other FP8
 data, because the generators now encode E4M3 as `E4M3_RN_SATFINITE` (`gen_utils.py`).
+
+Verilator, 2026-10-25, with the scaled BF16 pops, the `mxu1` FP32 transfers, the `.vx` and `.vr`
+forms and `vgelu.bf16`: the suite has 133 tests. The 8 new tests are `mxu1_scaled_pop`,
+`mxu1_fp32_spill`, `mxu1_back_to_back`, `nvfp4_scaled_pop`, `nvfp4_fp32_spill`, `vpu_vx_vr`,
+`interlock_xreg` and `vpu_gelu`. With the original kernels and with every `DELAY` removed,
+`default` gives 133 / 133 as expected (114 pass, 19 illegal) and `ipt-nvfp4` 133 / 133 (122, 11).
+The other 125 tests keep their status, cycle count and performance counters on both
+configurations, with one exception: without `DELAY`, `mem_scalar` takes 105 cycles, not 107, and
+`scalar_vector_concurrent` counts 3 fewer x-register stall cycles. An instruction now waits for a
+pending scalar load only on the x-registers that it names (docs/interlock.md).
