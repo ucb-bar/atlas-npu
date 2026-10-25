@@ -3,7 +3,9 @@
 //
 // FP8Pack is 2→1 phased: two sequential `req.valid` pulses (16 BF16 lanes
 // each) produce one `resp.valid` pulse carrying 16×UInt(16.W), where each
-// 16-bit slot holds two packed FP8 bytes. Output layout (FP8Pack.scala:122-125):
+// 16-bit slot holds two packed FP8 bytes. Each byte is
+// E4M3_RN_SATFINITE(x * 2^(scale - 127)) (VectorTestUtils.goldenE4m3).
+// Output layout (FP8Pack.scala):
 //
 //   result(j)     = Cat(lowHalf(2j+1),  lowHalf(2j))   // first-pulse bytes
 //   result(j+8)   = Cat(fp8Bytes(2j+1), fp8Bytes(2j))  // second-pulse bytes
@@ -24,6 +26,7 @@ import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
 import svsim.vcs.Backend
 import atlas.common._
+import atlas.vector.VectorTestUtils.goldenE4m3
 import java.nio.file.{Files, Path, Paths}
 
 // ============================================================================
@@ -80,7 +83,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   }
   //----------- CI/CD INCLUDE --------------
 
-  // ---- BF16 <-> Float helpers ----
+  // ---- BF16 helper ----
   def fpTobf(f: Float): Int = {
     val x = java.lang.Float.floatToRawIntBits(f)
     val lsb = (x >>> 16) & 1
@@ -88,76 +91,11 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     ((x + roundingBias) >>> 16) & 0xFFFF
   }
 
-  def bfTofp(b: Int): Float =
-    java.lang.Float.intBitsToFloat((b & 0xFFFF) << 16)
-
-  // ---- FP8 E4M3 golden helpers matching FP8Pack.scala ----
-  private def packE4M3(sign: Int, exp: Int, mant: Int): Int =
-    ((sign & 1) << 7) | ((exp & 0xF) << 3) | (mant & 0x7)
-
-  private def roundRightShift4RNE(mant8: Int): Int = {
-    val trunc  = (mant8 >>> 4) & 0xF
-    val guard  = (mant8 >>> 3) & 0x1
-    val sticky = mant8 & 0x7
-    val lsb    = trunc & 0x1
-    val inc    = (guard == 1) && ((sticky != 0) || (lsb == 1))
-    trunc + (if (inc) 1 else 0)
-  }
-
-  private def goldenFp8ByteFromBf16(bf16: Int, expShift: Int): Int = {
-    val sign   = (bf16 >>> 15) & 0x1
-    val expBF  = (bf16 >>> 7) & 0xFF
-    val mantBF = bf16 & 0x7F
-
-    val isZero = (expBF == 0) && (mantBF == 0)
-    val isSub  = (expBF == 0) && (mantBF != 0)
-    val isInf  = (expBF == 0xFF) && (mantBF == 0)
-    val isNaN  = (expBF == 0xFF) && (mantBF != 0)
-
-    val E4M3_MAX_POS = 0x7E
-    val E4M3_MAX_NEG = 0xFE
-
-    if (isZero || isSub || isNaN) {
-      0
-    } else if (isInf) {
-      if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-    } else {
-      val unbExp = expBF - 127
-      val expAdjusted = unbExp - expShift
-
-      val mant8 = (1 << 7) | mantBF
-      val roundedSig = roundRightShift4RNE(mant8)
-      val normCarry = roundedSig == 16
-
-      val finalExpAdjusted =
-        if (normCarry) expAdjusted + 1
-        else expAdjusted
-
-      val mantFP8 =
-        if (normCarry) 0
-        else (roundedSig - 8) & 0x7
-
-      if (finalExpAdjusted > 8) {
-        if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-      } else if (finalExpAdjusted >= -6) {
-        val expFP8 = finalExpAdjusted + 7
-        val packed = packE4M3(sign, expFP8, mantFP8)
-        if ((packed & 0x7F) == 0x7F) {
-          if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-        } else {
-          packed
-        }
-      } else {
-        0
-      }
-    }
-  }
-
   // ---- DUT helpers for the 2→1 phased interface ----
 
-  private def pokeRow(dut: FP8Pack, dataBf16: Seq[Int], expShift: Int): Unit = {
+  private def pokeRow(dut: FP8Pack, dataBf16: Seq[Int], e: Int): Unit = {
     dut.io.req.valid.poke(true.B)
-    dut.io.req.bits.expShift.poke(expShift.S)
+    dut.io.req.bits.scale.poke(e.U)
     dataBf16.zipWithIndex.foreach { case (bits, i) =>
       dut.io.req.bits.xVec(i).poke((bits & 0xFFFF).U)
     }
@@ -175,17 +113,17 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       dut: FP8Pack,
       firstRow: Seq[Int],
       secondRow: Seq[Int],
-      expShift: Int
+      e: Int
   ): Seq[Int] = {
     require(firstRow.length == 16 && secondRow.length == 16,
       "FP8Pack expects exactly 16 BF16 lanes per pulse")
 
     // First pulse: loads lowHalf, phase → true
-    pokeRow(dut, firstRow, expShift)
+    pokeRow(dut, firstRow, e)
     dut.clock.step(1)
 
     // Second pulse: pack and latch into respBitsReg, phase → false
-    pokeRow(dut, secondRow, expShift)
+    pokeRow(dut, secondRow, e)
     dut.clock.step(1)
 
     dut.io.req.valid.poke(false.B)
@@ -216,12 +154,12 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   private def expectPackedMatches(
       firstRow: Seq[Int],
       secondRow: Seq[Int],
-      expShift: Int,
+      e: Int,
       actual: Seq[Int],
       label: String
   ): Unit = {
     val allInputs = firstRow ++ secondRow
-    val expected  = allInputs.map(b => goldenFp8ByteFromBf16(b, expShift))
+    val expected  = allInputs.map(b => goldenE4m3(b, e))
     actual.zip(expected).zipWithIndex.foreach { case ((act, exp), i) =>
       withClue(f"$label byte $i: in=0x${allInputs(i)}%04X act=0x$act%02X exp=0x$exp%02X\n") {
         act shouldBe exp
@@ -231,7 +169,7 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   behavior of "FP8Pack"
 
-  it should "convert 32 BF16 lanes into 32 FP8 bytes with expShift=0" in {
+  it should "convert 32 BF16 lanes into 32 FP8 bytes at e = 127" in {
     makeSim("RVFP8PackTest_baseline").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
@@ -248,134 +186,93 @@ class RVFP8PackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       val firstBf16  = firstF.map(fpTobf)
       val secondBf16 = secondF.map(fpTobf)
 
-      val actual = drivePairAndRead(dut, firstBf16, secondBf16, expShift = 0)
-      expectPackedMatches(firstBf16, secondBf16, expShift = 0, actual, "baseline")
+      val actual = drivePairAndRead(dut, firstBf16, secondBf16, e = 127)
+      expectPackedMatches(firstBf16, secondBf16, e = 127, actual, "baseline")
     }
   }
 
-  it should "shift exponent correctly with positive expShift" in {
-    makeSim("RVFP8PackTest_posShift").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
+  it should "multiply by 2^(e - 127)" in {
+    makeSim("RVFP8PackTest_scale").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
 
-      val expShift = 2
       val row = Seq.fill(16)(fpTobf(1.0f))
 
-      val actual = drivePairAndRead(dut, row, row, expShift)
-      expectPackedMatches(row, row, expShift, actual, "expShift(+2)")
+      val actual = drivePairAndRead(dut, row, row, e = 129)
+      expectPackedMatches(row, row, e = 129, actual, "e = 129")
+      actual.foreach(_ shouldBe 0x48) // 4.0
     }
   }
 
-  it should "underflow to zero with sufficiently positive expShift" in {
-    makeSim("RVFP8PackTest_underflow").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
+  it should "keep E4M3 subnormals and round below them to nearest even" in {
+    makeSim("RVFP8PackTest_subnormal").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
 
-      // Large positive expShift pushes the packed result below E4M3 normal range.
-      val expShift = 10
       val row = Seq.fill(16)(fpTobf(1.0f))
 
-      val actual = drivePairAndRead(dut, row, row, expShift)
-      expectPackedMatches(row, row, expShift, actual, "underflow")
-      actual.foreach(_ shouldBe 0)
+      // 2^-6 is the smallest normal (0x08); 2^-7 and 2^-9 are subnormals.
+      drivePairAndRead(dut, row, row, e = 121).foreach(_ shouldBe 0x08)
+      drivePairAndRead(dut, row, row, e = 120).foreach(_ shouldBe 0x04)
+      drivePairAndRead(dut, row, row, e = 118).foreach(_ shouldBe 0x01)
+
+      // 2^-10 is the tie between 0 and 2^-9: nearest even gives zero, with the sign of x.
+      val signs = Seq.tabulate(16)(i => fpTobf(if (i % 2 == 0) 1.0f else -1.0f))
+      val tie   = drivePairAndRead(dut, signs, signs, e = 117)
+      expectPackedMatches(signs, signs, e = 117, tie, "tie")
+      tie.zipWithIndex.foreach { case (b, i) => b shouldBe (if (i % 2 == 0) 0x00 else 0x80) }
     }
   }
 
-  it should "clamp overflow to max finite with sufficiently negative expShift" in {
+  it should "saturate above 448 to max finite" in {
     makeSim("RVFP8PackTest_overflow").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
 
-      // Large negative expShift overflows past max finite E4M3.
-      val expShift = -10
-      val row = Seq.fill(16)(fpTobf(1000.0f))
+      val row = Seq.fill(16)(fpTobf(1.0f))
 
-      val actual = drivePairAndRead(dut, row, row, expShift)
-      expectPackedMatches(row, row, expShift, actual, "overflow")
-      actual.foreach(_ shouldBe 0x7E) // positive max finite
+      // e = 135 multiplies by 256: max E4M3 normal exponent (byte 0x78).
+      drivePairAndRead(dut, row, row, e = 135).foreach(_ shouldBe 0x78)
+
+      // e = 136 multiplies by 512: saturates to 0x7E (448).
+      drivePairAndRead(dut, row, row, e = 136).foreach(_ shouldBe 0x7E)
+
+      // 480 and the tie 464 give 448, never the NaN code 0x7F.
+      val big = Seq.tabulate(16)(i => fpTobf(if (i % 2 == 0) 480.0f else -464.0f))
+      val sat = drivePairAndRead(dut, big, big, e = 127)
+      expectPackedMatches(big, big, e = 127, sat, "saturate")
+      sat.zipWithIndex.foreach { case (b, i) => b shouldBe (if (i % 2 == 0) 0x7E else 0xFE) }
     }
   }
 
-  it should "handle the exact boundary between minimum normal and flush-to-zero underflow" in {
-    makeSim("RVFP8PackTest_minNormBoundary").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
+  it should "use 2^128 for e = 255" in {
+    makeSim("RVFP8PackTest_e255").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
 
-      val row = Seq.fill(16)(fpTobf(1.0f))
-
-      // expShift = +6 divides by 64 → minimum normal E4M3 (byte 0x08).
-      val minNormal = drivePairAndRead(dut, row, row, expShift = 6)
-      minNormal.foreach(_ shouldBe 0x08)
-
-      // expShift = +7 divides by 128 → below min normal, flush to zero.
-      val underflow = drivePairAndRead(dut, row, row, expShift = 7)
-      underflow.foreach(_ shouldBe 0x00)
+      // BF16 subnormal 2^-128 times 2^128 is 1.0.
+      val row = Seq.fill(16)(0x0020)
+      drivePairAndRead(dut, row, row, e = 255).foreach(_ shouldBe 0x38)
     }
   }
 
-  it should "handle the exact boundary between max normal and overflow clamping" in {
-    makeSim("RVFP8PackTest_maxNormBoundary").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
-      val dut = module.wrapped
-      resetDrain(dut)
-
-      val row = Seq.fill(16)(fpTobf(1.0f))
-
-      // expShift = -8 multiplies by 256 → max E4M3 normal (byte 0x78).
-      val maxNormal = drivePairAndRead(dut, row, row, expShift = -8)
-      maxNormal.foreach(_ shouldBe 0x78)
-
-      // expShift = -9 multiplies by 512 → overflow, clamp to max finite 0x7E.
-      val overflow = drivePairAndRead(dut, row, row, expShift = -9)
-      overflow.foreach(_ shouldBe 0x7E)
-    }
-  }
-
-  it should "ignore expShift for special values (zero, inf, nan)" in {
+  it should "give signed zero, 448 for Inf and 0x7F for NaN" in {
     makeSim("RVFP8PackTest_specials").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
 
-      val bf16Zero   = 0x0000
-      val bf16PosInf = 0x7F80
-      val bf16NegInf = 0xFF80
-      val bf16NaN    = 0x7FC0
+      val pattern = Seq(0x0000, 0x8000, 0x7F80, 0xFF80, 0x7FC0, 0xFFC0, 0x7F81, 0x0001)
+      val row     = pattern ++ pattern
 
-      val pattern = Seq(
-        bf16Zero, bf16PosInf, bf16NegInf, bf16NaN,
-        bf16Zero, bf16PosInf, bf16NegInf, bf16NaN,
-        bf16Zero, bf16PosInf, bf16NegInf, bf16NaN,
-        bf16Zero, bf16PosInf, bf16NegInf, bf16NaN
-      )
+      val actual   = drivePairAndRead(dut, row, row, e = 177)
+      val expected = Seq(0x00, 0x80, 0x7E, 0xFE, 0x7F, 0x7F, 0x7F, 0x00)
 
-      val actual = drivePairAndRead(dut, pattern, pattern, expShift = 50)
-      val expected = Seq(
-        0x00, 0x7E, 0xFE, 0x00,
-        0x00, 0x7E, 0xFE, 0x00,
-        0x00, 0x7E, 0xFE, 0x00,
-        0x00, 0x7E, 0xFE, 0x00
-      )
-      val fullExpected = expected ++ expected
-
-      actual.zip(fullExpected).zipWithIndex.foreach { case ((a, e), i) =>
-        withClue(f"special byte $i: in=0x${(pattern ++ pattern)(i)}%04X act=0x$a%02X exp=0x$e%02X\n") {
+      actual.zip(Seq.fill(4)(expected).flatten).zipWithIndex.foreach { case ((a, e), i) =>
+        withClue(f"special byte $i: in=0x${(row ++ row)(i)}%04X act=0x$a%02X exp=0x$e%02X\n") {
           a shouldBe e
         }
       }
-    }
-  }
-
-  it should "clamp would-be E4M3 NaN encoding to max finite" in {
-    makeSim("RVFP8PackTest_clampNaN").simulate(new FP8Pack(BF16, numLanes = 16)) { module =>
-      val dut = module.wrapped
-      resetDrain(dut)
-
-      val expShift = 0
-      // 480.0 is above max-finite E4M3 (448.0) and previously could land on 0x7F.
-      val row = Seq.fill(16)(fpTobf(480.0f))
-
-      val actual = drivePairAndRead(dut, row, row, expShift)
-      expectPackedMatches(row, row, expShift, actual, "clamp-NaN")
-      actual.foreach(_ shouldBe 0x7E)
+      expectPackedMatches(row, row, e = 177, actual, "specials")
     }
   }
 }

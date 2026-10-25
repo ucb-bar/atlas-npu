@@ -187,26 +187,40 @@ object VectorTestUtils {
         fpToBf16(yFloat)
     }
 
-    def goldenFP8(a: Short, expShift: Int): Short = {
-        def packE4M3(sign: Int, exp: Int, mant: Int): Short = {
-            (((sign & 1) << 7) | ((exp & 0xF) << 3) | (mant & 0x7)).toShort
+    /** |x| * 2^(e - 127) rounded to nearest even with mbits fraction bits and emin the
+      * smallest normal exponent. The product is exact in a double. */
+    private def roundScaled(x: Double, e: Int, mbits: Int, emin: Int): Double = {
+        val v = Math.abs(x) * Math.pow(2, e - 127)
+        if (v == 0 || v.isInfinite) v
+        else {
+            val q = Math.pow(2, Math.max(Math.getExponent(v), emin) - mbits)
+            Math.rint(v / q) * q
         }
+    }
 
-        val sign = (a >>> 15) & 1
-        val expBF = (a >>> 7) & 0xFF
-        val mantBF = a & 0x7F
+    /** vpack.bf16.fp8: E4M3_RN_SATFINITE(x * 2^(e - 127)) of BF16 bits x (ISA v2, 5.2). */
+    def goldenE4m3(bf16: Int, e: Int): Int = {
+        val x = bf16ToFp(bf16.toShort).toDouble
+        if (x.isNaN) 0x7f
+        else {
+            val r   = Math.min(roundScaled(x, e, 3, -6), 448.0)
+            val exp = Math.getExponent(r)
+            val mag = if (r < Math.pow(2, -6)) (r * 512).toInt
+                      else ((exp + 7) << 3) | ((r * Math.pow(2, 3 - exp)).toInt - 8)
+            ((bf16 >>> 8) & 0x80) | mag
+        }
+    }
 
-        val isZero = (expBF == 0) && (mantBF == 0)
-        if (isZero) return 0.toShort
-
-        // Subtract expShift before converting the BF16 exponent into E4M3.
-        val expAdj = expBF - 120 - expShift
-        val expClamped = if (expAdj <= 0) 0.toShort
-                         else if (expAdj >= 15) 15.toShort
-                         else expAdj
-
-        val mantFP8 = (mantBF >>> 4) & 0x7
-        packE4M3(sign, expClamped, mantFP8)
+    /** vunpack.fp8.bf16: BF16_RNE(x * 2^(e - 127)) of E4M3 code x (ISA v2, 5.2). */
+    def goldenBf16FromE4m3(code: Int, e: Int): Int = {
+        val field = (code >>> 3) & 0xf
+        val m     = code & 0x7
+        if ((code & 0x7f) == 0x7f) 0x7fff
+        else {
+            val x = (if (field > 0) 8 + m else m) * Math.pow(2, Math.max(field, 1) - 10)
+            val r = roundScaled(x, e, 7, -126)
+            ((code & 0x80) << 8) | (java.lang.Float.floatToRawIntBits(r.toFloat) >>> 16)
+        }
     }
 
     def goldenRelu(x: Short): Short = {
@@ -297,11 +311,6 @@ object VectorTestUtils {
         Array.tabulate(16) { i =>
             if (i == 0) sumBF16 else 0.toShort
         }
-    }
-
-    def goldenFP8Vector(aVec: Array[Short], expShift: Int): Array[Short] = {
-        require(aVec.length == 16)
-        Array.tabulate(16) { i => goldenFP8(aVec(i), expShift) }
     }
 
     def goldenReluVector(aVec: Array[Short]): Array[Short] = {
@@ -413,13 +422,6 @@ object VectorTestUtils {
         aMat.map { lane =>
             require(lane.length == 16)
             goldenReduSumVector(lane)
-        }
-    }
-
-    def goldenFP8Matrix(aMat: Array[Array[Short]], expShift: Int): Array[Array[Short]] = {
-        aMat.map { lane =>
-            require(lane.length == 16)
-            goldenFP8Vector(lane, expShift)
         }
     }
 

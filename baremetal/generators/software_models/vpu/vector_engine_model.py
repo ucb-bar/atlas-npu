@@ -20,9 +20,8 @@ single-pulse vector file format, so `gen_vectors.py` skips them in
 file output. The functional entry point below still supports them:
 fp8pack takes two BF16 rows via (`a_vec`, `b_vec`) and returns 16
 UInt16 packed slots; fp8unpack takes one packed row via `a_vec` and
-returns 32 BF16 bits (low row followed by high row). The engine-layer
-E8M0 clamp from `VectorEngine.scala:44-51` is applied here to match
-RTL.
+returns 32 BF16 bits (low row followed by high row). Both take the raw
+e-register value as `scale_e8m0`.
 
 `fp8` (the dead enum value between `csum` and `fp8pack` in `VPUOp`)
 is unwired in `VectorEngine.scala`. `execute("fp8", ...)` raises
@@ -57,21 +56,6 @@ from .lane_boxes.vector_load_imm import VectorLoadImm, VLIReq
 
 
 _FP32_PLUS_ZERO = 0
-
-
-def _e8m0_to_scale_exp_clamped(scale_e8m0: int) -> int:
-    """Mirror of `VectorEngine.scala:44-51`: E8M0 byte → clamped int8
-    scale exponent. Identical arithmetic: subtract 127, then clip into
-    [-128, 127]. `scale_e8m0 == 0` yields -127, `scale_e8m0 == 0xFE`
-    yields 127, `scale_e8m0 == 0xFF` yields 128 pre-clamp → clamped to
-    127. Caller is responsible for accepting the 8-bit input; this
-    helper does NOT validate."""
-    wide = (scale_e8m0 & 0xFF) - 127
-    if wide > 127:
-        return 127
-    if wide < -128:
-        return -128
-    return wide
 
 
 # Single-row pointwise binary ops dispatched via `aVec` + `bVec`.
@@ -441,8 +425,7 @@ class VectorEngineModel:
         """Two BF16 rows → 16 UInt16 packed slots. Uses the pure
         `FP8Pack.pack_two_rows` helper so no phase state is mutated on
         the shared instance (the cycle-accurate test machinery owns
-        the `step()` entry point). Engine-layer clamp mirrors
-        `VectorEngine.scala:243-244`."""
+        the `step()` entry point)."""
         n = self.p.num_lanes
         if len(a_vec) != n:
             raise ValueError(
@@ -452,10 +435,9 @@ class VectorEngineModel:
             raise ValueError(
                 f"fp8pack: b_vec (high row) must have {n} lanes, got {len(b_vec)}"
             )
-        exp_shift = _e8m0_to_scale_exp_clamped(scale_e8m0)
         resp = self.fp8_pack.pack_two_rows(
-            FP8PackReq(xVec=a_vec, expShift=exp_shift),
-            FP8PackReq(xVec=b_vec, expShift=exp_shift),
+            FP8PackReq(xVec=a_vec, scale=scale_e8m0),
+            FP8PackReq(xVec=b_vec, scale=scale_e8m0),
         )
         return list(resp.result)
 
@@ -464,15 +446,13 @@ class VectorEngineModel:
     ) -> list[int]:
         """One 16-slot packed row → 32 BF16 lanes (low row [0..15] then
         high row [16..31]). Uses the pure `FP8Unpack.unpack_both_rows`
-        helper; phase state on the shared instance is untouched.
-        Engine-layer clamp mirrors `VectorEngine.scala:243-244`."""
+        helper; phase state on the shared instance is untouched."""
         n = self.p.num_lanes
         if len(a_vec) != n:
             raise ValueError(
                 f"fp8unpack: a_vec must have {n} packed slots, got {len(a_vec)}"
             )
-        exp_shift = _e8m0_to_scale_exp_clamped(scale_e8m0)
         low_resp, high_resp = self.fp8_unpack.unpack_both_rows(
-            FP8UnpackReq(xVec=a_vec, expShift=exp_shift)
+            FP8UnpackReq(xVec=a_vec, scale=scale_e8m0)
         )
         return list(low_resp.result) + list(high_resp.result)

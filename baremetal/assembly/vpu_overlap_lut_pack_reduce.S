@@ -85,7 +85,7 @@
     DELAY 37
 
     # Pack/unpack with scale exponents chosen to hit normal, zero, and clip paths.
-    seli e3, 0x7B
+    seli e3, 0x83
     seli e4, 0x86
     vpack.bf16.fp8 m28, m24, e3
     DELAY 64

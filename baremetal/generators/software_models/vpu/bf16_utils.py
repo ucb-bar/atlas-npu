@@ -148,8 +148,11 @@ def _f32_to_fp32_bits_clamped(s: float) -> int:
 
     `struct.pack('<f', s)` raises OverflowError for finite FP64 values
     outside FP32 range — but the RTL AddRecFN saturates such results to
-    ±inf, so we mirror that here. Inf and NaN inputs pack fine via struct.
+    ±inf, so we mirror that here. A NaN result is HardFloat's canonical
+    NaN, 0x7FC00000, whatever the NaN inputs were.
     """
+    if s != s:
+        return 0x7FC00000
     try:
         packed = struct.pack("<f", s)
     except OverflowError:

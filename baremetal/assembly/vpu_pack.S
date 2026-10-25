@@ -7,13 +7,12 @@
 # Pack quantizes BF16 → FP8, unpack dequantizes FP8 → BF16.
 # Pack consumes two BF16 mregs and writes one packed FP8 mreg.
 # Unpack consumes one packed FP8 mreg and writes two BF16 mregs.
-# Pack subtracts the decoded scale exponent before rebiasing to E4M3.
-# Unpack adds the decoded scale exponent when reconstructing BF16.
+# Pack and unpack multiply by the scale 2^(e - 127).
 #
 # Test values:
 #   Input:        2.0 (BF16 0x4000)
-#   Pack scale:   scale reg 0 = 0x80 → 2^(128-127) = 2.0
-#                 pack subtracts this exponent, so 2.0 → 1.0
+#   Pack scale:   scale reg 0 = 0x7E → 2^(126-127) = 0.5
+#                 pack multiplies by it, so 2.0 → 1.0
 #   Pack result:  1.0 → FP8 E4M3 0x38, packed into one output mreg
 #   Unpack scale: scale reg 1 = 0x81 → 2^(129-127) = 4.0
 #   Unpack result:1.0 × 4.0 = 4.0 → BF16 0x4080
@@ -48,10 +47,10 @@
 
 # ================================================================
 # Test 1: vfp8pack  m4, m0 with scale reg 0
-#   scale reg 0 = 0x80 → 2^(+1)
-#   pack subtracts this exponent, so 2.0 → 1.0 → E4M3 0x38
+#   scale reg 0 = 0x7E → 2^(-1)
+#   pack multiplies by it, so 2.0 → 1.0 → E4M3 0x38
 # ================================================================
-    seli e0, 0x80
+    seli e0, 0x7E
     vpack.bf16.fp8 m4, m0, e0
     DELAY 64
 

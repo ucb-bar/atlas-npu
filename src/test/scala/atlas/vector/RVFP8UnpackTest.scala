@@ -4,12 +4,14 @@
 // FP8Unpack is 1→2 phased: one `req.valid` pulse carrying 16×UInt(16.W)
 // (= 32 packed FP8 bytes) produces two consecutive `resp.valid` pulses.
 // First pulse carries the low 16 bytes (byte 0..15) as BF16, second pulse
-// carries the high 16 bytes (byte 16..31) as BF16. See FP8Unpack.scala:57-64
+// carries the high 16 bytes (byte 16..31) as BF16. See FP8Unpack.scala
 // for the byte layout: `inputBuf := xVec.asUInt`, then
 //   fp8Bytes(i) = inputBuf(8*i+7, 8*i)         (sLow)
 //   fp8Bytes(i) = inputBuf(128 + 8*i+7, ...)   (sHigh)
 // so xVec(i)[7:0] is an even byte and xVec(i)[15:8] is the following odd
 // byte — pack inputs as xVec(i) = (bytes(2i+1) << 8) | bytes(2i).
+// Each byte converts as BF16_RNE(x * 2^(scale - 127))
+// (VectorTestUtils.goldenBf16FromE4m3).
 //
 // RUN: (from sp26-atlas-acc)
 //    mill atlas.test.testOnly atlas.vector.RVFP8UnpackTest
@@ -27,6 +29,7 @@ import svsim.CommonCompilationSettings
 import svsim.vcs.{Backend => VcsBackend}
 import svsim.vcs.Backend
 import atlas.common._
+import atlas.vector.VectorTestUtils.{goldenBf16FromE4m3, goldenE4m3}
 import java.nio.file.{Files, Path, Paths}
 
 // ============================================================================
@@ -81,93 +84,12 @@ class RVFP8UnpackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
     outcome
   }
 
-  // ---- FP8 E4M3 → BF16 golden (matches FP8Unpack.scala) ----
-  private def goldenBf16FromFp8Byte(fp8: Int, expShift: Int): Int = {
-    val sign    = (fp8 >>> 7) & 0x1
-    val expFP8  = (fp8 >>> 3) & 0xF
-    val mantFP8 = fp8 & 0x7
-
-    val isZero = (expFP8 == 0) && (mantFP8 == 0)
-    val isSub  = (expFP8 == 0) && (mantFP8 != 0)
-    val isNaN  = (expFP8 == 0xF) && (mantFP8 == 0x7)
-    if (isZero || isSub || isNaN) return (sign << 15) & 0xFFFF
-
-    val unbExpFP8  = expFP8 - 7
-    val unbExpBF16 = unbExpFP8 + expShift
-    val expBF16    = unbExpBF16 + 127
-
-    if (expBF16 <= 0) {
-      (sign << 15) & 0xFFFF
-    } else if (expBF16 >= 255) {
-      if (sign == 1) 0xFF7F else 0x7F7F
-    } else {
-      val fracBF16 = (mantFP8 & 0x7) << 4
-      ((sign & 0x1) << 15) | ((expBF16 & 0xFF) << 7) | (fracBF16 & 0x7F)
-    }
-  }
-
-  // ---- BF16 helpers for round-trip test ----
+  // ---- BF16 helper for the round-trip test ----
   private def fpTobf(f: Float): Int = {
     val x = java.lang.Float.floatToRawIntBits(f)
     val lsb = (x >>> 16) & 1
     val roundingBias = 0x7FFF + lsb
     ((x + roundingBias) >>> 16) & 0xFFFF
-  }
-
-  private def packE4M3(sign: Int, exp: Int, mant: Int): Int =
-    ((sign & 1) << 7) | ((exp & 0xF) << 3) | (mant & 0x7)
-
-  private def roundRightShift4RNE(mant8: Int): Int = {
-    val trunc  = (mant8 >>> 4) & 0xF
-    val guard  = (mant8 >>> 3) & 0x1
-    val sticky = mant8 & 0x7
-    val lsb    = trunc & 0x1
-    val inc    = (guard == 1) && ((sticky != 0) || (lsb == 1))
-    trunc + (if (inc) 1 else 0)
-  }
-
-  private def goldenFp8ByteFromBf16(bf16: Int, expShift: Int): Int = {
-    val sign   = (bf16 >>> 15) & 0x1
-    val expBF  = (bf16 >>> 7) & 0xFF
-    val mantBF = bf16 & 0x7F
-
-    val isZero = (expBF == 0) && (mantBF == 0)
-    val isSub  = (expBF == 0) && (mantBF != 0)
-    val isInf  = (expBF == 0xFF) && (mantBF == 0)
-    val isNaN  = (expBF == 0xFF) && (mantBF != 0)
-
-    val E4M3_MAX_POS = 0x7E
-    val E4M3_MAX_NEG = 0xFE
-
-    if (isZero || isSub || isNaN) {
-      0
-    } else if (isInf) {
-      if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-    } else {
-      val unbExp = expBF - 127
-      val expAdjusted = unbExp - expShift
-
-      val mant8 = (1 << 7) | mantBF
-      val roundedSig = roundRightShift4RNE(mant8)
-      val normCarry = roundedSig == 16
-
-      val finalExpAdjusted = if (normCarry) expAdjusted + 1 else expAdjusted
-      val mantFP8 = if (normCarry) 0 else (roundedSig - 8) & 0x7
-
-      if (finalExpAdjusted > 8) {
-        if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-      } else if (finalExpAdjusted >= -6) {
-        val expFP8 = finalExpAdjusted + 7
-        val packed = packE4M3(sign, expFP8, mantFP8)
-        if ((packed & 0x7F) == 0x7F) {
-          if (sign == 1) E4M3_MAX_NEG else E4M3_MAX_POS
-        } else {
-          packed
-        }
-      } else {
-        0
-      }
-    }
   }
 
   // ---- DUT helpers for the 1→2 phased interface ----
@@ -186,11 +108,11 @@ class RVFP8UnpackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
   private def drivePackedRow(
       dut: FP8Unpack,
       bytes: Seq[Int],
-      expShift: Int
+      e: Int
   ): Unit = {
     require(bytes.length == 32, "FP8Unpack expects exactly 32 FP8 bytes per row")
     dut.io.req.valid.poke(true.B)
-    dut.io.req.bits.expShift.poke(expShift.S)
+    dut.io.req.bits.scale.poke(e.U)
     for (i <- 0 until 16) {
       val lo = bytes(2 * i)     & 0xFF
       val hi = bytes(2 * i + 1) & 0xFF
@@ -227,45 +149,46 @@ class RVFP8UnpackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   private def runUnpackCase(
       bytes: Seq[Int],
-      expShift: Int,
+      e: Int,
       label: String,
       testName: String
-  ): Unit = {
+  ): Seq[Int] = {
     makeSim(testName).simulate(new FP8Unpack(BF16, numLanes = 16)) { module =>
       val dut = module.wrapped
       resetDrain(dut)
-      drivePackedRow(dut, bytes, expShift)
+      drivePackedRow(dut, bytes, e)
       val actual = readTwoBeats(dut)
-      val expected = bytes.map(b => goldenBf16FromFp8Byte(b, expShift))
+      val expected = bytes.map(b => goldenBf16FromE4m3(b, e))
       actual.zip(expected).zipWithIndex.foreach { case ((act, exp), i) =>
         withClue(f"$label byte $i: in=0x${bytes(i)}%02X act=0x$act%04X exp=0x$exp%04X\n") {
           act shouldBe exp
         }
       }
-    }
+      actual
+    }.result
   }
 
   behavior of "FP8Unpack"
 
-  it should "convert 32 FP8 bytes into 32 BF16 values with expShift=0" in {
+  it should "convert 32 FP8 bytes into 32 BF16 values at e = 127" in {
     val bytes = Seq(
       0x00, 0x30, 0x38, 0x3C, 0x40, 0xB8, 0x45, 0x52,
       0x28, 0xC2, 0x4C, 0x00, 0x34, 0xA0, 0x54, 0x64,
       0x3C, 0x44, 0x48, 0x4A, 0x50, 0xD0, 0x58, 0x60,
       0x20, 0xA8, 0x2C, 0x30, 0x35, 0xB0, 0x55, 0x70
     )
-    runUnpackCase(bytes, expShift = 0, "baseline", "RVFP8UnpackTest_baseline")
+    runUnpackCase(bytes, e = 127, "baseline", "RVFP8UnpackTest_baseline")
   }
 
-  it should "undo positive expShift correctly" in {
-    // 0x38 ≈ 1.0 in E4M3
+  it should "multiply by 2^(e - 127)" in {
+    // 0x38 = 1.0 in E4M3
     val bytes = Seq.fill(32)(0x38)
-    runUnpackCase(bytes, expShift = 2, "expShift(+2)", "RVFP8UnpackTest_posShift")
+    runUnpackCase(bytes, e = 129, "e = 129", "RVFP8UnpackTest_scale").foreach(_ shouldBe 0x4080)
   }
 
-  it should "map zero FP8 to zero BF16 regardless of expShift" in {
+  it should "map zero FP8 to zero BF16 at any e" in {
     val bytes = Seq.fill(32)(0x00)
-    runUnpackCase(bytes, expShift = 50, "zero", "RVFP8UnpackTest_zero")
+    runUnpackCase(bytes, e = 177, "zero", "RVFP8UnpackTest_zero")
   }
 
   it should "round-trip pack then unpack with only pack-side quantization loss" in {
@@ -276,14 +199,24 @@ class RVFP8UnpackTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       -0.0625f, 2.5f, -6.0f, 48.0f, 0.875f, -3.5f, 96.0f, -0.25f
     )
     val bf16  = dataF.map(fpTobf)
-    val bytes = bf16.map(b => goldenFp8ByteFromBf16(b, 0))
-    runUnpackCase(bytes, expShift = 0, "roundtrip", "RVFP8UnpackTest_roundtrip")
+    val bytes = bf16.map(b => goldenE4m3(b, 127))
+    runUnpackCase(bytes, e = 127, "roundtrip", "RVFP8UnpackTest_roundtrip")
   }
 
-  it should "flush FP8 NaN/subnormal and preserve signed zero" in {
-    //  0x00/0x80 = ±0, 0x01/0x81 = ±subnormal → ±0, 0x7F/0xFF = ±NaN → ±0
+  it should "keep subnormals and signed zero, and give 0x7FFF for NaN" in {
+    //  0x00/0x80 = +-0, 0x01/0x81 = +-2^-9, 0x7F/0xFF = NaN
     val specials = Seq(0x00, 0x80, 0x01, 0x81, 0x7F, 0xFF, 0x38, 0xB8)
     val bytes    = specials ++ specials ++ specials ++ specials
-    runUnpackCase(bytes, expShift = 0, "specials", "RVFP8UnpackTest_specials")
+    val actual   = runUnpackCase(bytes, e = 127, "specials", "RVFP8UnpackTest_specials")
+    actual.take(8) shouldBe Seq(0x0000, 0x8000, 0x3B00, 0xBB00, 0x7FFF, 0x7FFF, 0x3F80, 0xBF80)
+  }
+
+  it should "give Inf on overflow and round BF16 subnormals to nearest even" in {
+    // At e = 255, 448 * 2^128 overflows. At e = 0, 2^-6 * 2^-127 is the smallest BF16
+    // subnormal, and 2^-9 * 2^-127 rounds to zero.
+    val bytes = Seq.tabulate(32)(i => Seq(0x7E, 0xFE, 0x08, 0x88, 0x01, 0x81, 0x09, 0x0C)(i % 8))
+    runUnpackCase(bytes, e = 255, "e = 255", "RVFP8UnpackTest_e255").take(2) shouldBe Seq(0x7F80, 0xFF80)
+    runUnpackCase(bytes, e = 0, "e = 0", "RVFP8UnpackTest_e0").drop(2).take(4) shouldBe
+      Seq(0x0001, 0x8001, 0x0000, 0x8000)
   }
 }

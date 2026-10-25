@@ -25,9 +25,9 @@
     LI    x21, 64
 
     # Scale registers for fp8pack / fp8unpack cases
-    seli e0, 0x80
+    seli e0, 0x7E
     seli e1, 0x81
-    seli e2, 0x82
+    seli e2, 0x7C
     seli e3, 0x7F
 
     # Load safe slot1 pair -> m0,m1

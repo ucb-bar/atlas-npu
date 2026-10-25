@@ -1,7 +1,7 @@
 """Vectorized Atlas RTL arithmetic, bit-exact with npu_model.configs.rtl_math.
 
-npu_model's RtlNumerics evaluates the inner-product-tree MXU and the FP8 converters one element
-at a time in Python, about 30 ms per 32 x 32 x 32 matmul. A DiT sampler runs some 400,000 of
+npu_model's RtlNumerics evaluates the inner-product-tree MXU and its FP8 pop one element at a
+time in Python, about 30 ms per 32 x 32 x 32 matmul. A DiT sampler runs some 400,000 of
 them, so FastRtlNumerics computes the same integer datapaths on whole tiles with torch int64
 tensors. tests/test_numerics.py checks every function against rtl_math bit for bit.
 """
@@ -87,55 +87,31 @@ def ipt_matmul(a: torch.Tensor, w: torch.Tensor, c: torch.Tensor) -> torch.Tenso
     return _from_bits16(bits)
 
 
-def pack_fp8(value: torch.Tensor, scale: int, *, mxu: bool = False) -> torch.Tensor:
-    """FP8Pack (VPU, divides by the scale) or BF16ScaleToE4M3 (MXU pop, multiplies). rtl_math.pack_row."""
+def pack_fp8(value: torch.Tensor, scale: int) -> torch.Tensor:
+    """BF16ScaleToE4M3 (MXU pop), rtl_math.pack_row."""
     raw = _bits16(value.flatten())
     sign, exp, mant = raw >> 15, (raw >> 7) & 255, raw & 127
     shift = min(127, max(-128, int(scale) - 127))
-    adjusted = exp - 127 + (shift if mxu else -shift)
+    adjusted = exp - 127 + shift
     sig = 128 | mant
     rounded = (sig >> 4) + (((sig & 8) != 0) & (((sig & 7) != 0) | (((sig >> 4) & 1) != 0))).to(torch.int64)
     carry = rounded == 16
     adjusted = adjusted + carry.to(torch.int64)
     rounded = torch.where(carry, 8, rounded)
     frac = (rounded - 8) & 7
-    saturate = adjusted > 8
-    if not mxu:
-        saturate = saturate | ((adjusted == 8) & (frac == 7))
-    out = torch.where(saturate, (sign << 7) | 0x7E,
+    out = torch.where(adjusted > 8, (sign << 7) | 0x7E,
                       torch.where(adjusted < -6, 0, (sign << 7) | ((adjusted + 7).clamp(0, 15) << 3) | frac))
     out = torch.where((exp == 255) & (mant == 0), (sign << 7) | 0x7E, out)
     out = torch.where((exp == 0) | ((exp == 255) & (mant != 0)), 0, out)
     return out.to(torch.uint8)
 
 
-def unpack_fp8(value: torch.Tensor, scale: int) -> torch.Tensor:
-    """FP8Unpack: E4M3 with an E8M0 scale to BF16, flushing subnormal and NaN inputs. rtl_math.unpack_row."""
-    raw = value.flatten().view(torch.uint8).to(torch.int64)
-    sign, exp, mant = raw >> 7, (raw >> 3) & 15, raw & 7
-    shift = min(127, max(-128, int(scale) - 127))
-    adjusted = exp - 7 + shift + 127
-    zero = (exp == 0) | ((exp == 15) & (mant == 7)) | (adjusted <= 0)
-    out = torch.where(adjusted >= 255, (sign << 15) | 0x7F7F,
-                      (sign << 15) | (adjusted.clamp(0, 255) << 7) | (mant << 4))
-    out = torch.where(zero, sign << 15, out)
-    return _from_bits16(out)
-
-
 class FastRtlNumerics(RtlNumerics):
     """RtlNumerics with the per-element Python loops replaced by tensor code (same bits)."""
 
     @staticmethod
-    def to_fp8(x: torch.Tensor, scale: int) -> torch.Tensor:
-        return pack_fp8(x.flatten(), scale).view(torch.float8_e4m3fn).reshape(x.shape)
-
-    @staticmethod
-    def from_fp8(x: torch.Tensor, scale: int) -> torch.Tensor:
-        return unpack_fp8(x.flatten().view(torch.uint8), scale).reshape(x.shape)
-
-    @staticmethod
     def acc_to_fp8(x: torch.Tensor, scale: int) -> torch.Tensor:
-        return pack_fp8(x.flatten(), scale, mxu=True).view(torch.float8_e4m3fn).reshape(x.shape)
+        return pack_fp8(x.flatten(), scale).view(torch.float8_e4m3fn).reshape(x.shape)
 
     @staticmethod
     def inner_product_matmul(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:

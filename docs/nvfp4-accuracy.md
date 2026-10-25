@@ -128,9 +128,9 @@ The rules follow the published recipes:
   uses blocks of 16 along K, as here.
 - MX scales are 2^ceil(log2(amax_block / max_element)), as ModelOpt sets them
   (`mxfp4_tensor.py`, line 75; `tensor_quant_mx.cu`, `compute_scale_e8m0_NV`).
-- FP8 is Atlas's: `apps/dit/ditflow/quant.py` (`exponent_for`, `to_fp8`), with subnormals flushed in
-  (1) as Atlas's MXU does. Blackwell keeps FP8 subnormals (`fp8_mma.py`, rule 2), so (2) keeps
-  them. The row "(2), subnormals flushed" differs from (1) only in the accumulation and from (2)
+- FP8 is Atlas's: `apps/dit/ditflow/quant.py` (`exponent_for`, `to_fp8`). `quantstudy/formats.py`
+  flushes subnormals in (1) as today's `mxu1` does. Blackwell keeps FP8 subnormals (`fp8_mma.py`,
+  rule 2), so (2) keeps them. The row "(2), subnormals flushed" differs from (1) only in the accumulation and from (2)
   only in the subnormals.
 - Atlas does q, k and v as one GEMM, so they share one weight scale (the maximum of the three) and
   the activation scale.

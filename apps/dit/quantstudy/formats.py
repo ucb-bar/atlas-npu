@@ -75,9 +75,10 @@ def mxfp8(x: torch.Tensor, amax: float = 0.0) -> torch.Tensor:
 
 
 def fp8(x: torch.Tensor, amax: float, margin: float = 1.0, flush: bool = False) -> torch.Tensor:
-    """E4M3 with one power-of-two scale per tensor (ditflow.quant); flush: Atlas's MXU flushes subnormals."""
+    """E4M3 with one power-of-two scale per tensor (ditflow.quant); flush: the v1 mxu1 flushes subnormals."""
     a = quant.exponent_for(amax, margin)
-    return quant.fake(x, a) if flush else e4m3(x * 2.0 ** -a) * 2.0 ** a
+    y = e4m3(x * 2.0 ** -a)
+    return (torch.where(y.abs() < 2.0 ** -6, 0.0, y) if flush else y) * 2.0 ** a
 
 
 def mm(a: torch.Tensor, w: torch.Tensor) -> torch.Tensor:

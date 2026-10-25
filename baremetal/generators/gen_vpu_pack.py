@@ -27,7 +27,7 @@ def main():
     preloads = tensor_preloads(0, INPUT_ROWS)
     checks = []
 
-    packed_rows = run_fp8_pack_rows(LOW_ROWS, HIGH_ROWS, scale_e8m0=0x80)
+    packed_rows = run_fp8_pack_rows(LOW_ROWS, HIGH_ROWS, scale_e8m0=0x7E)
     checks.extend(fp8_checks(64, packed_rows))
 
     unpacked_rows = run_fp8_unpack_rows(packed_rows, scale_e8m0=0x81)

@@ -50,7 +50,7 @@
 #     0x12800  m30/m31  VADD.BF16(VEXP2(A), VRECIP.BF16(A)) 2 KiB
 #     0x13000  m32/m33  VSUB.BF16(VTANH(A), MUL)            2 KiB
 #     0x13800  m34/m35  VREDSUM.ROW.BF16(ADD)               2 KiB
-#     0x14000  m36      VFP8PACK(ADD,    scale=0x7B)        1 KiB
+#     0x14000  m36      VFP8PACK(ADD,    scale=0x83)        1 KiB
 #     0x14400  m38/m39  VFP8UNPACK(PACK, scale=0x86)        2 KiB
 #     0x14C00  m40/m41  VREDSUM.BF16(UNPACK)                2 KiB
 #
@@ -75,7 +75,7 @@
 #   m40/m41 chain col-sum(unpack)
 #
 # Scale registers:
-#   e3 = 0x7B  (pack   scale e8m0)
+#   e3 = 0x83  (pack   scale e8m0)
 #   e4 = 0x86  (unpack scale e8m0)
 
     ADDI  x28, x0, 1
@@ -345,7 +345,7 @@
 
     # FP8 pack / unpack with non-trivial scales hits the saturation,
     # underflow, and clip paths in the dual-path FP8 datapath.
-    seli e3, 0x7B
+    seli e3, 0x83
     seli e4, 0x86
     vpack.bf16.fp8 m36, m30, e3
     DELAY 64

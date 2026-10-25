@@ -26,8 +26,8 @@ Output layout per `FP8Pack.scala:122-125`:
 i.e. inside each 16-bit slot, byte 2j sits in bits[7:0] and byte 2j+1
 sits in bits[15:8] (low byte first within the slot).
 
-Per-byte BF16 → E4M3 conversion lives in `fp8_e4m3.bf16_to_e4m3_byte`,
-already validated against `RVFP8PackTest.goldenFp8ByteFromBf16`.
+Per-byte BF16 → E4M3 conversion lives in `fp8_e4m3.bf16_to_e4m3_byte`:
+E4M3_RN_SATFINITE(x * 2^(scale - 127)).
 
 Use `convert_row(req)` for a pure per-row BF16 → FP8 conversion (16
 bytes out, no latching). Use `pack_two_rows(req_low, req_high)` for
@@ -47,7 +47,7 @@ from ..vector_params import VectorParams
 @dataclass
 class FP8PackReq:
     xVec: list[int]                    # 16 BF16 bit patterns (uint16)
-    expShift: int = 0                  # int8 (post engine-side clamp)
+    scale: int = 127                   # raw e-register value
 
 
 @dataclass
@@ -90,7 +90,7 @@ class FP8Pack:
         n = self.p.num_lanes
         if len(req.xVec) != n:
             raise ValueError(f"xVec must have {n} lanes, got {len(req.xVec)}")
-        return [fp8.bf16_to_e4m3_byte(x, req.expShift) for x in req.xVec]
+        return [fp8.bf16_to_e4m3_byte(x, req.scale) for x in req.xVec]
 
     def pack_two_rows(
         self, req_low: FP8PackReq, req_high: FP8PackReq

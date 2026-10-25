@@ -1,7 +1,7 @@
 """FastRtlNumerics against npu_model's element-wise RTL models, bit for bit."""
 import torch
 
-from ditflow.numerics import ipt_matmul, pack_fp8, unpack_fp8
+from ditflow.numerics import ipt_matmul, pack_fp8
 from npu_model.configs import rtl_math
 
 SPECIAL_FP8 = [0x00, 0x80, 0x01, 0x07, 0x08, 0x7E, 0x7F, 0xFE, 0xFF, 0x38, 0xB8, 0x40]
@@ -53,11 +53,7 @@ def test_ipt_matmul_cancellation_and_zero_rows():
     assert _bits(fast) == _bits(ref)
 
 
-def test_pack_unpack_exhaustive():
+def test_pop_fp8_exhaustive():
     every_bf16 = torch.arange(65536, dtype=torch.int32).to(torch.int16).view(torch.bfloat16)
-    every_fp8 = torch.arange(256, dtype=torch.int32).to(torch.uint8)
     for scale in (0, 1, 100, 119, 127, 130, 135, 150, 254, 255):
-        for mxu in (False, True):
-            assert pack_fp8(every_bf16, scale, mxu=mxu).tolist() == \
-                rtl_math.pack_row(every_bf16, scale, mxu=mxu).tolist(), (scale, mxu)
-        assert _bits(unpack_fp8(every_fp8, scale)) == _bits(rtl_math.unpack_row(every_fp8, scale)), scale
+        assert pack_fp8(every_bf16, scale).tolist() == rtl_math.pack_row(every_bf16, scale).tolist(), scale

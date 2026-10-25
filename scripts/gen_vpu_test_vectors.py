@@ -30,9 +30,11 @@ from pathlib import Path
 
 # Put baremetal/generators on sys.path so `software_models.vpu...` resolves
 # exactly the way `scripts/gen_mxu_vectors.py` reaches `software_models.mxu*`.
+# The FP8 lane boxes use npu-model's conversions (npu_model.configs.cvt).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _GENERATORS_DIR = _REPO_ROOT / "baremetal" / "generators"
 sys.path.insert(0, str(_GENERATORS_DIR))
+sys.path.insert(0, str(_REPO_ROOT / "npu-model"))
 
 from software_models.vpu.gen_vectors import main as gen_vectors_main  # noqa: E402
 

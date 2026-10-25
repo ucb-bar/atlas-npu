@@ -11,7 +11,7 @@ Cycle accounting (mirrors `FP8Unpack.scala:40-128`):
     cycle K    : req=packed → reqQ.enq.fire (deq still false this cycle)
     cycle K+1  : state=sIdle, reqQ.deq.valid → consume from queue,
                                                 inputBuf := xVec.asUInt,
-                                                expBuf   := expShift,
+                                                scaleBuf := scale,
                                                 state    := sLow
     cycle K+2  : state=sLow, io.resp.valid=1, output = convert(low half)
                                               state.next = sHigh
@@ -26,10 +26,8 @@ and `sHigh`, so a back-to-back stream of inputs reaches an equilibrium
 of one dequeue every two cycles (matching the 1-input → 2-output
 expansion).
 
-Subnormal FP8 inputs **and** the reserved NaN encoding (`exp=0xF,
-mant=0x7`) flush to **signed zero** — the MXU dequant policy. The
-per-byte conversion lives in `fp8_e4m3.e4m3_byte_to_bf16`, already
-validated against `RVFP8UnpackTest.scala`'s golden.
+Each byte converts as BF16_RNE(x * 2^(scale - 127)); the per-byte
+conversion lives in `fp8_e4m3.e4m3_byte_to_bf16`.
 
 Use `unpack_low_row(req)` / `unpack_high_row(req)` for pure per-half
 conversion (no FSM, no queue). Use `unpack_both_rows(req)` for the
@@ -61,7 +59,7 @@ _QUEUE_DEPTH = 32
 @dataclass
 class FP8UnpackReq:
     xVec: list[int]                     # 16 UInt16 slots; low byte = byte 2j
-    expShift: int = 0                   # int8 (post engine-side clamp)
+    scale: int = 127                    # raw e-register value
 
 
 @dataclass
@@ -75,7 +73,7 @@ class FP8Unpack:
 
     Visible latency = 2 (one cycle for the queue's enq→deq latency,
     one cycle for the `state := sLow` register update). The class is
-    stateful: `_state`, `_input_buf`, `_exp_buf`, and `_queue` mirror
+    stateful: `_state`, `_input_buf`, `_scale_buf`, and `_queue` mirror
     the four pieces of register state in the Scala module.
     """
 
@@ -87,8 +85,8 @@ class FP8Unpack:
         self._state: str = "idle"             # "idle" | "low" | "high"
         # `inputBuf = Reg(UInt(256.W))` — modelled as a flat 32-byte list.
         self._input_buf: list[int] = [0] * (2 * p.num_lanes)
-        # `expBuf = Reg(SInt(8.W))` — int8 holding the post-clamp scale.
-        self._exp_buf: int = 0
+        # `scaleBuf = Reg(UInt(8.W))` — the raw e-register value.
+        self._scale_buf: int = 127
         # `Queue(FP8UnpackReq, 32)` with default `pipe=false flow=false`,
         # i.e. enqueue at cycle K is visible on deq starting cycle K+1.
         # We model that 1-cycle latency by appending to _queue at the END
@@ -98,7 +96,7 @@ class FP8Unpack:
     def reset(self) -> None:
         self._state = "idle"
         self._input_buf = [0] * (2 * self.p.num_lanes)
-        self._exp_buf = 0
+        self._scale_buf = 127
         self._queue.clear()
 
     # ------------------------------------------------------------
@@ -109,14 +107,14 @@ class FP8Unpack:
         """Convert the low half of one packed row to 16 BF16 values."""
         bytes_low, _ = self._unpack_xvec(req.xVec)
         return FP8UnpackResp(result=[
-            fp8.e4m3_byte_to_bf16(b, req.expShift) for b in bytes_low
+            fp8.e4m3_byte_to_bf16(b, req.scale) for b in bytes_low
         ])
 
     def unpack_high_row(self, req: FP8UnpackReq) -> FP8UnpackResp:
         """Convert the high half of one packed row to 16 BF16 values."""
         _, bytes_high = self._unpack_xvec(req.xVec)
         return FP8UnpackResp(result=[
-            fp8.e4m3_byte_to_bf16(b, req.expShift) for b in bytes_high
+            fp8.e4m3_byte_to_bf16(b, req.scale) for b in bytes_high
         ])
 
     def unpack_both_rows(
@@ -139,7 +137,7 @@ class FP8Unpack:
             else self._input_buf[self.p.num_lanes :]
         )
         return FP8UnpackResp(result=[
-            fp8.e4m3_byte_to_bf16(b, self._exp_buf) for b in bytes_view
+            fp8.e4m3_byte_to_bf16(b, self._scale_buf) for b in bytes_view
         ])
 
     # ------------------------------------------------------------
@@ -151,7 +149,7 @@ class FP8Unpack:
     ) -> Optional[FP8UnpackResp]:
         """Cycle-accurate step. Returns whatever `io.resp` shows at
         the START of this cycle (combinational over `_state`,
-        `_input_buf`, `_exp_buf`). At the END of the cycle the FSM
+        `_input_buf`, `_scale_buf`). At the END of the cycle the FSM
         advances and any new request is enqueued (visible on the next
         cycle's dequeue, mirroring the Chisel `Queue`'s 1-cycle
         enq→deq latency).
@@ -200,12 +198,12 @@ class FP8Unpack:
 
     def _consume_from_queue(self) -> None:
         """Dequeue one request and load it into `_input_buf` /
-        `_exp_buf`. Mirrors `inputBuf := reqQ.io.deq.bits.xVec.asUInt;
-        expBuf := reqQ.io.deq.bits.expShift` in Scala."""
+        `_scale_buf`. Mirrors `inputBuf := reqQ.io.deq.bits.xVec.asUInt;
+        scaleBuf := reqQ.io.deq.bits.scale` in Scala."""
         next_req = self._queue.popleft()
         bytes_low, bytes_high = self._unpack_xvec(next_req.xVec)
         self._input_buf = list(bytes_low) + list(bytes_high)
-        self._exp_buf = next_req.expShift
+        self._scale_buf = next_req.scale
 
     def _unpack_xvec(
         self, x_vec: list[int]

@@ -49,16 +49,6 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   val writeData1   = Wire(UInt(256.W))
   val writeData2   = Wire(UInt(256.W))
 
-  // Convert raw E8M0 into a clamped signed scale exponent.
-  private def e8m0ToScaleExpClamped(scaleE8M0: UInt): SInt = {
-    val scaleExpWide = scaleE8M0.zext -& 127.S(9.W)
-    val scaleExp     = Wire(SInt(8.W))
-    when(scaleExpWide > 127.S)           { scaleExp := 127.S }
-      .elsewhen(scaleExpWide < (-128).S) { scaleExp := (-128).S }
-      .otherwise                         { scaleExp := scaleExpWide(7, 0).asSInt }
-    scaleExp
-  }
-
 	// FSM
 	val fsm = Module(new VectorFSM(p))
 
@@ -242,20 +232,15 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   sqcb.io.req.bits.isCube       := isCubeValid
 
   // ── FP8 pack/unpack ──
-  val fp8packScaleE8M0Sel   = Mux(isFp8pack1,   fsm.io.out.packScale1,   fsm.io.out.packScale2)
-  val fp8unpackScaleE8M0Sel = Mux(isFp8unpack1, fsm.io.out.unpackScale1, fsm.io.out.unpackScale2)
-  val fp8packScaleExpSel    = e8m0ToScaleExpClamped(fp8packScaleE8M0Sel)
-  val fp8unpackScaleExpSel  = e8m0ToScaleExpClamped(fp8unpackScaleE8M0Sel)
-
   val fp8pack = Module(new FP8Pack(p.BF16))
-  fp8pack.io.req.valid         := isFp8packValid
-  fp8pack.io.req.bits.xVec     := Mux(isFp8pack1, vector1, vector2)
-  fp8pack.io.req.bits.expShift := fp8packScaleExpSel
+  fp8pack.io.req.valid      := isFp8packValid
+  fp8pack.io.req.bits.xVec  := Mux(isFp8pack1, vector1, vector2)
+  fp8pack.io.req.bits.scale := Mux(isFp8pack1, fsm.io.out.packScale1, fsm.io.out.packScale2)
 
   val fp8unpack = Module(new FP8Unpack(p.BF16))
-  fp8unpack.io.req.valid         := isFp8unpackValid
-  fp8unpack.io.req.bits.xVec     := Mux(isFp8unpack1, vector1, vector2)
-  fp8unpack.io.req.bits.expShift := fp8unpackScaleExpSel
+  fp8unpack.io.req.valid      := isFp8unpackValid
+  fp8unpack.io.req.bits.xVec  := Mux(isFp8unpack1, vector1, vector2)
+  fp8unpack.io.req.bits.scale := Mux(isFp8unpack1, fsm.io.out.unpackScale1, fsm.io.out.unpackScale2)
 
   val relu = Module(new Relu(p.BF16))
   relu.io.req.valid         := isReluValid

@@ -2,7 +2,8 @@
 
 A tensor with scale exponent a is stored as FP8(x / 2**a). Atlas applies 2**a exactly: in a
 scale register for vmatpop.fp8 (raw value 127 - a), or as a multiply by a power-of-two BF16 tile
-after a matmul. Its MXU treats FP8 subnormals as zero, so the quantizer flushes them too.
+after a matmul. The quantizer keeps E4M3 subnormals, as the Blackwell conversion does
+(cvt.rn.satfinite.e4m3x2.f32, ISA v2 section 5.2).
 
 Weights get their exponent from their own maximum; activations get it from calibration: the
 largest magnitude each matmul input reaches over the sampler's trajectory on a few random
@@ -26,10 +27,8 @@ def exponent_for(amax: float, margin: float = 1.0) -> int:
 
 
 def to_fp8(x: torch.Tensor, a: int) -> torch.Tensor:
-    """FP8 codes (uint8) of x / 2**a: round to nearest even, saturate at 448, flush subnormals."""
-    y = (x.float() * 2.0 ** -a).clamp(-FP8_MAX, FP8_MAX).to(torch.float8_e4m3fn)
-    codes = y.view(torch.uint8)
-    return torch.where((codes & 0x78) == 0, torch.zeros_like(codes), codes)
+    """FP8 codes (uint8) of x / 2**a: round to nearest even, saturate at 448."""
+    return (x.float() * 2.0 ** -a).clamp(-FP8_MAX, FP8_MAX).to(torch.float8_e4m3fn).view(torch.uint8)
 
 
 def from_fp8(codes: torch.Tensor, a: int) -> torch.Tensor:

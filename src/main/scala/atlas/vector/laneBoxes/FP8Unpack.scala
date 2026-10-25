@@ -9,18 +9,18 @@
 //   resp valid 0 → convert low 16 bytes → 16 BF16 values
 //   resp valid 1 → convert high 16 bytes → 16 BF16 values
 //
-// Subnormals and the reserved NaN encoding are flushed to signed zero,
-// matching the MXU dequant policy.
+// Each byte converts as BF16_RNE(x * 2^(scale - 127)) (Cvt.bf16Rne).
 // ============================================================================
 
 package atlas.vector
 
 import chisel3._
 import chisel3.util._
+import atlas.common.Cvt
 import sp26FPUnits._
 
 class FP8UnpackReq(wordWidth: Int, numLanes: Int) extends Bundle {
-  val expShift = SInt(8.W)
+  val scale    = UInt(8.W)
   val xVec     = Vec(numLanes, UInt(wordWidth.W))
 }
 
@@ -41,7 +41,7 @@ class FP8Unpack(BF16T: AtlasFPType, numLanes: Int = 16)
   val sIdle :: sLow :: sHigh :: Nil = Enum(3)
   val state     = RegInit(sIdle)
   val inputBuf  = Reg(UInt(256.W))
-  val expBuf    = Reg(SInt(8.W))
+  val scaleBuf  = Reg(UInt(8.W))
 
   // Buffer incoming packed rows so the VPU can stream mreg reads at line rate
   // without any external backpressure, even though each unpacked row takes
@@ -64,40 +64,7 @@ class FP8Unpack(BF16T: AtlasFPType, numLanes: Int = 16)
   }
 
   // ── Per-lane FP8 → BF16 conversion (combinational) ─────────────
-  val outVec = Wire(Vec(numLanes, UInt(BF16T.wordWidth.W)))
-
-  for (i <- 0 until numLanes) {
-    val fp8     = fp8Bytes(i)
-    val sign    = fp8(7)
-    val expFP8  = fp8(6, 3)
-    val mantFP8 = fp8(2, 0)
-
-    val isZero = (expFP8 === 0.U) && (mantFP8 === 0.U)
-    val isSub  = (expFP8 === 0.U) && (mantFP8 =/= 0.U)
-    val isNaN  = (expFP8 === "hf".U) && (mantFP8 === "h7".U)
-
-    val bf16 = Wire(UInt(16.W))
-    bf16 := 0.U
-
-    when(isZero || isSub || isNaN) {
-      bf16 := Cat(sign, 0.U(15.W))
-    }.otherwise {
-      val unbExpFP8   = expFP8.zext - 7.S(10.W)
-      val scaleWide   = expBuf.pad(10)
-      val unbExpBF16  = unbExpFP8 + scaleWide
-      val expBF16Wide = unbExpBF16 + 127.S(10.W)
-
-      when(expBF16Wide <= 0.S) {
-        bf16 := Cat(sign, 0.U(15.W))
-      }.elsewhen(expBF16Wide >= 255.S) {
-        bf16 := Mux(sign.asBool, "hff7f".U(16.W), "h7f7f".U(16.W))
-      }.otherwise {
-        val fracBF16 = Cat(mantFP8, 0.U(4.W))
-        bf16 := Cat(sign, expBF16Wide(7, 0), fracBF16)
-      }
-    }
-    outVec(i) := bf16
-  }
+  val outVec = VecInit(fp8Bytes.map(x => Cvt.bf16Rne(Cvt.e4m3ToF32(x), scaleBuf)))
 
   // ── Control ────────────────────────────────────────────────────
   io.resp.valid := (state === sLow) || (state === sHigh)
@@ -108,7 +75,7 @@ class FP8Unpack(BF16T: AtlasFPType, numLanes: Int = 16)
       when(reqQ.io.deq.valid) {
         reqQ.io.deq.ready := true.B
         inputBuf := reqQ.io.deq.bits.xVec.asUInt
-        expBuf   := reqQ.io.deq.bits.expShift
+        scaleBuf := reqQ.io.deq.bits.scale
         state    := sLow
       }
     }
@@ -119,7 +86,7 @@ class FP8Unpack(BF16T: AtlasFPType, numLanes: Int = 16)
       when(reqQ.io.deq.valid) {
         reqQ.io.deq.ready := true.B
         inputBuf := reqQ.io.deq.bits.xVec.asUInt
-        expBuf   := reqQ.io.deq.bits.expShift
+        scaleBuf := reqQ.io.deq.bits.scale
         state    := sLow
       }.otherwise {
         state := sIdle

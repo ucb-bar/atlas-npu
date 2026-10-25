@@ -94,7 +94,8 @@ $(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S atlas_asm.py $(wildcard \
 	fi; \
 	if [ -f "$(GEN_DIR)/gen_$$BASE.py" ]; then \
 		echo "--> Using generator gen_$$BASE.py for test $*"; \
-		$(PYTHON) $(GEN_DIR)/gen_$$BASE.py > $(GEN_DIR)/$*.json; \
+		PYTHONPATH="$(abspath $(NPU_MODEL_DIR))$${PYTHONPATH:+:$$PYTHONPATH}" \
+			$(PYTHON) $(GEN_DIR)/gen_$$BASE.py > $(GEN_DIR)/$*.json; \
 		$(ATLAS_ASSEMBLER_RUN) atlas_asm.py $< \
 			--out-c $@ \
 			--golden-json $(GEN_DIR)/$*.json; \

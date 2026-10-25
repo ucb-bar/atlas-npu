@@ -62,6 +62,8 @@
     LI    x7, 2048
     seld e0, x7
     DELAY 2
+    # vpack multiplies by 2^(0x80 - 127), the inverse of the vunpack scale.
+    seli e1, 0x80
 
     # ------------------------------------------------------------------
     # Stage FP8 tiles into MREGs
@@ -93,7 +95,7 @@
     vrelu.bf16 m12, m8
     DELAY 64
 
-    vpack.bf16.fp8 m16, m12, e0
+    vpack.bf16.fp8 m16, m12, e1
     DELAY 64
 
     vunpack.fp8.bf16 m20, m16, e0
