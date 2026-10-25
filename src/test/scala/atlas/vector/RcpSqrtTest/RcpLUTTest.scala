@@ -70,7 +70,7 @@ class RcpLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
   }
   //----------- CI/CD INCLUDE --------------
 
-  it should "Print values of RcpLUT ranging from 0.5 to 1.0" in {
+  it should "give 1/x for x in (-4, -2]" in {
     val rawExp = 128
     val isOddExp = (((rawExp - 127) & 1) === 1)
     PersistentVcsRcpLUTSimulator.simulate(new RcpLUT(16, 7, 9, 12)) { module =>
@@ -97,6 +97,9 @@ class RcpLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
         }
 
         printBF16Array(bf16Shorts, false)
+        val expected = goldenRcpSqrtVector(Array.tabulate(16)(k => (0x8000 | (rawExp << 7) | (i * 16 + k)).toShort), false)
+        printBF16Array(expected, true)
+        checkVectorTolerance(bf16Shorts, expected) shouldBe true
       }
     }.result
   }

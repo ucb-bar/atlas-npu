@@ -70,7 +70,7 @@ class LogLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
   }
   //----------- CI/CD INCLUDE --------------
 
-  it should "Print values of LogLUT ranging from 0.5 to 1.0" in {
+  it should "give log2(x) for x in [0.25, 0.5)" in {
     val rawExp = 125
     val isOddExp = (((rawExp - 127) & 1) === 1)
     PersistentVcsLogLUTSimulator.simulate(new LogLUT(16, 7, 9, 12)) { module =>
@@ -96,6 +96,9 @@ class LogLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
         }
 
         printBF16Array(bf16Shorts, false)
+        val expected = goldenLogVector(Array.tabulate(16)(k => ((rawExp << 7) | (i * 16 + k)).toShort))
+        printBF16Array(expected, true)
+        checkVectorTolerance(bf16Shorts, expected) shouldBe true
       }
     }.result
   }

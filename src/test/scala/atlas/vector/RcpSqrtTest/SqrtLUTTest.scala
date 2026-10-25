@@ -70,7 +70,7 @@ class SqrtLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pe
   }
   //----------- CI/CD INCLUDE --------------
 
-  it should "Print values of SqrtLUT ranging from 1.0 to 2.0" in {
+  it should "give sqrt(x) for x in [2^13, 2^14)" in {
     val rawExp = 140
     val isOddExp = (((rawExp - 127) & 1) === 1)
     PersistentVcsSqrtLUTSimulator.simulate(new SqrtLUT(16, 7, 9, 12)) { module =>
@@ -97,6 +97,9 @@ class SqrtLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pe
         }
 
         printBF16Array(bf16Shorts, false)
+        val expected = goldenRcpSqrtVector(Array.tabulate(16)(k => ((rawExp << 7) | (i * 16 + k)).toShort), true)
+        printBF16Array(expected, true)
+        checkVectorTolerance(bf16Shorts, expected) shouldBe true
       }
     }.result
   }
