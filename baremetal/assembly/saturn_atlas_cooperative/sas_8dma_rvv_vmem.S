@@ -48,11 +48,11 @@
 
     # ── Phase marker 10: configured, round_loop entry ──
     ADDI  x1, x0, 10
-    csrrw x0, 0xC10, x1            # dbg0 = 10
+    csrrw x0, 0x800, x1            # dbg0 = 10
 
 round_loop:
     # dbg1 = current round number (host can read post-mortem)
-    csrrw x0, 0xC11, x28
+    csrrw x0, 0x801, x28
 
 # ── Phase 1: 8-channel DMA.LOAD burst (DRAM IN → VMEM banks) ──────────
 
@@ -90,7 +90,7 @@ round_loop:
 
     # ── Phase marker 20: 8 DMA.LOADs enqueued, before WAITs ──
     ADDI  x1, x0, 20
-    csrrw x0, 0xC10, x1
+    csrrw x0, 0x800, x1
 
     # Drain all 8 channels.
     dma.wait ch0
@@ -104,7 +104,7 @@ round_loop:
 
     # ── Phase marker 30: all DMA.LOADs drained ──
     ADDI  x1, x0, 30
-    csrrw x0, 0xC10, x1
+    csrrw x0, 0x800, x1
 
 # ── Phase 2: 8-channel DMA.STORE burst (VMEM banks → DRAM OUT) ────────
 
@@ -142,7 +142,7 @@ round_loop:
 
     # ── Phase marker 40: 8 DMA.STOREs enqueued, before WAITs ──
     ADDI  x1, x0, 40
-    csrrw x0, 0xC10, x1
+    csrrw x0, 0x800, x1
 
     dma.wait ch0
     dma.wait ch1
@@ -155,7 +155,7 @@ round_loop:
 
     # ── Phase marker 50: all DMA.STOREs drained, end of round ──
     ADDI  x1, x0, 50
-    csrrw x0, 0xC10, x1
+    csrrw x0, 0x800, x1
 
     # Outer round loop counter.
     ADDI  x28, x28, 1
@@ -168,5 +168,5 @@ round_loop:
 # completion. dbg1 holds the last round counter for further diagnostics.)
 
     LI    x30, 1
-    csrrw x0, 0xC10, x30
+    csrrw x0, 0x800, x30
     ECALL

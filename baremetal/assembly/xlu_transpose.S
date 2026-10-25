@@ -103,10 +103,10 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL
     

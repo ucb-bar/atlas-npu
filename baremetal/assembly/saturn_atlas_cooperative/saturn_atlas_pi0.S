@@ -23,7 +23,7 @@
 # @TIMEOUT 200000
 
 _start:
-    csrrs x1, 0xC11, x0              # x1 = dbg1 (phase selector)
+    csrrs x1, 0x801, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
     NOP
     JAL   x0, phase_1
@@ -61,7 +61,7 @@ p0_k_loop:
     NOP
 
     ADDI  x1, x0, 1
-    csrrw x0, 0xC10, x1              # dbg0 = 1 (phase 0 done)
+    csrrw x0, 0x800, x1              # dbg0 = 1 (phase 0 done)
     ECALL
 
 # ── Phase 1: result[i] = Q'[i] XOR K'[i]; running checksum ─────────────────
@@ -93,5 +93,5 @@ p1_loop:
     DELAY 1
 
     ADDI  x1, x0, 2
-    csrrw x0, 0xC10, x1              # dbg0 = 2 (PASS)
+    csrrw x0, 0x800, x1              # dbg0 = 2 (PASS)
     ECALL

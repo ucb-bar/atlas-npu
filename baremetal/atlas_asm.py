@@ -245,7 +245,7 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
         perf_report: if True, emit the perf printout (dbg1_cycles + per-MXU
             MAC-based util) WITHOUT gating pass/fail on utilization. Implied
             when perf_threshold is set. Use for tests that bank a timed-window
-            cycle delta into CSR_DBG1 (CSRW ..., 0xC11) but rely on golden
+            cycle delta into CSR_DBG1 (CSRRW ..., 0x801) but rely on golden
             DRAM comparison for pass/fail.
         perf_macs_mxu1: total MACs issued to MXU1 in the timed window, or None.
     """

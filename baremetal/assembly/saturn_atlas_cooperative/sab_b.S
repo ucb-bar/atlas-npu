@@ -19,10 +19,10 @@ _start:
     NOP
 
     ADDI  x1, x0, 2
-    csrrw x0, 0xC10, x1                 # dbg0 = 2 PASS
+    csrrw x0, 0x800, x1                 # dbg0 = 2 PASS
     ECALL
 
 b_fail:
     LI    x1, 0xBAD
-    csrrw x0, 0xC10, x1                 # dbg0 = 0xBAD
+    csrrw x0, 0x800, x1                 # dbg0 = 0xBAD
     ECALL

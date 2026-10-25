@@ -126,11 +126,11 @@
     ADDI  x28, x28, 1
 
 pass:
-    CSRRW x0, 0xC11, x26       # write cumulative timed cycles to CSR_DBG1
+    CSRRW x0, 0x801, x26       # write cumulative timed cycles to CSR_DBG1
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL

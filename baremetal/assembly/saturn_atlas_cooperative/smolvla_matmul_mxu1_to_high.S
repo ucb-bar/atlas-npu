@@ -1,7 +1,7 @@
 # smolvla_matmul_mxu1_to_high.S — JAL-to-upper-IMEM variant of smolvla_matmul_mxu1
 #
 # Identical body to smolvla_matmul_mxu1.S through the final DMA.STORE + DMA.WAIT,
-# then replaces the pass: {ADDI x1,x0,1 ; CSRRW x0,0xC10,x1 ; ECALL} block with
+# then replaces the pass: {ADDI x1,x0,1 ; CSRRW x0,0x800,x1 ; ECALL} block with
 # a word-indexed JALR to byte 0x10000 (word 0x4000) so the next kernel staged
 # into the upper IMEM half runs without halting.
 #
@@ -84,5 +84,5 @@ to_high:
     NOP
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL

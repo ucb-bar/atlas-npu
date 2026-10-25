@@ -13,8 +13,8 @@ dma.config x5, ch0
 dma.load x6, x10, x12, ch0
 dma.store x10, x6, x12, ch1
 dma.wait ch1
-csrrw x0, 0xC10, x7
-csrrs x7, 0xC10, x0
+csrrw x0, 0x800, x7
+csrrs x7, 0x800, x0
 vmatpop.fp8.acc.mxu1 m4, acc0, e0
 ```
 
@@ -42,4 +42,4 @@ Pair-based BF16 VPU operations require even source and destination banks. Two re
 
 The Atlas harness recognizes `# @DRAM_BASE`, `# @DRAM`, and `# @CHECK_DRAM` annotations. Generator JSON supplies `dram_preloads` and `dram_checks`; a JSON entry's DRAM base takes precedence over the source annotation, which takes precedence over the CLI default. Every DMA load needs data from JSON or inline `@DRAM` annotations.
 
-The harness uploads the assembled program, starts Atlas, and polls `DBG0` with a bound. A completed run passes when `DBG0` is `1`; a nonzero failure code or a poll timeout fails the test. Preserve the standard CSR `0xC10` pass/fail epilogue and `ecall`.
+The harness uploads the assembled program, starts Atlas, and polls `DBG0` with a bound. A completed run passes when `DBG0` is `1`; a nonzero failure code or a poll timeout fails the test. Preserve the standard CSR `0x800` pass/fail epilogue and `ecall`.

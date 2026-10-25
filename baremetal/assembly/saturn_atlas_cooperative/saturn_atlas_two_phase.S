@@ -21,7 +21,7 @@
 # @TIMEOUT 200000
 
 _start:
-    csrrs x1, 0xC11, x0              # x1 = dbg1 (phase selector)
+    csrrs x1, 0x801, x0              # x1 = dbg1 (phase selector)
     BEQ   x1, x0, phase_0
     NOP
     JAL   x0, phase_1
@@ -43,7 +43,7 @@ p0_loop:
     NOP
 
     ADDI  x1, x0, 1
-    csrrw x0, 0xC10, x1              # dbg0 = 1 (phase 0 done)
+    csrrw x0, 0x800, x1              # dbg0 = 1 (phase 0 done)
     ECALL
 
 phase_1:
@@ -64,10 +64,10 @@ p1_loop:
     NOP
 
     ADDI  x1, x0, 2
-    csrrw x0, 0xC10, x1              # dbg0 = 2 (PASS)
+    csrrw x0, 0x800, x1              # dbg0 = 2 (PASS)
     ECALL
 
 p1_fail:
     ADDI  x8, x4, 100            # dbg0 = 100 + failing i
-    csrrw x0, 0xC10, x8
+    csrrw x0, 0x800, x8
     ECALL

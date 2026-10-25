@@ -152,7 +152,7 @@ def golden(out: Path) -> None:
     c = saved["compiled"]
     sim = FuncSim(c.source, c.blobs, 64 << 20)
     t0 = time.time()
-    sim.run(progress=lambda n, s, st: print(f"  {n} instructions, {s:.0f} s, step {st.read_csrf(0xC11)}", flush=True))
+    sim.run(progress=lambda n, s, st: print(f"  {n} instructions, {s:.0f} s, step {st.read_csrf(0x801)}", flush=True))
     res = C.read_outputs(c, sim.read_dram)
     res.update(_policy_cond(c, saved, sim.read_dram))
     res.update({"instructions": sim.executed, "seconds": time.time() - t0})

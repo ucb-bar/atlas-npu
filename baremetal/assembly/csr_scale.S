@@ -5,27 +5,27 @@
 
 # ── Test 1: CSRRW write and read-back via DBG1 ──────────
     ADDI  x1, x0, 0x42
-    CSRRW x0, 0xC11, x1
-    CSRRS x2, 0xC11, x0
+    CSRRW x0, 0x801, x1
+    CSRRS x2, 0x801, x0
     ADDI  x30, x0, 0x42
     BNE   x2, x30, fail
     NOP
-    CSRRW x0, 0xC11, x0
+    CSRRW x0, 0x801, x0
     ADDI  x28, x28, 1
 
 # ── Test 2: CSRRS set-bits on DBG1 ─────────────────────
     ADDI  x1, x0, 0x0F
-    CSRRW x0, 0xC11, x1
+    CSRRW x0, 0x801, x1
     ADDI  x3, x0, 0x30
-    CSRRS x2, 0xC11, x3
+    CSRRS x2, 0x801, x3
     ADDI  x30, x0, 0x0F
     BNE   x2, x30, fail
     NOP
-    CSRRS x4, 0xC11, x0
+    CSRRS x4, 0x801, x0
     ADDI  x30, x0, 0x3F
     BNE   x4, x30, fail
     NOP
-    CSRRW x0, 0xC11, x0
+    CSRRW x0, 0x801, x0
     ADDI  x28, x28, 1
 
 # ── Test 3: SELI writes don't crash ─────────────────────
@@ -50,10 +50,10 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL
     

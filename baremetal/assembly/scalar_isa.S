@@ -12,7 +12,7 @@
 #   Branches   : BLT, BGE, BLTU, BGEU
 #
 # Convention (AssemblyTestRunner):
-#   DBG0 (CSR 0xC10) = 0x01  → PASS
+#   DBG0 (CSR 0x800) = 0x01  → PASS
 #   DBG0 = any other nonzero → FAIL (value encodes which test)
 #   Terminate with  JAL x0, 0  after writing DBG0.
 #
@@ -259,50 +259,50 @@
     OR      x30, x30, x3
 
 # ================================================================
-#  5. CSR TESTS  (using DBG1 @ 0xC11, which is RW)
+#  5. CSR TESTS  (using DBG1 @ 0x801, which is RW)
 # ================================================================
-# NOTE: DBG0 (0xC10) is reserved for the pass/fail protocol,
-# so all CSR read-modify-write tests use DBG1 (0xC11) instead.
+# NOTE: DBG0 (0x800) is reserved for the pass/fail protocol,
+# so all CSR read-modify-write tests use DBG1 (0x801) instead.
 
 # ---- CSRRWI -----------------------------------------------------
-    CSRRW   x0, 0xC11, x0          # clear DBG1 to 0   (setup)
-    CSRRWI  x3, 0xC11, 21          # old=0→x3; DBG1=21
+    CSRRW   x0, 0x801, x0          # clear DBG1 to 0   (setup)
+    CSRRWI  x3, 0x801, 21          # old=0→x3; DBG1=21
     OR      x30, x30, x3           # x3 must be 0
-    CSRRS   x4, 0xC11, x0          # readback DBG1
+    CSRRS   x4, 0x801, x0          # readback DBG1
     ADDI    x29, x0, 21
     XOR     x4, x4, x29
     OR      x30, x30, x4
 
 # ---- CSRRSI -----------------------------------------------------
     # DBG1 = 21 = 0b10101
-    CSRRSI  x3, 0xC11, 10          # old=21→x3; DBG1=21|10=31
+    CSRRSI  x3, 0x801, 10          # old=21→x3; DBG1=21|10=31
     ADDI    x29, x0, 21
     XOR     x3, x3, x29
     OR      x30, x30, x3
-    CSRRS   x4, 0xC11, x0          # readback DBG1 = 31
+    CSRRS   x4, 0x801, x0          # readback DBG1 = 31
     ADDI    x29, x0, 31
     XOR     x4, x4, x29
     OR      x30, x30, x4
 
 # ---- CSRRCI -----------------------------------------------------
     # DBG1 = 31 = 0b11111
-    CSRRCI  x3, 0xC11, 15          # old=31→x3; DBG1=31&~15=16
+    CSRRCI  x3, 0x801, 15          # old=31→x3; DBG1=31&~15=16
     ADDI    x29, x0, 31
     XOR     x3, x3, x29
     OR      x30, x30, x3
-    CSRRS   x4, 0xC11, x0          # readback DBG1 = 16
+    CSRRS   x4, 0x801, x0          # readback DBG1 = 16
     ADDI    x29, x0, 16
     XOR     x4, x4, x29
     OR      x30, x30, x4
 
 # ---- CSRRC ------------------------------------------------------
-    CSRRWI  x0, 0xC11, 31          # DBG1 = 0x1F   (setup)
+    CSRRWI  x0, 0x801, 31          # DBG1 = 0x1F   (setup)
     ADDI    x1, x0, 0x0F           # bits to clear
-    CSRRC   x3, 0xC11, x1          # old=31→x3; DBG1=31&~15=16
+    CSRRC   x3, 0x801, x1          # old=31→x3; DBG1=31&~15=16
     ADDI    x29, x0, 31
     XOR     x3, x3, x29
     OR      x30, x30, x3
-    CSRRS   x4, 0xC11, x0          # readback DBG1 = 16
+    CSRRS   x4, 0x801, x0          # readback DBG1 = 16
     ADDI    x29, x0, 16
     XOR     x4, x4, x29
     OR      x30, x30, x4
@@ -505,10 +505,10 @@ ebreak_skip:
     BEQ     x30, x0, all_pass
     NOP
     # ── FAIL path ──
-    csrrw x0, 0xC10, x30              # DBG0 = fail flags (nonzero != 1)
+    csrrw x0, 0x800, x30              # DBG0 = fail flags (nonzero != 1)
     ECALL
 
 all_pass:
     ADDI    x1, x0, 1
-    csrrw x0, 0xC10, x1               # DBG0 = 1 (PASS)
+    csrrw x0, 0x800, x1               # DBG0 = 1 (PASS)
     ECALL

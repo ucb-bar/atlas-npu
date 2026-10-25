@@ -80,12 +80,12 @@
 # ═══════════════════════════════════════════════════════════════
     csrrs x21, 0xC00, x0                # x21 = cycle count at end
     SUB   x22, x21, x20             # x22 = end - start
-    csrrw x0, 0xC11, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
+    csrrw x0, 0x801, x22                # stash delta in CSR_DBG1 (host reads @ 0x14)
 
 # ═══════════════════════════════════════════════════════════════
 # DONE — host reads the mcycles delta from CSR_DBG1 @ 0x14 and the
 #        mxu1_busy counter (docs/perf-counters.md)
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    csrrw x0, 0xC10, x30
+    csrrw x0, 0x800, x30
     ECALL

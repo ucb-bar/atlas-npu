@@ -8,5 +8,5 @@
     ADDI  x5, x0, 0
     CSRRS x2, 0xCC0, x5
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL

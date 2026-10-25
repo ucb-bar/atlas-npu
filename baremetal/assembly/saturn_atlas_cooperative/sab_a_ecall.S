@@ -21,5 +21,5 @@ a_busy:
     DELAY 1
 
     ADDI  x1, x0, 1
-    csrrw x0, 0xC10, x1                 # dbg0 = 1 (A done)
+    csrrw x0, 0x800, x1                 # dbg0 = 1 (A done)
     ECALL

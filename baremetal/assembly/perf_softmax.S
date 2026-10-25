@@ -82,8 +82,8 @@
     CSRRS x25, 0xC00, x0       # Read CSR_CYCLE_COUNTER (0xC00) into x25
     SUB   x26, x25, x24        # x26 = end_time - start_time
 
-    # Output total cycles to CSR_DBG1 (0xC11)
-    CSRRW x0, 0xC11, x26
+    # Output total cycles to CSR_DBG1 (0x801)
+    CSRRW x0, 0x801, x26
 
     LI    x8, 512
     vstore m12, 0(x8)
@@ -104,9 +104,9 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL

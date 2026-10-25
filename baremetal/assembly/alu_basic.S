@@ -114,10 +114,10 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1    # DBG0 = 1 (PASS)
+    CSRRW x0, 0x800, x1    # DBG0 = 1 (PASS)
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28   # DBG0 = test case number
+    CSRRW x0, 0x800, x28   # DBG0 = test case number
     ECALL
     

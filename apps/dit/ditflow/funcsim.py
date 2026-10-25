@@ -57,7 +57,6 @@ class FuncSim:
         ins = self.instrs[pc]
         s.execute_pc = pc
         s.redirect_requested = False
-        s.begin_csr_cycle()
         ins.exec(s)
         s.finish_csr_cycle(True)
         self.executed += 1

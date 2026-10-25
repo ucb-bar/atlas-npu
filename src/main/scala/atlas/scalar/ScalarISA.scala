@@ -155,12 +155,10 @@ object ScalarISA {
   val XLU_X       = 0.U(1.W)
 
   // ── CSR address map (CSRFile; any other address is illegal) ────────
-  val CSR_CYCLE_COUNTER = 0xC00.U(12.W)
-  val CSR_INST_COUNTER  = 0xC01.U(12.W)
-  val CSR_STATUS        = 0xC02.U(12.W)   // read-only
-  val CSR_ILLEGAL_INSTR = 0xC03.U(12.W)   // read-only
-  val CSR_DBG0          = 0xC10.U(12.W)
-  val CSR_DBG1          = 0xC11.U(12.W)
+  val CSR_CYCLE_COUNTER = 0xC00.U(12.W)   // read-only
+  val CSR_INST_COUNTER  = 0xC02.U(12.W)   // read-only
+  val CSR_DBG0          = 0x800.U(12.W)
+  val CSR_DBG1          = 0x801.U(12.W)
   // Custom read-only: ISA version and units, the number of performance counters, then
   // counter i's bits 31:0 at CSR_PERF_BASE + 2i and bits 63:32 at CSR_PERF_BASE + 2i + 1.
   val CSR_ISA           = 0xCC0.U(12.W)

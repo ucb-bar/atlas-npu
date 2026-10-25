@@ -93,7 +93,7 @@
 # ═══════════════════════════════════════════════════════════════
     CSRRS  x21, 0xC00, x0             # x21 = cycle count at end
     SUB   x22, x21, x20          # x22 = elapsed cycles
-    CSRRW  x0, 0xC11, x22              # stash in CSR_DBG1
+    CSRRW  x0, 0x801, x22              # stash in CSR_DBG1
 
 # ═══════════════════════════════════════════════════════════════
 # WRITEBACK (not timed) — MREG → VMEM → DRAM
@@ -115,5 +115,5 @@
 # DONE — host checks DRAM 0x0800 against golden; reads CSR_DBG1
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    csrrw x0, 0xC10, x30
+    csrrw x0, 0x800, x30
     ECALL

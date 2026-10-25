@@ -8,7 +8,7 @@
 #   4  PERF_NUM (0xCC1) is 27
 #   5  two back-to-back csrrs of cycle (0xC00) differ by 1: a read with x0 does not write
 #   6  the same with csrrsi and csrrci with 0
-#   7  two back-to-back csrrs of instret (0xC01) differ by 1
+#   7  two back-to-back csrrs of instret (0xC02) differ by 1
 #   8  counter cycles (0xCC2) differs by 1 back to back, its bits 63:32 (0xCC3) are 0, and
 #      counter instret (0xCC4) differs by 3 over two NOPs
 #   9  a transpose behind a busy XLU stalls: stall_unit_xlu (0xCE8) counts the stalled cycles, and
@@ -70,8 +70,8 @@
 
 # ── 7: instret ──
     ADDI  x28, x28, 1
-    CSRRS x2, 0xC01, x0
-    CSRRS x3, 0xC01, x0
+    CSRRS x2, 0xC02, x0
+    CSRRS x3, 0xC02, x0
     SUB   x4, x3, x2
     BNE   x4, x5, fail
     NOP
@@ -126,12 +126,12 @@
     NOP
 
 pass:
-    CSRRW x0, 0xC11, x1
+    CSRRW x0, 0x801, x1
     ADDI  x2, x0, 1
-    CSRRW x0, 0xC10, x2
+    CSRRW x0, 0x800, x2
     ECALL
 
 fail:
-    CSRRW x0, 0xC11, x1
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x801, x1
+    CSRRW x0, 0x800, x28
     ECALL

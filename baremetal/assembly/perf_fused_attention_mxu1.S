@@ -373,7 +373,7 @@
 # ═══════════════════════════════════════════════════════════════
     CSRRS x21, 0xC00, x0
     SUB   x22, x21, x20         # Final active duration without pauses
-    CSRRW x0,  0xC11, x22       # Write out total cycles
+    CSRRW x0,  0x801, x22       # Write out total cycles
 
 # ═══════════════════════════════════════════════════════════════
 # POST-STORE: Dump O to VMEM, then DMA to DRAM
@@ -395,9 +395,9 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL

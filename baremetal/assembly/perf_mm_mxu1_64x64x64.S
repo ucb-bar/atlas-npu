@@ -204,7 +204,7 @@
 # ═══════════════════════════════════════════════════════════════
     csrrs x21, 0xC00, x0                # cyc 291
     SUB   x22, x21, x20
-    csrrw x0, 0xC11, x22
+    csrrw x0, 0x801, x22
 
 # ═══════════════════════════════════════════════════════════════
 # WRITEBACK (not timed) — MREG → VMEM → DRAM for each output tile
@@ -250,5 +250,5 @@
 # DONE — host verifies DRAM 0x2000–0x2FFF; reads dbg1_cycles for util.
 # ═══════════════════════════════════════════════════════════════
     LI    x30, 1
-    csrrw x0, 0xC10, x30
+    csrrw x0, 0x800, x30
     ECALL

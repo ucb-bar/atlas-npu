@@ -218,7 +218,7 @@ class DiTProgram:
             b.op("ADD x9, x9, x10")
         b.op("ADDI x7, x7, 2")
         b.op("ADDI x5, x5, 1")
-        b.op("CSRRW x0, 0xC11, x5")                     # DBG1: steps done
+        b.op("CSRRW x0, 0x801, x5")                     # DBG1: steps done
         b.op("BEQ x5, x6, sampler_done")
         b.op("NOP")
         b.op("JAL x0, step")

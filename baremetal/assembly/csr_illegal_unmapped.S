@@ -6,5 +6,5 @@
 
     ADDI  x1, x0, 1
     CSRRS x2, 0xC20, x0
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL

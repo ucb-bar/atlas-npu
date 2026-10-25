@@ -53,5 +53,5 @@
     dma.wait ch3
 
     ADDI  x30, x0, 1
-    CSRRW x0, 0xC10, x30
+    CSRRW x0, 0x800, x30
     ECALL

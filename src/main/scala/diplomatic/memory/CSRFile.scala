@@ -24,10 +24,10 @@ Every counter counts its event in the cycles from a start until the core has hal
 unit is idle (a halt does not wait for units), so it stops when a kernel finishes and the host
 reads it afterwards; PerfCounters.names lists the events.
 
-The scalar core reads the same words as CSRs (ScalarISA): cycle 0xC00, instructions 0xC01,
-status 0xC02, illegal PC 0xC03, dbg0 0xC10, dbg1 0xC11, ISA 0xCC0, PERF_NUM 0xCC1, and counter i
-at 0xCC2 + 2i (bits 31:0) and 0xCC3 + 2i (bits 63:32). It can write only cycle, instructions,
-dbg0 and dbg1. An access to any other CSR, or a write to a read-only one, is illegal.
+The scalar core reads the same words as CSRs (ScalarISA): cycle 0xC00, instructions 0xC02,
+dbg0 0x800, dbg1 0x801, ISA 0xCC0, PERF_NUM 0xCC1, and counter i at 0xCC2 + 2i (bits 31:0) and
+0xCC3 + 2i (bits 63:32). It can write only dbg0 and dbg1. An access to any other CSR, or a write
+to a read-only one, is illegal. Status and the illegal-instruction PC are for the host only.
 
 halt_reason encoding:
   0 = none, 1 = illegal instruction, 2 = ecall, 3 = ebreak
@@ -166,10 +166,8 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   // 12-bit CSR address -> (word index, writable). Any other address is illegal, and so is a
   // write to a read-only CSR (RISC-V privileged spec).
   private val csrMap = Seq(
-    CSR_CYCLE_COUNTER -> (0.U, true),
-    CSR_INST_COUNTER  -> (1.U, true),
-    CSR_STATUS        -> (2.U, false),
-    CSR_ILLEGAL_INSTR -> (3.U, false),
+    CSR_CYCLE_COUNTER -> (0.U, false),
+    CSR_INST_COUNTER  -> (1.U, false),
     CSR_DBG0          -> (4.U, true),
     CSR_DBG1          -> (5.U, true),
     CSR_ISA           -> (isaIdx, false),
@@ -198,8 +196,6 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
   // Internal writes — lower priority (TL overwrites via last-connect). A write to a read-only
   // CSR is illegal and never valid.
   when(io.csr.valid && io.csr.write) {
-    when(intIdx === 0.U) { reg_cycle := newVal }
-    when(intIdx === 1.U) { reg_inst  := newVal }
     when(intIdx === 4.U) { reg_dbg0  := newVal }
     when(intIdx === 5.U) { reg_dbg1  := newVal }
   }

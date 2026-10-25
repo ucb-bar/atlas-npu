@@ -62,7 +62,7 @@
     vmatpop.fp32.acc.nv m16, acc0
     csrrs x21, 0xC00, x0                # the pop has issued
     sub   x22, x21, x20
-    csrrw x0, 0xC11, x22
+    csrrw x0, 0x801, x22
 
     LI    x10, 4096                     # result: 16 KiB
     vstore m16, 0(x10)
@@ -75,8 +75,8 @@
 
 pass:
     ADDI  x1, x0, 1
-    CSRRW x0, 0xC10, x1
+    CSRRW x0, 0x800, x1
     ECALL
 fail:
-    CSRRW x0, 0xC10, x28
+    CSRRW x0, 0x800, x28
     ECALL

@@ -71,5 +71,5 @@
     dma.wait ch4
 
     LI    x30, 1
-    csrrw x0, 0xC10, x30
+    csrrw x0, 0x800, x30
     ECALL

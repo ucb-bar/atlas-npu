@@ -82,25 +82,24 @@ The scalar core reads the CSR block with the RISC-V CSR instructions (`ScalarISA
 
 | CSR | Name | Access | MMIO offset |
 |---|---|---|---|
-| `0xC00` | cycle | RW | `0x00` |
-| `0xC01` | instructions | RW | `0x04` |
-| `0xC02` | status ([0] halted, [2:1] halt reason) | R | `0x08` |
-| `0xC03` | illegal-instruction PC | R | `0x0C` |
-| `0xC10` | DBG0 | RW | `0x10` |
-| `0xC11` | DBG1 | RW | `0x14` |
+| `0xC00` | cycle | R | `0x00` |
+| `0xC02` | instret (instructions) | R | `0x04` |
+| `0x800` | DBG0 | RW | `0x10` |
+| `0x801` | DBG1 | RW | `0x14` |
 | `0xCC0` | ISA (below) | R | `0x1C` |
 | `0xCC1` | PERF_NUM | R | `0x108` |
 | `0xCC2 + 2i` | counter i, bits 31:0 | R | `0x200 + 8i` |
 | `0xCC3 + 2i` | counter i, bits 63:32 | R | `0x204 + 8i` |
 
-- An access to any other CSR is an illegal instruction, also a read: the core halts, status reads
-  3 (halted, illegal instruction) and the illegal-instruction PC holds the word address.
+- An access to any other CSR is an illegal instruction, also a read: the core halts, status
+  (MMIO `0x08`) reads 3 (halted, illegal instruction) and the illegal-instruction PC (MMIO `0x0C`)
+  holds the word address. Status and the illegal-instruction PC are not CSRs of the core.
 - A write to a read-only CSR is an illegal instruction. `csrrw` and `csrrwi` always write.
   `csrrs` and `csrrc` with `rs1` = `x0`, and `csrrsi` and `csrrci` with `uimm` = 0, only read
   (RISC-V privileged spec). With any other `rs1` they write, also when the register holds 0. A
   read does not write the CSR back, so a read of cycle or instructions does not stop that counter.
-- `0xC00` to `0xC11` are in the standard read-only range (`csr[11:10]` = 3), but programs can write
-  cycle, instructions, DBG0 and DBG1. `0xCC0` to `0xCFF` is the custom read-only range.
+- cycle and instret have their RISC-V numbers. DBG0 and DBG1 are in the custom read/write range
+  (`0x800` to `0x8FF`), and `0xCC0` to `0xCFF` is the custom read-only range.
 - The counters count while the core runs. To read a 64-bit counter, read bits 63:32, then bits
   31:0, then bits 63:32 again. If the high word changed, read again.
 
