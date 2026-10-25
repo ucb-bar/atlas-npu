@@ -5,7 +5,7 @@ One-way Saturn -> Atlas FP8 handshake test. Two checkpoints:
 
   Checkpoint 1 (Saturn quantizer alignment):
       Saturn quantizes A_bf16 -> A_fp8 (E4M3) via native vfncvtbf16.f.f.w.
-      Host compares Saturn-produced bytes against bf16_tile_to_e4m3_bytes
+      Host compares Saturn-produced bytes against bf16_tile_to_e4m3_bytes_mxu1
       (which mirrors Atlas's own VMATPUSH.ACC.BF16 + SELI 0x7F + VMATPOP.FP8
       roundtrip). If checkpoint 1 fails, Saturn and Atlas disagree on
       E4M3 bit-encoding for normal-finite inputs -- that is a real
@@ -20,11 +20,9 @@ One-way Saturn -> Atlas FP8 handshake test. Two checkpoints:
 
 Atlas operates on a perfect-software assumption: no Inf/NaN/subnormal
 inputs. The Saturn-quantized A_bf16 tile is restricted to |x| in
-[0.25, 2.0) because Atlas's bf16_tile_to_e4m3_bytes flushes near-zero
-values to +/-0 while Saturn emits E4M3 subnormals for the same inputs
-(real cross-engine encoding divergence outside the well-defined
-domain). B_bf16 and bias do NOT go through Saturn's quantizer, so they
-use the unrestricted torch.randn distribution.
+[0.25, 2.0), where every E4M3 result is normal. B_bf16 and bias do NOT
+go through Saturn's quantizer, so they use the unrestricted torch.randn
+distribution.
 
 DRAM layout (matches smolvla_fused_matmul_bias_v2_mxu1.S kernel + a
 Saturn staging slot at 0x2000):
@@ -44,7 +42,7 @@ import sys
 
 import torch
 
-from mxu_fp8_utils import bf16_tile_to_e4m3_bytes
+from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
@@ -150,29 +148,24 @@ def main() -> int:
 
     # ── Inputs (normal-finite BF16; respects Atlas's perfect-software domain) ──
     #
-    # A_bf16 is the input to Saturn's vfncvtbf16 narrow. Atlas's reference
-    # converter `bf16_tile_to_e4m3_bytes` flushes BF16 values whose scaled
-    # unbiased exponent falls below -6 to +0/-0 (mxu_fp8_utils.py:7-9 — no
-    # E4M3 subnormals emitted). Saturn's native vfncvtbf16 path *does*
-    # emit E4M3 subnormals for the same inputs, so unbounded randn seeds
-    # produce a known divergence for near-zero values. Per the Atlas
+    # A_bf16 is the input to Saturn's vfncvtbf16 narrow. Per the Atlas
     # perfect-software invariant in the master plan, cooperative tests
-    # must seed away from the underflow region. We use a uniform-magnitude
+    # seed away from the underflow region. We use a uniform-magnitude
     # |x| in [0.25, 2.0) which sits well above E4M3's smallest normal
-    # (2^-6 ≈ 0.0156) and inside Atlas's well-behaved domain.
+    # (2^-6 ≈ 0.0156).
     torch.manual_seed(args.seed)
     sign_a = torch.randint(0, 2, (TILE_ROWS, TILE_COLS)).float() * 2 - 1
     mag_a  = torch.rand(TILE_ROWS, TILE_COLS) * 1.75 + 0.25
     A_bf16 = (sign_a * mag_a).to(torch.bfloat16)                        # Saturn input
     # B and bias don't go through Saturn — B is host-quantized via the
-    # same bf16_tile_to_e4m3_bytes, and the IPT golden decodes the same
+    # same bf16_tile_to_e4m3_bytes_mxu1, and the IPT golden decodes the same
     # bytes (no Saturn-vs-golden divergence path). Use unrestricted randn.
     B_bf16   = (torch.randn(TILE_ROWS, TILE_COLS) * 0.5).to(torch.bfloat16)
     bias_raw = torch.randn(TILE_ROWS, TILE_COLS, dtype=torch.bfloat16)
 
     # ── Saturn-side golden: BF16 -> E4M3 via the same converter Atlas uses ──
-    A_fp8_expected = bf16_tile_to_e4m3_bytes(A_bf16, scale_exp=0)   # checkpoint 1
-    B_fp8 = bf16_tile_to_e4m3_bytes(B_bf16, scale_exp=0)            # host preload
+    A_fp8_expected = bf16_tile_to_e4m3_bytes_mxu1(A_bf16, scale_exp=0)  # checkpoint 1
+    B_fp8 = bf16_tile_to_e4m3_bytes_mxu1(B_bf16, scale_exp=0)           # host preload
 
     # ── Atlas-side golden via IPT + VPU bias add (same chain as
     #    gen_smolvla_fused_matmul_bias_v2_mxu1.py) ────────────────────────────

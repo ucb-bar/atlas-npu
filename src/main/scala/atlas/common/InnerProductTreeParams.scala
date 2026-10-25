@@ -14,7 +14,6 @@ case class InnerProductTreeParams(
 
   require(mxu.arrayRows > 1, s"Inner product trees must have >1 rows, got ${mxu.arrayRows}")
   require(mxu.arrayCols > 1, s"Inner product trees must have >1 cols, got ${mxu.arrayCols}")
-  require(mxu.accumFmt == AtlasFPType.FP32, "the inner product trees accumulate in FP32")
 
   // ── Convenience aliases (match prior API so downstream code compiles) ──
   val numLanes: Int = mxu.arrayCols

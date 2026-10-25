@@ -3,9 +3,8 @@
 //
 // Spec parameters (per buffer):
 //   ACCUM_BUFFER_ROWS      = 32   rows
-//   ACCUM_BUFFER_COLS_BF16 = 32   columns of MxuParams.accumFmt (FP32 in mxu1,
-//                                 BF16 in mxu0)
-//   ACCUM_BUFFER_BYTES     = 4096 bytes in mxu1 (32 × 32 × 4)
+//   ACCUM_BUFFER_COLS_BF16 = 32   FP32 columns (MxuParams.accumFmt)
+//   ACCUM_BUFFER_BYTES     = 4096 bytes (32 × 32 × 4)
 //
 // Two identically-sized buffers are selected by the `accSel` bit in each
 // bundle.  The module is parameterized by MxuParams.

@@ -692,8 +692,8 @@ class InnerProductTreesSequencer(
     }
   }
 
-  // Pointer advance — depth 2 is a power of two; explicit wrap kept for
-  // symmetry with SA in case depth ever changes.
+  // Pointer advance — depth 2 is a power of two; the explicit wrap keeps
+  // other depths correct.
   when(popThisCycle) {
     ifHead := Mux(ifHead === (inflightDepth - 1).U, 0.U, ifHead + 1.U)
   }

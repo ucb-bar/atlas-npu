@@ -23,7 +23,6 @@ class AtlasFPType:
 
 
 E4M3 = AtlasFPType("E4M3", ieeeWidth=8, expWidth=4, mantissaBits=3, ieeeBias=7)
-BF16 = AtlasFPType("BF16", ieeeWidth=16, expWidth=8, mantissaBits=7, ieeeBias=127)
 
 
 class OutputFmtSel(Enum):
@@ -33,8 +32,6 @@ class OutputFmtSel(Enum):
 
 BF16_MAX_POS = 0x7F7F
 BF16_MAX_NEG = 0xFF7F
-E4M3_MAX_POS = 0x7E
-E4M3_MAX_NEG = 0xFE
 
 
 F32_SIGN_MASK = 0x80000000
@@ -118,10 +115,6 @@ def decode_e4m3(bits: int) -> DecodedFloat:
     return _E4M3_DECODE_LUT[bits & 0xFF]
 
 
-def encode_e4m3_normal(sign: int, unb_exp: int, mant3: int) -> int:
-    return ((sign & 1) << 7) | (((unb_exp + _E4M3_BIAS) & 0xF) << 3) | (mant3 & 0x7)
-
-
 def f32_to_bf16_bits_rne(x: float) -> int:
     u = float_to_u32(x)
     exp = (u >> 23) & 0xFF
@@ -140,9 +133,3 @@ def f32_to_bf16_bits_rne(x: float) -> int:
 def bf16_bits_to_f32(bits: int) -> float:
     return u32_to_float((bits & 0xFFFF) << 16)
 
-
-def round_right_shift4_rne(x: int) -> int:
-    trunc = (x >> 4) & 0xF
-    guard = (x >> 3) & 1
-    sticky = int((x & 0x7) != 0)
-    return trunc + (guard & (sticky | (trunc & 1)))

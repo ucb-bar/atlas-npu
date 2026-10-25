@@ -13,8 +13,8 @@ Use this if V1 fails or if the tracker contract turns out to mean
 Byte-exactness: the same `torch.float8_e4m3fn` tensor is `view`ed as
 uint8 for the DRAM preloads; the IPT golden decodes those same bytes
 back to FP32 via `mxu1_ipt.fp_formats.decode_e4m3` (IPT requires
-FP32 inputs, unlike SA which accepts uint8 directly). The golden
-therefore sees exactly the bytes the assembly will load.
+FP32 inputs). The golden therefore sees exactly the bytes the assembly
+will load.
 """
 
 import os

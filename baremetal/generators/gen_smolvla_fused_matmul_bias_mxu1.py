@@ -15,9 +15,9 @@ Golden mirrors the hardware:
   - `bf16_tile_to_e4m3_bytes_mxu1` (from `mxu_fp8_utils`) reproduces the
     `VMATPUSH.ACC.BF16 + VMATPOP.FP8` quantization on mxu1 bit-for-bit.
   - `IPTLinearRTLFunction` (with FP32-decoded E4M3 inputs) handles the
-    FP8 matmul, the FP32 accumulator and the BF16 pop. IPT differs from SA
-    here: SA accepts uint8 bytes directly, IPT does not, so we decode the
-    same E4M3 bytes back to FP32 via `e4m3_bytes_to_float`.
+    FP8 matmul, the FP32 accumulator and the BF16 pop. IPT does not
+    accept uint8 bytes, so we decode the same E4M3 bytes back to FP32 via
+    `e4m3_bytes_to_float`.
   - `run_binary_rows("add", ...)` adds the bias through atlas's
     `VectorEngineModel` so the VADD.BF16 result matches RTL.
 """
@@ -105,8 +105,8 @@ def main():
 
     ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
     # IPTLinearRTLFunction computes y = x @ w^T. For A @ B, pass w = B^T.
-    # IPT requires FP32 inputs (SA accepts uint8 directly, IPT does not),
-    # so decode the same E4M3 bytes that feed DRAM back to FP32.
+    # IPT requires FP32 inputs, so decode the same E4M3 bytes that feed DRAM
+    # back to FP32.
     a_fp32 = e4m3_bytes_to_float(A_FP8)
     w_fp32 = e4m3_bytes_to_float(B_FP8.T.contiguous())
     mat_bf16 = ipt_bf16(a_fp32, w_fp32, scale_exp=0).to(torch.bfloat16)

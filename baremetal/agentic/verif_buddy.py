@@ -466,7 +466,6 @@ def _load_software_models_reference() -> str:
 
     ipt_path = models_dir / "mxu1_ipt" / "ipt_rtl_linear.py"
     fp_fmt_path = models_dir / "mxu1_ipt" / "fp_formats.py"
-    conv_path = models_dir / "mxu1_ipt" / "converters.py"
     vpu_eng_path = models_dir / "vpu" / "vector_engine_model.py"
 
     blocks: list[str] = []
@@ -495,9 +494,7 @@ def _load_software_models_reference() -> str:
         for fn in (
             "f32_to_bf16_bits_rne",
             "bf16_bits_to_f32",
-            "encode_e4m3_normal",
             "decode_e4m3",
-            "round_right_shift4_rne",
         ):
             sig = _extract_function_signature(fmt_text, fn)
             if sig:
@@ -508,22 +505,6 @@ def _load_software_models_reference() -> str:
                 "# Canonical FP-format helpers and the enums MXU adapters expect.\n"
                 "# Use these enums as `out_fmt_sel=OutputFmtSel.OutBF16` (or OutE4M3).\n"
                 + ("\n\n".join(enum_blocks + fmt_fn_blocks))
-            )
-
-    if conv_path.exists():
-        conv_text = conv_path.read_text(encoding="utf-8", errors="replace")
-        conv_fn_blocks: list[str] = []
-        for fn in ("bf16_scale_to_e4m3",):
-            sig = _extract_function_signature(conv_text, fn)
-            if sig:
-                conv_fn_blocks.append(sig)
-        if conv_fn_blocks:
-            blocks.append(
-                "# --- software_models.mxu1_ipt.converters ---\n"
-                "# The MXU0 FP8 pop: for a BF16-valued tile that MXU0 round-trips\n"
-                "# through FP8, `bf16_scale_to_e4m3(bits, scale_exp)` is the bit-exact\n"
-                "# mirror. MXU1 pops convert as npu_model.configs.cvt does.\n"
-                + "\n\n".join(conv_fn_blocks)
             )
 
     if vpu_eng_path.exists():
@@ -608,7 +589,7 @@ def _generator_canonical_imports_block() -> str:
         # matmul tile through MXU1 — these are bit-exact against the RTL):
         from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
         from software_models.mxu1_ipt.fp_formats import OutputFmtSel
-        from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
+        from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
         """
     ).rstrip()
 
@@ -746,9 +727,10 @@ def _load_generator_helper_reference() -> str:
                optional bias.
              - `software_models.mxu1_ipt.fp_formats` — the canonical enum
                (`OutputFmtSel`) and BF16/E4M3 rounding primitives.
-             - `software_models.mxu1_ipt.converters` — `bf16_scale_to_e4m3`, a
-               BF16 to E4M3 quantization without E4M3 subnormals. MXU1 pops
-               convert as `npu_model.configs.cvt` does.
+             - `mxu_fp8_utils.bf16_tile_to_e4m3_bytes_mxu1` (in `generators/`) —
+               the BF16 → FP8 accumulator round trip on MXU1 (VMATPUSH.ACC.BF16,
+               VMATPOP.FP8). MXU1 pushes and pops convert as `npu_model.configs.cvt`
+               does.
              - `software_models.vpu.vector_engine_model.VectorEngineModel` —
                the underlying VPU model; `vpu_gen_utils.MODEL` is a shared instance.
 
@@ -1553,8 +1535,7 @@ tests contribute coverage.
    `run_binary_rows`, `run_row_reduce_tensor`, `run_col_reduce_tensor`,
    `run_fp8_pack_rows`, `run_vli_rows`, `tensor_preloads`/`tensor_checks`), and
    `generators/software_models/` (the bit-exact MXU1 `IPTLinearRTLFunction`,
-   VPU `VectorEngineModel`, and `bf16_scale_to_e4m3` /
-   `OutputFmtSel`). They are the single source of truth for every
+   VPU `VectorEngineModel`, and `OutputFmtSel`). They are the single source of truth for every
    numerical model in the chip. If you find yourself writing a custom
    `bf16_word(v)` lookup, a `fp8_byte(v)` dict, a `(v << 8)` conversion, an
    ad-hoc matmul loop, or a hand-rolled `exp` / `tanh` / `rsum` oracle, stop and
