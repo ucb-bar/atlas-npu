@@ -1,7 +1,8 @@
 """Shared data and golden helpers for the NVFP4 MXU tests (gen_nvfp4_*.py).
 
 The arithmetic is npu_model/configs/nvfp4.py (from ucb-bar/nvfp4@0c611e1:host/nvfp4_model.py, the
-model of fp4_fedp), loaded by path so the generators need no npu_model environment. Layouts
+model of fp4_fedp) and the BF16 conversion npu_model/configs/cvt.py, loaded by path so the
+generators need no npu_model environment. Layouts
 follow docs/nvfp4-mxu.md:
   tile data   32 rows x 32 bytes, 64 E2M1 codes per row (low nibble first)
   tile scales 32 rows x 4 UE4M3 bytes (128 bytes)
@@ -13,10 +14,18 @@ import random
 import struct
 from pathlib import Path
 
-_spec = importlib.util.spec_from_file_location(
-    "nvfp4", Path(__file__).resolve().parents[2] / "npu-model" / "npu_model" / "configs" / "nvfp4.py")
-nvfp4 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(nvfp4)
+import numpy as np
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parents[2] / "npu-model" / "npu_model" / "configs" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+nvfp4, cvt = _load("nvfp4"), _load("cvt")
 
 BEAT = 32
 ROWS = 32
@@ -67,9 +76,9 @@ def fp32_regs(tile) -> list[bytes]:
 
 
 def bf16_regs(tile) -> list[bytes]:
-    """FP32 tile -> {m[d], m[d+1]} as stored by vmatpop.bf16.acc.nv (RNE)."""
-    return [b"".join(struct.pack("<16H", *[nvfp4.f32_to_bf16(x) for x in row[16 * h:16 * h + 16]])
-                     for row in tile) for h in range(2)]
+    """FP32 tile -> {m[d], m[d+1]} as stored by vmatpop.bf16.acc.nv (BF16_RNE)."""
+    bits = cvt.bf16_rne(np.array(tile, dtype=np.uint32))
+    return [bits[:, 16 * h:16 * h + 16].astype("<u2").tobytes() for h in range(2)]
 
 
 class Image:

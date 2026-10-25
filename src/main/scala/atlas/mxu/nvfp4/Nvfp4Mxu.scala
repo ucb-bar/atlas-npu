@@ -28,7 +28,7 @@ package atlas.nvfp4
 
 import chisel3._
 import chisel3.util._
-import atlas.common.{Nvfp4MxuParams, MregParams, MregReadReq, MregWriteReq}
+import atlas.common.{Cvt, Nvfp4MxuParams, MregParams, MregReadReq, MregWriteReq}
 
 /** fp4_fedp (ucb-bar/nvfp4@0c611e1:fpga/pe/fp4_fedp.sv): 64-element NVFP4 dot product with FP32 accumulate. */
 class Fp4Fedp extends BlackBox with HasBlackBoxResource {
@@ -70,12 +70,6 @@ class NvCmd(mregIdBits: Int) extends Bundle {
 }
 
 object Nvfp4 {
-  /** FP32 -> BF16, round to nearest even; NaN -> quiet NaN with the input's sign. */
-  def f32ToBf16(x: UInt): UInt = {
-    val isNaN = x(30, 23).andR && x(22, 0).orR
-    val rnd   = (x + (0x7FFF.U(32.W) + x(16)))(31, 16)
-    Mux(isNaN, Cat(x(31), "h7fc0".U(15.W)), rnd)
-  }
   def bf16ToF32(x: UInt): UInt = Cat(x(15, 0), 0.U(16.W))
 }
 
@@ -352,7 +346,7 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
     val r    = row(wn)
     val data = accRdData(w.accSel)
     when(w.op === PopBF16) {
-      val bf = data.map(Nvfp4.f32ToBf16)
+      val bf = data.map(Cvt.bf16Rne(_))
       io.mregWriteReq0.valid := true.B
       io.mregWriteReq0.bits.mregId := w.mregId
       io.mregWriteReq0.bits.row := r

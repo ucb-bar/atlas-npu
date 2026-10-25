@@ -10,12 +10,12 @@ columns 0-15 then 16-31), result 160-223.
 import random
 import struct
 
-from nvfp4_common import Image, bf16_regs, f32, matmul, nvfp4, rand_scales, rand_tile
+from nvfp4_common import Image, bf16_regs, cvt, f32, matmul, rand_scales, rand_tile
 
 rng = random.Random(4003)
 a, sa = rand_tile(rng), rand_scales(rng)
 w, sw = rand_tile(rng), rand_scales(rng)
-bias = [[nvfp4.f32_to_bf16(f32(rng.uniform(-8.0, 8.0))) for _ in range(32)] for _ in range(32)]
+bias = [[int(cvt.bf16_rne(f32(rng.uniform(-8.0, 8.0)))) for _ in range(32)] for _ in range(32)]
 
 bias_regs = [b"".join(struct.pack("<16H", *row[16 * h:16 * h + 16]) for row in bias) for h in range(2)]
 c = [[x << 16 for x in row] for row in bias]
