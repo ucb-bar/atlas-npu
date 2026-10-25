@@ -28,9 +28,9 @@ BF16 activations still have 27.2% feature error.
 
 Of the formats that Atlas has or plans, FP8 with the arithmetic of Blackwell (E4M3 subnormals
 kept, FP32 accumulation) is the most accurate. On ViT-B it gains 1.6 points of feature error over
-today's `mxu1`: 1.4 points come from the subnormals, which `mxu1` flushes to zero, and 0.2 points
-from FP32 accumulation. On ViT-S it gains 0.4 points: 0.1 from the subnormals and 0.3 from the
-accumulation.
+the `mxu1` before ISA 2.0: 1.4 points come from the subnormals, which that `mxu1` flushed to zero,
+and 0.2 points from FP32 accumulation. On ViT-S it gains 0.4 points: 0.1 from the subnormals and
+0.3 from the accumulation. ISA 2.0 `mxu1` has this arithmetic (`docs/fp8-mxu.md`).
 
 No trained specialist_dit checkpoint is in the workspace, so the study cannot measure the policy's
 actions. See Limits.
@@ -41,8 +41,9 @@ actions. See Limits.
    FP4 x FP8 mixed mode. Keep the NVFP4 MXU of `ipt-nvfp4` as it is, for experiments.
 2. Give `mxu1` the arithmetic of Blackwell FP8 MMA (npu_model `configs/fp8_mma.py`). Two of its
    properties matter here, and `mxu1` must have both: it keeps E4M3 subnormals, and it accumulates
-   in FP32. On ViT-B, the subnormals that `mxu1` flushes today cost 1.4 points of feature error
-   and the BF16 accumulation per K tile costs 0.2 points; on ViT-S they cost 0.1 and 0.3 points.
+   in FP32. On ViT-B, the subnormals that the v1 `mxu1` flushed cost 1.4 points of feature error
+   and its BF16 accumulation per K tile cost 0.2 points; on ViT-S they cost 0.1 and 0.3 points.
+   ISA 2.0 `mxu1` does both (`docs/fp8-mxu.md`).
    Keep per-tensor power-of-two scales: MXFP8 block scales (E8M0 per 32) give the same error on
    this model.
 3. Run the patch embedding more precisely than FP8. FP8 there causes about a third of the FP8
@@ -101,7 +102,7 @@ All quantizers put the blocks along K, the reduction dimension.
 
 | Configuration | Weights | Activations | Accumulation |
 |---|---|---|---|
-| (1) Atlas FP8 today | E4M3, one power-of-two scale from the maximum, subnormals flushed | E4M3, one power-of-two scale per tensor from calibration, 2x margin, subnormals flushed | BF16, rounded once per 32-wide K tile (`mxu1`) |
+| (1) Atlas FP8 before ISA 2.0 | E4M3, one power-of-two scale from the maximum, subnormals flushed | E4M3, one power-of-two scale per tensor from calibration, 2x margin, subnormals flushed | BF16, rounded once per 32-wide K tile (`mxu1`) |
 | (2) FP8, Blackwell | as (1), subnormals kept | as (1), subnormals kept | FP32 (Blackwell FP8 MMA, see Arithmetic) |
 | (2), subnormals flushed | as (1) | as (1) | FP32 |
 | MXFP8 | E4M3, E8M0 scale per 32 | E4M3, E8M0 scale per 32, dynamic | FP32 |
@@ -195,7 +196,7 @@ FP32 reference: Imagewoof probe 96.1%, k-NN 95.7%; Imagenette 99.7% and 99.8%.
 |---|---|---|---|---|---|---|---|
 | FP32 (reference) | 0 | 0.0% / 0.0% | 1.000 | 96.1% / 100.0% | 95.7% / 100.0% | 82.1% | 100.0% |
 | BF16 | 0.2% | 1.0% / 2.1% | 1.000 | 96.2% / 100.0% | 95.7% / 100.0% | 82.1% | 99.8% |
-| (1) Atlas FP8 today | 2.9% | 17.4% / 22.6% | 0.984 | 95.8% / 98.7% | 95.6% / 99.5% | 81.5% | 96.9% |
+| (1) Atlas FP8 before ISA 2.0 | 2.9% | 17.4% / 22.6% | 0.984 | 95.8% / 98.7% | 95.6% / 99.5% | 81.5% | 96.9% |
 | (2) FP8, Blackwell | 2.9% | 15.8% / 21.1% | 0.986 | 96.1% / 99.0% | 95.7% / 99.5% | 81.7% | 97.7% |
 | (2), subnormals flushed | 2.9% | 17.2% / 22.4% | 0.984 | 95.9% / 98.7% | 95.7% / 99.5% | 81.5% | 97.2% |
 | MXFP8 | 2.9% | 15.8% / 21.1% | 0.986 | 95.9% / 98.9% | 95.6% / 99.6% | 81.7% | 97.8% |
@@ -218,7 +219,7 @@ Linear output rel. L2 by kind of linear (mean over the layers):
 | Configuration | patch embedding | q, k, v | o | up | down |
 |---|---|---|---|---|---|
 | BF16 | 0.4% | 0.2% | 0.2% | 0.2% | 0.2% |
-| (1) Atlas FP8 today | 6.7% | 2.7% | 3.5% | 3.1% | 2.7% |
+| (1) Atlas FP8 before ISA 2.0 | 6.7% | 2.7% | 3.5% | 3.1% | 2.7% |
 | (2) FP8, Blackwell | 6.6% | 2.7% | 3.4% | 3.0% | 2.5% |
 | (2), subnormals flushed | 6.6% | 2.7% | 3.4% | 3.0% | 2.5% |
 | (3) NVFP4 W4A4 | 23.1% | 9.0% | 12.2% | 9.8% | 8.6% |
@@ -233,7 +234,7 @@ FP32 reference: Imagewoof probe 94.3%, k-NN 93.6%; Imagenette 99.1% and 99.1%.
 |---|---|---|---|---|---|---|---|
 | FP32 (reference) | 0 | 0.0% / 0.0% | 1.000 | 94.3% / 100.0% | 93.6% / 100.0% | 82.6% | 100.0% |
 | BF16 | 0.2% | 0.9% / 1.8% | 1.000 | 94.4% / 99.8% | 93.6% / 99.9% | 82.6% | 99.9% |
-| (1) Atlas FP8 today | 3.3% | 16.2% / 19.5% | 0.986 | 94.1% / 98.4% | 93.4% / 99.0% | 81.4% | 97.4% |
+| (1) Atlas FP8 before ISA 2.0 | 3.3% | 16.2% / 19.5% | 0.986 | 94.1% / 98.4% | 93.4% / 99.0% | 81.4% | 97.4% |
 | (2) FP8, Blackwell | 3.2% | 15.8% / 19.2% | 0.986 | 94.4% / 98.6% | 93.5% / 98.8% | 81.5% | 97.7% |
 | (2), subnormals flushed | 3.3% | 15.9% / 19.2% | 0.986 | 94.4% / 98.4% | 93.4% / 98.7% | 81.7% | 97.7% |
 | MXFP8 | 3.2% | 15.8% / 19.2% | 0.986 | 94.5% / 98.6% | 93.6% / 98.9% | 81.6% | 97.7% |
