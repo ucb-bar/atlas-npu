@@ -1,11 +1,13 @@
 package atlas.vector
 
 import chisel3._
+import chisel3.simulator.PeekPokeAPI._
 import atlas.common.VpuParams
 import sp26FPUnits.hardfloat._
 import fpex.FPType.BF16T
 import scala.math._
 import scala.util.Random
+import scala.collection.mutable.ArrayBuffer
 
 object VectorTestUtils {
     // Float -> BF16 as Short (16 bits)
@@ -528,6 +530,26 @@ object VectorTestUtils {
         Array.fill(32)(resultRow)
     }
 
+
+    /** The (bank, row) of each of the 64 rows of the register pair that starts at bank. */
+    def pairRows(bank: Int): Seq[(Int, Int)] =
+        for (b <- Seq(bank, bank + 1); r <- 0 until 32) yield (b, r)
+
+    /** The (bank, row) of each valid read1, read2, write1 and write2 request of a VectorFSM,
+      * one list per port, in the order of the sampled cycles. */
+    class FsmRequestLog {
+        val ports = Seq.fill(4)(ArrayBuffer[(Int, Int)]())
+
+        def sample(out: FSMOut): Unit =
+            Seq(
+                (out.readValid1, out.readBank1, out.readRow1),
+                (out.readValid2, out.readBank2, out.readRow2),
+                (out.writeValid1, out.writeBank1, out.writeRow1),
+                (out.writeValid2, out.writeBank2, out.writeRow2)
+            ).zip(ports).foreach { case ((valid, bank, row), log) =>
+                if (valid.peek().litToBoolean) log += ((bank.peek().litValue.toInt, row.peek().litValue.toInt))
+            }
+    }
 
     // ---------------------------------------------------------------------------------------
     // Functions checking the tolerance on variable, vector (16) and matrix(32 * 16)

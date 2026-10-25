@@ -8,6 +8,7 @@ import atlas.common.VpuParams
 import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
+import VectorTestUtils._
 
 import org.scalatest.Outcome 
 
@@ -154,6 +155,7 @@ class FSMSingle extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.clock.step(1)
 
             // Testing
+            val log = new FsmRequestLog
             for (i <- 0 to 70) {
                 // Instruction fires at 0th cycle, first register read should also be sent at the 0th cycle
                 if (i == 0) {
@@ -162,12 +164,14 @@ class FSMSingle extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     dut.io.in.instReadBank1.poke(1.U)
                     dut.io.in.instReadBank2.poke(2.U)
                     dut.io.in.instWriteBank.poke(3.U)
+                    dut.io.out.VEReady.expect(true.B)
                 } else if (i == 1) {
                     dut.io.in.instFire.poke(true.B)
                     dut.io.in.instType.poke(VPUOp.log)
                     dut.io.in.instReadBank1.poke(11.U)
                     dut.io.in.instReadBank2.poke(12.U)
                     dut.io.in.instWriteBank.poke(13.U)
+                    dut.io.out.VEReady.expect(true.B)
                 } else {
                     dut.io.in.instFire.poke(false.B)
                     dut.io.in.instType.poke(VPUOp.sub)
@@ -222,8 +226,11 @@ class FSMSingle extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     |state:  ${dut.io.out.state.peek().litValue}
                     |""".stripMargin
                 )
+                log.sample(dut.io.out)
                 dut.clock.step(1)
             }
+            log.ports shouldBe Seq(pairRows(1), pairRows(11), pairRows(3), pairRows(13))
+            dut.io.out.state.expect(0.U)
         }.result
     }
 }

@@ -8,6 +8,7 @@ import atlas.common.VpuParams
 import svsim.CommonCompilationSettings.Timescale.Unit.s
 import sp26FPUnits.hardfloat._
 import sp26FPUnits.AtlasFPType.BF16
+import VectorTestUtils._
 
 import org.scalatest.Outcome 
 
@@ -169,6 +170,7 @@ class FSMSingleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.clock.step(1)
 
             // Testing
+            val log = new FsmRequestLog
             for (i <- 0 to 135) {
                 // Input fires at the beginning
                 if (i == 0) {
@@ -177,19 +179,22 @@ class FSMSingleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     dut.io.in.instReadBank1.poke(1.U)
                     dut.io.in.instReadBank2.poke(2.U)
                     dut.io.in.instWriteBank.poke(3.U)
+                    dut.io.out.VEReady.expect(true.B)
                 // Input fires at the 65th cycle again which is when the first instruction is done
                 } else if (i == 1) {
                     dut.io.in.instFire.poke(true.B)
-                    dut.io.in.instType.poke(VPUOp.exp2)
+                    dut.io.in.instType.poke(VPUOp.tanh)
                     dut.io.in.instReadBank1.poke(4.U)
                     dut.io.in.instReadBank2.poke(5.U)
                     dut.io.in.instWriteBank.poke(6.U)
+                    dut.io.out.VEReady.expect(true.B)
                 } else if (i == 66) {
                     dut.io.in.instFire.poke(true.B)
                     dut.io.in.instType.poke(VPUOp.mul)
                     dut.io.in.instReadBank1.poke(11.U)
                     dut.io.in.instReadBank2.poke(12.U)
                     dut.io.in.instWriteBank.poke(13.U)
+                    dut.io.out.VEReady.expect(true.B)
                 }
                 else {
                     dut.io.in.instFire.poke(false.B)
@@ -253,8 +258,14 @@ class FSMSingleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     |state:  ${dut.io.out.state.peek().litValue}
                     |""".stripMargin
                 )
+                log.sample(dut.io.out)
                 dut.clock.step(1)
             }
+            log.ports shouldBe Seq(
+                pairRows(1) ++ pairRows(11), pairRows(4) ++ pairRows(12),
+                pairRows(3) ++ pairRows(13), pairRows(6)
+            )
+            dut.io.out.state.expect(0.U)
         }.result
     }
 }
