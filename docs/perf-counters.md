@@ -93,7 +93,7 @@ The scalar core reads the CSR block with the RISC-V CSR instructions (`ScalarISA
 
 - An access to any other CSR is an illegal instruction, also a read: the core halts, status
   (MMIO `0x08`) reads 3 (halted, illegal instruction) and the illegal-instruction PC (MMIO `0x0C`)
-  holds the word address. Status and the illegal-instruction PC are not CSRs of the core.
+  holds its byte address. Status and the illegal-instruction PC are not CSRs of the core.
 - A write to a read-only CSR is an illegal instruction. `csrrw` and `csrrwi` always write.
   `csrrs` and `csrrc` with `rs1` = `x0`, and `csrrsi` and `csrrci` with `uimm` = 0, only read
   (RISC-V privileged spec). With any other `rs1` they write, also when the register holds 0. A

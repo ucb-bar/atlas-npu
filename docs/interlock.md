@@ -68,6 +68,13 @@ can never be read together, and no amount of waiting fixes that. Such an instruc
 illegal: the core halts with STATUS 3. Naming the same pair twice is fine, since one read serves
 both operands.
 
+### Jump targets
+
+There is no delay slot (ISA 2.0): a taken branch or jump drops the instruction fetched after it,
+which costs one bubble. A taken branch or jump to a target with bit 1 set is illegal. The core
+checks the target in the cycle the instruction would issue, after the interlock and any `DELAY`
+release it. So a `jalr` whose `rs1` waits for a scalar load uses the loaded value, not the old one.
+
 ### 2026-10-22: `vload` lost its WAR exemption
 
 `vload` used to skip the WAR check, on the grounds that it writes each row after an earlier
@@ -110,9 +117,9 @@ program fails only without `DELAY`, over 963 programs and about 540,000 random t
 instructions. On `default`, two programs (seeds 1000 and 1028) were bisected, and they fail
 identically in both copies. Bisection puts the first difference at one instruction each: a
 `vsub.bf16` result one BF16 ULP from the RTL's, and a `vmatmul.acc.mxu1` onto a large BF16
-partial sum. npu_model's `RtlNumerics` and ditflow's
-fast numerics agree with each other there, so the model's arithmetic is off in these two corner
-cases. No program fails only without `DELAY`.
+partial sum. npu_model's `RtlNumerics` and ditflow's fast numerics agree with each other there,
+so the model's arithmetic is off in these two corner cases. No program fails only without
+`DELAY`.
 
 On the old RTL, the assertions came from three sources. Two-source VPU instructions named two
 pairs in one bank (now illegal). The MXU1 sequencer's push and pop checks counted an engine on

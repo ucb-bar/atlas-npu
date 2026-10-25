@@ -71,8 +71,8 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim --config ipt-n
     --out build/sim-nodelay build/bundle/nodelay/*.json
 ```
 
-`--no-delay` removes every `DELAY` from the kernels (one in a branch delay slot would become a
-`NOP`). The model keeps all RTL assertions, so a hazard that got past the interlock fails the test.
+`--no-delay` removes every `DELAY` from the kernels. The model keeps all RTL assertions, so a
+hazard that got past the interlock fails the test.
 
 The Ethernet model runs the same tests over UDP on 127.0.0.1, through `eth_udp_stack` and
 `eth_tsi`. Each test gets its own model and UDP port:

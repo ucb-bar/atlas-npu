@@ -250,7 +250,7 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
         perf_threshold: if set (0..100), gate pass/fail on the MAC-based util
             of MXU1 declared via @PERF_MACS_MXU1. Test fails if the declared
             util = MACs * 100 / (1024 * dbg1_cycles) is below it.
-        perf_report: if True, emit the perf printout (dbg1_cycles + per-MXU
+        perf_report: if True, emit the perf printout (dbg1_cycles + MXU1's
             MAC-based util) WITHOUT gating pass/fail on utilization. Implied
             when perf_threshold is set. Use for tests that bank a timed-window
             cycle delta into CSR_DBG1 (CSRRW ..., 0x801) but rely on golden
