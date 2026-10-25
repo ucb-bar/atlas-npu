@@ -1,5 +1,5 @@
 /*
-FPUtils.scala — All floating-point conversion utilities for both MXU datapaths.
+FPUtils.scala — Floating-point conversion utilities of the systolic-array MXU (mxu0).
 
 Everything lives in one object with a readable functional API:
 
@@ -15,17 +15,6 @@ Everything lives in one object with a readable functional API:
   │    FPUtils.e4m3ToBf16Row(fp8s)                                  │
   │    FPUtils.bf16ToE4m3Row(bf16s, scaleE8M0)                      │
   ├─────────────────────────────────────────────────────────────────┤
-  │  Anchor-aligned converters (IPT accumulation tree)              │
-  │    FPUtils.ieeeToAlignedInt(ieee, anchor, fmt, intW, expW)      │
-  │    FPUtils.alignedIntToIEEE(intIn, anchor, outFmt, intW, expW)  │
-  │    FPUtils.e4m3ProdToAlignedInt(prod, anchor, intW, expW)       │
-  ├─────────────────────────────────────────────────────────────────┤
-  │  RecFN helpers (HardFloat recoded-format field access)          │
-  │    FPUtils.RecFN.fields(fmt, rec)                               │
-  │    FPUtils.RecFN.isZero(fmt, recExp)                            │
-  │    FPUtils.RecFN.unbiasedExp(fmt, recExp)                       │
-  │    FPUtils.RecFN.fullSig(fmt, recExp, mantissa)                 │
-  ├─────────────────────────────────────────────────────────────────┤
   │  Converter banks (shared hardware for sequencer FSMs)           │
   │    FPUtils.E4M3ToBF16Bank(n)                                    │
   │    FPUtils.BF16ToE4M3Bank(n)                                    │
@@ -40,36 +29,6 @@ import sp26FPUnits._
 import sp26FPUnits.hardfloat._
 
 object FPUtils {
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  RecFN helpers — HardFloat recoded-format field access
-  // ═══════════════════════════════════════════════════════════════════
-
-  object RecFN {
-    /** Bit width of a recFN number for the given format. */
-    def width(fmt: AtlasFPType): Int = fmt.recFNWidth
-
-    /** Split a recFN number into (sign, recodedExponent, mantissa). */
-    def fields(fmt: AtlasFPType, rec: UInt): (Bool, UInt, UInt) = {
-      val w  = fmt.recFNWidth
-      val sw = fmt.sigWidth
-      (rec(w - 1), rec(w - 2, sw - 1), rec(sw - 2, 0))
-    }
-
-    /** True when the recFN number represents ±0 or a subnormal. */
-    def isZero(fmt: AtlasFPType, recExp: UInt): Bool =
-      recExp(fmt.expWidth, fmt.expWidth - 2) === 0.U
-
-    /** Convert recoded exponent to an unbiased signed exponent (recFN bias = 2^ew). */
-    def unbiasedExp(fmt: AtlasFPType, recExp: UInt): SInt = {
-      val bias = 1 << fmt.expWidth
-      recExp.zext - bias.S
-    }
-
-    /** Full significand with implicit leading bit restored (sigWidth total bits). */
-    def fullSig(fmt: AtlasFPType, recExp: UInt, mantissa: UInt): UInt =
-      Cat(!isZero(fmt, recExp), mantissa)
-  }
 
   // ═══════════════════════════════════════════════════════════════════
   //  HardFloat recoding utilities
@@ -163,134 +122,6 @@ object FPUtils {
   /** Quantize a row of BF16 values to E4M3 with shared E8M0 scale. */
   def bf16ToE4m3Row(bf16s: Seq[UInt], scaleE8M0: UInt): Vec[UInt] =
     VecInit(bf16s.map(bf16ToE4m3(_, scaleE8M0)))
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  Anchor-aligned converters (IPT accumulation tree)
-  // ═══════════════════════════════════════════════════════════════════
-
-  /**
-   * Convert an IEEE floating-point value to an anchor-aligned signed integer.
-   *
-   * Works for any IEEE-like format (E4M3, FP16, BF16, FP32, …).
-   * Subnormals are treated with exponent = −bias (not 1−bias) — a negligible
-   * approximation in the context of anchor accumulation.
-   *
-   * @param ieee      IEEE-encoded floating-point input
-   * @param anchorExp anchor exponent (signed)
-   * @param fmt       floating-point format descriptor
-   * @param intWidth  output integer width
-   * @param expW      exponent work-register width
-   */
-  def ieeeToAlignedInt(ieee: UInt, anchorExp: SInt,
-                       fmt: AtlasFPType, intWidth: Int, expW: Int): SInt = {
-    val shiftBits = log2Ceil(intWidth + 1) max 1
-
-    val sign     = ieee(fmt.ieeeWidth - 1)
-    val expField = ieee(fmt.ieeeWidth - 2, fmt.mantissaBits)
-    val frac     = ieee(fmt.mantissaBits - 1, 0)
-
-    val isZero  = expField === 0.U && frac === 0.U
-    val unbExp  = expField.zext -& fmt.ieeeBias.S(expW.W)
-    val fullSig = Cat(expField =/= 0.U, frac)
-
-    val shiftRight = anchorExp -& unbExp -& (intWidth - 1 - fmt.mantissaBits).S(expW.W)
-
-    val sigWide   = fullSig.pad(intWidth.max(fmt.sigWidth))
-    val magnitude = Wire(UInt(intWidth.W))
-    when(shiftRight >= intWidth.S) {
-      magnitude := 0.U
-    }.elsewhen(shiftRight >= 0.S) {
-      magnitude := (sigWide >> shiftRight(shiftBits - 1, 0))(intWidth - 1, 0)
-    }.elsewhen(shiftRight >= (-(intWidth - 1)).S) {
-      val negShift = (0.S(expW.W) - shiftRight)(shiftBits - 1, 0)
-      magnitude := (sigWide << negShift)(intWidth - 1, 0)
-    }.otherwise {
-      magnitude := 0.U
-    }
-
-    Mux(isZero, 0.S(intWidth.W),
-      Mux(sign, -(magnitude.asSInt), magnitude.asSInt))
-  }
-
-  /**
-   * Convert an anchor-aligned signed integer back to IEEE floating-point.
-   *
-   * Uses HardFloat's INToRecFN to convert the integer to recoded FP,
-   * then adjusts the exponent by (anchorExp − (intWidth−1)) to undo the
-   * anchor scaling, and converts back to IEEE.
-   *
-   * @param intIn     signed integer input
-   * @param anchorExp anchor exponent (signed)
-   * @param outFmt    output floating-point format descriptor
-   * @param intWidth  input integer width
-   * @param expW      exponent work-register width
-   */
-  def alignedIntToIEEE(intIn: SInt, anchorExp: SInt,
-                       outFmt: AtlasFPType, intWidth: Int, expW: Int): UInt = {
-    // Step 1: integer → recoded FP
-    val conv = Module(new INToRecFN(intWidth, outFmt.expWidth, outFmt.sigWidth))
-    conv.io.signedIn       := true.B
-    conv.io.in             := intIn.asUInt
-    conv.io.roundingMode   := consts.round_near_even
-    conv.io.detectTininess := consts.tininess_afterRounding
-
-    val rawRecFN = conv.io.out
-    val (rawSign, rawRecExp, rawMantissa) = RecFN.fields(outFmt, rawRecFN)
-    val rawIsZero = RecFN.isZero(outFmt, rawRecExp)
-
-    // Step 2: adjust exponent to undo anchor scaling
-    val adjRecExp  = rawRecExp.zext +& (anchorExp -& (intWidth - 1).S(expW.W))
-    val recExpBits = outFmt.expWidth + 1
-
-    // Step 3: clamp to valid range
-    val expClamped = Wire(UInt(recExpBits.W))
-    when(adjRecExp <= 0.S) {
-      expClamped := 0.U
-    }.elsewhen(adjRecExp >= ((1 << recExpBits) - 2).S) {
-      expClamped := Cat("b110".U(3.W), 0.U((recExpBits - 3).max(0).W))
-    }.otherwise {
-      expClamped := adjRecExp(recExpBits - 1, 0)
-    }
-
-    val adjRecFN   = Cat(rawSign, expClamped, rawMantissa)
-    val finalRecFN = Mux(intIn === 0.S || rawIsZero,
-                         0.U(outFmt.recFNWidth.W), adjRecFN)
-
-    // Step 4: recoded FP → IEEE
-    fNFromRecFN(outFmt.expWidth, outFmt.sigWidth, finalRecFN)
-  }
-
-  /**
-   * Convert an E4M3 lossless product (13-bit custom float) to an
-   * anchor-aligned two's-complement integer.
-   *
-   * The product format is S(1) E(5, bias=13) M(7) as produced by E4M3Mul.
-   * The barrel shifter is fed an 8-bit significand — fewer mux stages
-   * and fewer wire toggles than the wider recFN path.
-   * Zero products bypass the shifter entirely.
-   *
-   * @param prod      13-bit E4M3 product (from E4M3Mul)
-   * @param anchorExp anchor exponent (signed)
-   * @param intW      output integer width
-   * @param expW      exponent work-register width
-   */
-  def e4m3ProdToAlignedInt(prod: UInt, anchorExp: SInt, intW: Int, expW: Int): SInt = {
-    val sign    = prod(12)
-    val expBits = prod(11, 7)
-    val man     = prod(6, 0)
-    val isZero  = expBits === 0.U
-
-    val sig    = Cat(1.U(1.W), man)
-    val unbExp = (expBits.zext - E4M3ProdFmt.bias.S).pad(expW).asSInt
-    val rshift = (anchorExp - unbExp).asUInt
-
-    val sigWide   = Cat(sig, 0.U((intW - E4M3ProdFmt.sigWidth).W))
-    val shifted   = (sigWide >> rshift)(intW - 1, 0)
-    val magnitude = shifted.asSInt
-    val signed    = Mux(sign, -magnitude, magnitude)
-
-    Mux(isZero, 0.S(intW.W), signed)
-  }
 
   // ═══════════════════════════════════════════════════════════════════
   //  Converter banks (shared hardware for sequencer FSMs)

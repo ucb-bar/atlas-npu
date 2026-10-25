@@ -4,7 +4,7 @@ import math
 import numpy as np
 import torch
 
-from ditflow import numerics, quant
+from ditflow import quant
 from npu_model.configs import fp8_mma, nvfp4
 from quantstudy import formats as F
 from quantstudy.study import e2m1_codes, nv_operand
@@ -56,21 +56,6 @@ def test_fp8_flushes_only_on_atlas():
     x = torch.tensor([2.0 ** -8, 448.0, 1000.0])
     assert F.fp8(x, 448.0, flush=True).tolist() == [0.0, 448.0, 448.0]
     assert F.fp8(x, 448.0).tolist() == [2.0 ** -8, 448.0, 448.0]
-
-
-def test_ipt_emulation_is_the_atlas_datapath():
-    """mm_ipt (BF16 rounding per 32-wide K tile) against numerics.ipt_matmul on activation-like
-    FP8 tiles, chained over K = 256."""
-    g = torch.Generator().manual_seed(3)
-    a = torch.randn(32, 256, generator=g) * torch.rand(1, 256, generator=g) * 4
-    w = torch.randn(64, 256, generator=g) * 0.05
-    ea, ew = quant.exponent_for(float(a.abs().max()), 2.0), quant.exponent_for(float(w.abs().max()))
-    ca, cw = quant.to_fp8(a, ea), quant.to_fp8(w, ew)
-    acc = torch.zeros(32, 64, dtype=torch.bfloat16)
-    for k in range(0, 256, 32):
-        acc = numerics.ipt_matmul(ca[:, k:k + 32].view(torch.float8_e4m3fn), cw[:, k:k + 32].view(torch.float8_e4m3fn), acc)
-    fast = F.mm_ipt(quant.from_fp8(ca, ea), quant.from_fp8(cw, ew))
-    assert float((fast == acc.float() * 2.0 ** (ea + ew)).float().mean()) >= 0.99
 
 
 def test_fp32_emulation_against_blackwell_fp8_and_atlas_nvfp4():

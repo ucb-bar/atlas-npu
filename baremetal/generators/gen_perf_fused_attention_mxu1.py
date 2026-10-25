@@ -3,9 +3,8 @@
 
 MXU1 (IPT) sibling of stock gen_smolvla_fused_attention.py. Routes the
 matmul golden through software_models.mxu1_ipt.IPTLinearRTLFunction. The
-uint8 FP8 bytes emitted by bf16_tile_to_e4m3_bytes are decoded to FP32
-via software_models' decode_e4m3 before the IPT call (IPT doesn't accept
-raw uint8).
+uint8 FP8 bytes emitted by bf16_tile_to_e4m3_bytes_mxu1 are decoded to FP32
+(e4m3_bytes_to_float) before the IPT call (IPT doesn't accept raw uint8).
 
 Single-tile flash attention over 2 K-tiles (k_seq=64), head_dim=64:
 
@@ -30,11 +29,9 @@ Atlas's MXU computes A @ W^T natively. Q @ K^T pushes K as W (no XLU).
 exp_s @ V_left pushes V_mlir[:32, :] as W (since V_left = V_mlir[:32, :]^T).
 
 Golden mirrors atlas hardware:
-  - IPTLinearRTLFunction handles the K-chain FP32 accumulator + final BF16
-    truncation for the MXU1 engine (aligned-product accumulation, rounds
-    once at the end). Uint8 FP8 bytes from bf16_tile_to_e4m3_bytes are
-    decoded to FP32 via software_models' decode_e4m3 before the IPT call
-    (IPT does not accept raw uint8, unlike SA).
+  - IPTLinearRTLFunction handles the K-chain FP32 accumulator and the BF16
+    pop for the MXU1 engine. bf16_tile_to_e4m3_bytes_mxu1 models the BF16 → FP8
+    accumulator round trip (vmatpush.acc.bf16, vmatpop.fp8).
   - VPU pair ops, row-reduces, and unaries route through
     vpu_gen_utils.MODEL (atlas's VectorEngineModel) for bit-exact pipeline
     match. VMAX.BF16 → "pairmax".
@@ -58,6 +55,7 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from gen_utils import emit_test_data
+from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
 from vpu_gen_utils import (
     BF16_PER_BEAT,
     ROWS_PER_REGISTER,
@@ -68,52 +66,8 @@ from vpu_gen_utils import (
     run_row_reduce_tensor,
     run_unary_rows,
 )
-from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
-from software_models.mxu1_ipt.fp_formats import OutputFmtSel, decode_e4m3
-from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
-
-
-def fp8_uint8_to_fp32(tile_uint8: torch.Tensor) -> torch.Tensor:
-    """Decode E4M3 uint8 bytes → FP32 via software_models decode_e4m3.
-
-    IPTLinearRTLFunction expects float-typed inputs. Keeping the conversion inside software_models
-    rather than going through torch.float8_e4m3fn's native cast.
-    """
-    arr = tile_uint8.numpy().astype(np.uint8)
-    fp32 = np.empty(arr.shape, dtype=np.float32)
-    it = np.nditer(arr, flags=["multi_index"])
-    for x in it:
-        fp32[it.multi_index] = decode_e4m3(int(x)).value
-    return torch.from_numpy(fp32)
-
-
-def bf16_tile_to_e4m3_bytes(tile: torch.Tensor) -> torch.Tensor:
-    """Quantize a BF16 tile to raw E4M3 bytes with the IPT converter.
-
-    Keep this path for Q/K/V tiles, which are not especially sensitive to
-    the softmax-tail underflow edge.
-    """
-    if tile.dtype != torch.bfloat16:
-        raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
-    bits = tile.contiguous().view(torch.int16).numpy().astype(np.uint16)
-    flat = bits.ravel()
-    out = np.empty(flat.size, dtype=np.uint8)
-    for i in range(flat.size):
-        out[i] = bf16_scale_to_e4m3(int(flat[i]), 0) & 0xFF
-    return torch.from_numpy(out.reshape(bits.shape))
-
-
-def bf16_tile_to_e4m3_bytes_torch_cast(tile: torch.Tensor) -> torch.Tensor:
-    """Quantize BF16 tile via PyTorch's float8 cast and return raw FP8 bytes.
-
-    This is used for the online-softmax `exp_s` path, where values cluster
-    near the E4M3 underflow boundary and empirically track the MXU pop path
-    more closely when routed through the float8 cast semantics.
-    """
-    if tile.dtype != torch.bfloat16:
-        raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
-    fp8 = tile.to(torch.float32).to(torch.float8_e4m3fn).contiguous()
-    return fp8.view(torch.uint8)
+from software_models.mxu1_ipt.fp_formats import OutputFmtSel
+from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction, e4m3_bytes_to_float
 
 
 Q_ROWS    = 32
@@ -188,18 +142,15 @@ def main():
     V0_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
     V1_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
 
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=Q_ROWS, num_lanes=Q_ROWS, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     def mxu_matmul(a_u8: torch.Tensor, w_u8: torch.Tensor,
                    scale_exp: int = 0) -> torch.Tensor:
         """Drop-in replacement for stock `sa_bf16(a_u8, w_u8, scale_exp=...)`
         that routes through IPTLinearRTLFunction. Decodes uint8 FP8 bytes
         to FP32 via software_models before the call."""
-        a_fp32 = fp8_uint8_to_fp32(a_u8)
-        w_fp32 = fp8_uint8_to_fp32(w_u8)
+        a_fp32 = e4m3_bytes_to_float(a_u8)
+        w_fp32 = e4m3_bytes_to_float(w_u8)
         return ipt_bf16(a_fp32, w_fp32, scale_exp=scale_exp)
 
     # ── Online-softmax state (broadcast tiles, stored as bank rows) ──
@@ -219,11 +170,11 @@ def main():
         + constant_bf16_rows(ROWS_PER_REGISTER, SCALE_BITS)
     )
 
-    Q_FP8 = bf16_tile_to_e4m3_bytes(Q_RAW)
+    Q_FP8 = bf16_tile_to_e4m3_bytes_mxu1(Q_RAW)
 
     # ── Per K-tile flash-attention body ──
     for K_RAW, V_MLIR in [(K0_RAW, V0_MLIR), (K1_RAW, V1_MLIR)]:
-        K_FP8 = bf16_tile_to_e4m3_bytes(K_RAW)
+        K_FP8 = bf16_tile_to_e4m3_bytes_mxu1(K_RAW)
         scores_bf16 = mxu_matmul(
             Q_FP8, K_FP8, scale_exp=0
         ).to(torch.bfloat16)
@@ -251,11 +202,11 @@ def main():
         exp_s_rows = run_unary_rows("exp", exp_s_pre_rows)
 
         exp_s_bf16 = bank_rows_to_bf16_tile(exp_s_rows)
-        exp_s_fp8  = bf16_tile_to_e4m3_bytes_torch_cast(exp_s_bf16)
+        exp_s_fp8  = bf16_tile_to_e4m3_bytes_mxu1(exp_s_bf16)
 
         # V_top = V_mlir[:32, :] [32, 32]; pushed as W → A @ V_top^T = exp_s @ V_left
-        V_top_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[:Q_ROWS, :].contiguous())
-        V_bot_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[Q_ROWS:, :].contiguous())
+        V_top_fp8 = bf16_tile_to_e4m3_bytes_mxu1(V_MLIR[:Q_ROWS, :].contiguous())
+        V_bot_fp8 = bf16_tile_to_e4m3_bytes_mxu1(V_MLIR[Q_ROWS:, :].contiguous())
 
         vc_left_bf16  = mxu_matmul(exp_s_fp8, V_top_fp8, scale_exp=0).to(torch.bfloat16)
         vc_right_bf16 = mxu_matmul(exp_s_fp8, V_bot_fp8, scale_exp=0).to(torch.bfloat16)

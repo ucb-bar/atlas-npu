@@ -431,7 +431,64 @@ class InnerProductTreesTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
           assert(v == BF16_32, s"Row $row: expected 0x4200, got 0x${v.toHexString}")
         }
       }
-    }
+
+      // ── Test 9: FP32 accumulator: 256 + 1 + 1 = 258 (a BF16 one stays at 256) ──
+      println("  Test 9: FP32 accumulator")
+      idle(dut)
+      val bf16Row256 = packElems(Seq.fill(16)(0x4380), 16)
+      for (row <- 0 until p.tileRows) {
+        trfWriteRow(dut, BIAS_BANK, row, bf16Row256)
+        trfWriteRow(dut, BIAS_BANK + 1, row, bf16Row256)
+      }
+      sendCmd(dut, MxuOp.PushAccBF16, mregId = BIAS_BANK)
+      waitDataIdle(dut)
+      val oneHot = packElems(Seq(E4M3_1) ++ Seq.fill(p.vecLen - 1)(E4M3_0), 8)
+      for (row <- 0 until p.tileRows) {
+        trfWriteRow(dut, WGT_BANK, row, oneHot)
+        trfWriteRow(dut, ACT_BANK, row, oneHot)
+      }
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      for (_ <- 0 until 2) {
+        sendCmd(dut, MxuOp.MatmulAcc, mregId = ACT_BANK)
+        waitComputeIdle(dut)
+      }
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe 0x4381)
+
+      // ── Test 10: E4M3 subnormals count; a NaN input gives BF16 NaN 0x7FFF ──
+      println("  Test 10: subnormal and NaN inputs")
+      idle(dut)
+      loadUniformTile(dut, p, WGT_BANK, E4M3_1)
+      sendCmd(dut, MxuOp.PushWeight, mregId = WGT_BANK)
+      waitDataIdle(dut)
+      loadUniformTile(dut, p, ACT_BANK, 0x01)  // 2^-9
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe 0x3D80)  // 32 x 2^-9
+      trfWriteRow(dut, ACT_BANK, 0, packElems(Seq(0x7F) ++ Seq.fill(p.vecLen - 1)(E4M3_1), 8))
+      sendCmd(dut, MxuOp.Matmul, mregId = ACT_BANK)
+      waitComputeIdle(dut)
+      sendCmd(dut, MxuOp.PopAccBF16, mregId = OUT_BANK_LO)
+      waitDataIdle(dut)
+      readBF16Results(dut, p, OUT_BANK_LO, 0).foreach(_ shouldBe 0x7FFF)
+
+      // ── Test 11: FP8 push and pop keep E4M3 subnormals; the pop multiplies by 2^(e - 127) ──
+      println("  Test 11: FP8 push and pop")
+      idle(dut)
+      loadUniformTile(dut, p, BIAS_BANK, 0x81)  // -2^-9
+      sendCmd(dut, MxuOp.PushAccFP8, mregId = BIAS_BANK)
+      waitDataIdle(dut)
+      for ((scale, code) <- Seq(127 -> 0x81, 128 -> 0x82, 136 -> 0xB8)) {
+        sendCmd(dut, MxuOp.PopAccFP8, mregId = OUT_BANK_LO, scaleE8M0 = scale)
+        waitDataIdle(dut)
+        val row = trfReadRow(dut, OUT_BANK_LO, 0)
+        (0 until p.numLanes).foreach(l => ((row >> (8 * l)) & 0xFF).toInt shouldBe code)
+      }
+    }.result
   }
 
   // Run the suite for several pipeline depths.

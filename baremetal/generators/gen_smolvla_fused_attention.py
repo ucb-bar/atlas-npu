@@ -172,10 +172,7 @@ def main():
     V0_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
     V1_MLIR = (torch.randn(HEAD_DIM, Q_ROWS) * 0.5).to(torch.bfloat16)
 
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=Q_ROWS, num_lanes=Q_ROWS, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     # ── Online-softmax state (broadcast tiles, stored as bank rows) ──
     NEG_BITS   = float_to_bf16(INIT_NEG)

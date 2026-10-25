@@ -93,10 +93,7 @@ def main():
     B = (torch.randn(K, N) * 0.5).to(torch.bfloat16)
     BIAS = torch.randn(M, N, dtype=torch.bfloat16)
 
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     preloads: list = []
     checks: list = []

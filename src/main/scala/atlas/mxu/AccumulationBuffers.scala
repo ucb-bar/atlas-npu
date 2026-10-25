@@ -1,10 +1,11 @@
 // ============================================================================
-// AccumulationBuffers.scala — Dual BF16 accumulation-buffer storage.
+// AccumulationBuffers.scala — Dual accumulation-buffer storage.
 //
 // Spec parameters (per buffer):
 //   ACCUM_BUFFER_ROWS      = 32   rows
-//   ACCUM_BUFFER_COLS_BF16 = 32   BF16 columns
-//   ACCUM_BUFFER_BYTES     = 2048 bytes  (32 × 32 × 2)
+//   ACCUM_BUFFER_COLS_BF16 = 32   columns of MxuParams.accumFmt (FP32 in mxu1,
+//                                 BF16 in mxu0)
+//   ACCUM_BUFFER_BYTES     = 4096 bytes in mxu1 (32 × 32 × 4)
 //
 // Two identically-sized buffers are selected by the `accSel` bit in each
 // bundle.  The module is parameterized by MxuParams.
@@ -14,11 +15,11 @@
 //   1. Compute write / read — the MXU datapath writes result rows and reads
 //      partial sums during matrix-multiply operations.
 //
-//   2. Load (push path) — the sequencer writes BF16 data into a buffer
-//      after optional FP8→BF16 dequantization (dequant lives in sequencer).
+//   2. Load (push path) — the sequencer writes a row into a buffer after
+//      converting it to the accumulator format (in the sequencer).
 //
-//   3. Store (pop path) — the sequencer reads raw BF16 rows out of a buffer
-//      for optional BF16→FP8 quantization (quant lives in sequencer).
+//   3. Store (pop path) — the sequencer reads raw rows out of a buffer and
+//      converts them to the m-register format (in the sequencer).
 //
 // All (de)quantization happens in the sequencer, not here.
 //
@@ -49,7 +50,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
   val io = IO(new Bundle {
 
     // ── Compute pipeline (MXU datapath ↔ accum buffer) ─────────────
-    /** Write a BF16 result row from the compute pipeline. */
+    /** Write a result row from the compute pipeline. */
     val computeWriteReq = Flipped(Valid(new AccBufWriteReq(p)))
     /** Address for a compute-side partial-sum read. */
     val computeReadAddr = Input(new AccBufReadAddr(p))
@@ -59,7 +60,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     val computeReadData = Output(Vec(numCols, UInt(colWidth.W)))
 
     // ── Load path (sequencer → accum buffer) ───────────────────────
-    /** Write a BF16 row into the buffer (post-dequant push). */
+    /** Write a row into the buffer (push, after conversion). */
     val loadReq = Flipped(Valid(new AccBufLoadReq(p)))
 
     // ── Store path (accum buffer → sequencer) ──────────────────────
@@ -67,7 +68,7 @@ class AccumulationBuffers(p: MxuParams) extends Module {
     val storeAddr   = Input(new AccBufStoreAddr(p))
     /** Pulse to request a store/pop read-out. */
     val storeReadEn = Input(Bool())
-    /** Raw BF16 row returned one cycle after `storeReadEn`. */
+    /** Raw row returned one cycle after `storeReadEn`. */
     val storeData   = Output(Vec(numCols, UInt(colWidth.W)))
   })
 

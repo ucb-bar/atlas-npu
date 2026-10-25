@@ -59,10 +59,12 @@ class CvtLanes extends Module {
     val e    = Input(Vec(16, UInt(8.W)))
     val e4m3 = Output(Vec(16, UInt(8.W)))
     val bf16 = Output(Vec(16, UInt(16.W)))
+    val bf16Unscaled = Output(Vec(16, UInt(16.W)))
     val f32  = Output(Vec(16, UInt(32.W)))
   })
   io.e4m3 := VecInit(io.x.zip(io.e).map { case (x, e) => Cvt.e4m3RnSatfinite(x, e) })
   io.bf16 := VecInit(io.x.zip(io.e).map { case (x, e) => Cvt.bf16Rne(x, e) })
+  io.bf16Unscaled := VecInit(io.x.map(Cvt.bf16Rne(_)))
   io.f32  := VecInit(io.x.map(x => Cvt.e4m3ToF32(x(7, 0))))
 }
 
@@ -193,6 +195,7 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
       }
       sweep(bf16.length, bf16(_)._1, _ => 127) { (i, lane) =>
         bad.check(f"bf16 x 0x${bf16(i)._1}%08x", peek(dut.io.bf16(lane)), bf16(i)._2)
+        bad.check(f"bf16 unscaled x 0x${bf16(i)._1}%08x", peek(dut.io.bf16Unscaled(lane)), bf16(i)._2)
       }
       sweep(256, _.toLong, _ => 127) { (i, lane) =>
         bad.check(f"push x 0x$i%02x", peek(dut.io.f32(lane)), push(i))

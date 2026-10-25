@@ -109,10 +109,7 @@ def packed_rows_to_fp8_bytes(packed_rows: list[list[int]]) -> torch.Tensor:
 
 
 def main():
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     torch.manual_seed(49)
     Q = torch.randint(-4, 4, (TILE, TILE), dtype=torch.int8).to(torch.float8_e4m3fn)

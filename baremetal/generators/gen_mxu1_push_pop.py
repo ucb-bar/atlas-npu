@@ -62,9 +62,9 @@ def float_to_bf16_bits(x: float) -> int:
 
 def e4m3_to_float_hw(byte: int) -> float:
     """
-    Decode E4M3 to float matching the hardware behavior described in the test:
-      - exp=0      -> zero/subnormal flushed to 0
-      - exp=15,m=7 -> NaN flushed to 0
+    Decode the test's E4M3 constants (normal codes) to float:
+      - exp=0      -> 0 (the test has no subnormal codes)
+      - exp=15,m=7 -> 0 (the test has no NaN codes)
       - otherwise normal decode
     """
     byte &= 0xFF

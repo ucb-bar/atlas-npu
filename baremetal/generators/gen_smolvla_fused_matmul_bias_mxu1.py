@@ -12,12 +12,12 @@ Atlas MXU computes `A @ W^T` natively, so B is `VTRPOSE.XLU`-d to B^T
 before being pushed as the weight; the matmul then yields `A @ B`.
 
 Golden mirrors the hardware:
-  - `bf16_tile_to_e4m3_bytes` (from `mxu_fp8_utils`) reproduces the
-    `VMATPUSH.ACC.BF16 + VMATPOP.FP8` quantization bit-for-bit.
+  - `bf16_tile_to_e4m3_bytes_mxu1` (from `mxu_fp8_utils`) reproduces the
+    `VMATPUSH.ACC.BF16 + VMATPOP.FP8` quantization on mxu1 bit-for-bit.
   - `IPTLinearRTLFunction` (with FP32-decoded E4M3 inputs) handles the
-    FP8 matmul + accumulator BF16 narrowing. IPT differs from SA here:
-    SA accepts uint8 bytes directly, IPT does not, so we decode the
-    same E4M3 bytes back to FP32 via `decode_e4m3`.
+    FP8 matmul, the FP32 accumulator and the BF16 pop. IPT differs from SA
+    here: SA accepts uint8 bytes directly, IPT does not, so we decode the
+    same E4M3 bytes back to FP32 via `e4m3_bytes_to_float`.
   - `run_binary_rows("add", ...)` adds the bias through atlas's
     `VectorEngineModel` so the VADD.BF16 result matches RTL.
 """
@@ -30,7 +30,7 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from gen_utils import emit_test_data
-from mxu_fp8_utils import bf16_tile_to_e4m3_bytes
+from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
 from vpu_gen_utils import (
     BF16_PER_BEAT,
     FP8_PER_BEAT,
@@ -97,15 +97,13 @@ def main():
 
     # B is pre-quantized to FP8 in DRAM (host-side quant matches the
     # hardware path used for A on-chip).
-    B_FP8 = bf16_tile_to_e4m3_bytes(B_RAW, scale_exp=0)
+    B_FP8 = bf16_tile_to_e4m3_bytes_mxu1(B_RAW, scale_exp=0)
 
     # Golden: also quantize A through the same converter (mirrors what
     # VMATPUSH.ACC.BF16 + VMATPOP.FP8 does on-chip).
-    A_FP8 = bf16_tile_to_e4m3_bytes(A_RAW, scale_exp=0)
+    A_FP8 = bf16_tile_to_e4m3_bytes_mxu1(A_RAW, scale_exp=0)
 
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1, out_fmt_sel=OutputFmtSel.OutBF16
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
     # IPTLinearRTLFunction computes y = x @ w^T. For A @ B, pass w = B^T.
     # IPT requires FP32 inputs (SA accepts uint8 directly, IPT does not),
     # so decode the same E4M3 bytes that feed DRAM back to FP32.

@@ -2,11 +2,11 @@
 // InnerProductTreesTop.scala — Top-level wrapper for the IPT MXU.
 //
 // Instantiates and wires:
-//   • InnerProductTreesSequencer — 3-slot concurrent command FSMs,
-//                                  FP8↔BF16 (de)quant.
+//   • InnerProductTreesSequencer — 3-slot concurrent command FSMs, the
+//                                  FP32 ↔ FP8/BF16 conversions (atlas.common.Cvt).
 //   • InnerProductTrees          — MXU datapath (reduction-tree lanes).
 //   • WeightBuffers              — dual weight-tile storage (from atlas.mxu).
-//   • AccumulationBuffers        — dual BF16 accum storage (from atlas.mxu).
+//   • AccumulationBuffers        — dual FP32 accum storage (from atlas.mxu).
 // ============================================================================
 
 package atlas.ipt

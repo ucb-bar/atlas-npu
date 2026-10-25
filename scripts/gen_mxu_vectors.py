@@ -3,9 +3,8 @@
 gen_mxu_vectors.py: generate MXU test vectors using the IPT functional model,
 then convert expected outputs to E4M3 with scaling.
 
-Test data is generated using the IPT model's own E4M3 LUT so that
-the float→byte round-trip inside the model is consistent with the hex values
-written to the test vector files.
+The E4M3 values convert exactly to and from the hex values written to the
+test vector files. The E4M3 vectors pop the IPT's FP32 accumulator (the IPT model).
 
 Produces two files:
   1. ipt_<base>.txt         – BF16-expected vectors (IPT model)
@@ -21,24 +20,20 @@ from numpy.random import default_rng
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baremetal", "generators"))
+# The IPT model uses npu-model's FP8 MMA and conversions (npu_model.configs).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "npu-model"))
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     _E4M3_FLOAT_LUT,
+    float_to_e4m3_bytes,
 )
-from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
-# ── Build pool of valid E4M3 (byte, float) pairs from the model's own LUT ──
+# ── Pool of E4M3 (byte, float) pairs: +0 and the normal values below 256 ──
 
 def build_e4m3_pool():
-    valid_bytes = []
-    valid_floats = []
-    for b in range(256):
-        f = _E4M3_FLOAT_LUT[b].item()
-        if b == 0 or f != 0.0:
-            valid_bytes.append(b)
-            valid_floats.append(f)
-    return np.array(valid_bytes, dtype=np.uint8), np.array(valid_floats, dtype=np.float32)
+    valid_bytes = np.array([b for b in range(256) if b == 0 or 1 <= (b >> 3) & 15 <= 14], dtype=np.uint8)
+    return valid_bytes, _E4M3_FLOAT_LUT.numpy()[valid_bytes]
 
 POOL_BYTES, POOL_FLOATS = build_e4m3_pool()
 
@@ -83,8 +78,10 @@ def compute_expected_row(model, act_f32, wgt_f32, sel, bias_f32):
 # ── generate BF16-expected vectors ─────────────────────────────────────────
 
 def generate_vectors(path, model, args):
+    """Write the BF16-expected vectors; return each case's (act, wgt, bias) floats."""
     rng = default_rng(args.seed)
     case_types = ["basic", "bias"]
+    cases = []
     with open(path, "w") as f:
         for i in range(args.num):
             ct = case_types[i % 2]
@@ -111,12 +108,14 @@ def generate_vectors(path, model, args):
                 bias_f32 = bf  # [num_lanes]
 
             exp_hex = compute_expected_row(model, act_f32, wgt_f32, sel, bias_f32)
+            cases.append((act_f32, wgt_f32, bias_f32))
 
             f.write(f"# {i} {ct}\nsel {sel}\nact {' '.join(act_hex)}\n")
             for r, row in enumerate(wgt_hex_all):
                 f.write(f"wgt {r} {' '.join(row)}\n")
             f.write(f"bias {' '.join(bias_hex)}\nexp {' '.join(exp_hex)}\n\n")
     print(f"Wrote {args.num} vectors to {path}")
+    return cases
 
 # ── convert exp lines to E4M3 with scaling ─────────────────────────────────
 
@@ -130,10 +129,13 @@ def choose_dequant_scale(vals):
     raw = mx / 448.0
     return 1.0 if raw <= 1.0 else 2.0 ** math.ceil(math.log2(raw))
 
-def convert_file(inp: str, outp: str):
+def convert_file(inp: str, outp: str, cases):
+    """E4M3 pop of each case's FP32 accumulator at scale 2^se, se chosen from its BF16 results."""
+    pop = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutE4M3)
     with open(inp) as f:
         lines = f.readlines()
     out = []
+    i = 0
     for line in lines:
         s = line.strip()
         if not s.startswith("exp "):
@@ -144,9 +146,9 @@ def convert_file(inp: str, outp: str):
         ds = choose_dequant_scale(vals)
         qs = 1.0 / ds
         se = int(round(math.log2(qs)))
-        # Match the hardware pop path exactly: BF16 -> scaled E4M3 with
-        # underflow flushed to zero and no E4M3 subnormal outputs.
-        qb = [bf16_scale_to_e4m3(float_to_bf16_bits(v), se) for v in vals]
+        act, wgt, bias = cases[i]
+        qb = float_to_e4m3_bytes(pop(act, wgt, b_q=bias, scale_exp=se)).squeeze(0).tolist()
+        i += 1
         out.append(f"scale_exp {(se & 0xFF):02x}    # {se:+d}  (quant_scale={qs:.9g}, dequant_scale={ds:.9g})\n")
         out.append("exp_e4m3 " + " ".join(f"{b:02x}" for b in qb) + "\n")
         recon = [decode_e4m3_hw(b) * ds for b in qb]
@@ -167,10 +169,7 @@ def main():
     args = ap.parse_args()
 
     # IPT model — matches doc 20
-    ipt_model = IPTLinearRTLFunction(
-        vec_len=32, num_lanes=32, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_model = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     stripped = args.out.removesuffix(".txt")
     outdir = os.path.dirname(stripped)
@@ -185,8 +184,8 @@ def main():
     ipt_bf16_path = outpath(f"ipt_{base}.txt")
     ipt_e4m3_path = outpath(f"ipt_{base}_e4m3.txt")
 
-    generate_vectors(ipt_bf16_path, ipt_model, args)
-    convert_file(ipt_bf16_path, ipt_e4m3_path)
+    ipt_cases = generate_vectors(ipt_bf16_path, ipt_model, args)
+    convert_file(ipt_bf16_path, ipt_e4m3_path, ipt_cases)
 
 if __name__ == "__main__":
     main()

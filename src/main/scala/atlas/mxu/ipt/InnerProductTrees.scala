@@ -32,8 +32,8 @@ class InnerProductTrees(
     val weightBuf0 = Input(Vec(p.numLanes, Vec(p.vecLen, UInt(p.inputFmt.ieeeWidth.W))))
     /** Weight tile from slot 1 — indexed as (lane)(vecLen). */
     val weightBuf1 = Input(Vec(p.numLanes, Vec(p.vecLen, UInt(p.inputFmt.ieeeWidth.W))))
-    /** Result vector (valid after pipeline flush). */
-    val out        = Valid(Vec(p.numLanes, UInt(p.outputFmt.ieeeWidth.W)))
+    /** FP32 result row (valid after pipeline flush). */
+    val out        = Valid(Vec(p.numLanes, UInt(p.accumFmt.ieeeWidth.W)))
   })
 
   // ==========================================================================
@@ -64,7 +64,6 @@ class InnerProductTrees(
     lane.io.weightBuf1 := io.weightBuf1(laneIdx)
     lane.io.psum       := req.psum(laneIdx)
     lane.io.bufReadSel := req.weightBufSel
-    lane.io.accumulate := req.accumulate
     io.out.bits(laneIdx) := lane.io.out
   }
 }

@@ -9,8 +9,7 @@ import atlas.mxu.MxuParams
 class WithInnerProductTrees(
   arrayRows: Int = 32,
   arrayCols: Int = 32,
-  pipelineDepth: Int = 2,
-  accumIntWidth: Int = 0
+  pipelineDepth: Int = 2
 ) extends Config((site, here, up) => {
   case InnerProductTreeKey => Some(
     InnerProductTreeParams.withPipelineDepth(
@@ -19,8 +18,7 @@ class WithInnerProductTrees(
         mxu = MxuParams(
           arrayRows = arrayRows,
           arrayCols = arrayCols
-        ),
-        accumIntWidth = accumIntWidth
+        )
       )
     )
   )

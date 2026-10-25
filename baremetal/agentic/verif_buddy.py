@@ -283,7 +283,7 @@ def _extract_class_signature(text: str, class_name: str) -> str:
 
 def _extract_enum_summary(text: str, enum_name: str) -> str:
     """Return a one-block summary of an ``enum.Enum`` subclass (the class line
-    and its member assignments). Useful for OutputFmtSel / AddendSel.
+    and its member assignments). Useful for OutputFmtSel.
     """
 
     pattern = re.compile(rf"^class {re.escape(enum_name)}\b.*?:\s*\n", re.MULTILINE)
@@ -479,15 +479,15 @@ def _load_software_models_reference() -> str:
                 "# --- software_models.mxu1_ipt.ipt_rtl_linear ---\n"
                 "# MXU1 inner-product-tree functional adapter. Computes\n"
                 "#     y = x @ w^T + b\n"
-                "# bit for bit against the IPT lane RTL (E4M3 inputs, BF16 or E4M3\n"
-                "# output format). For C = A @ B + bias, pass w = B.T so y = A @ B.\n"
+                "# bit for bit with the RTL: FP32 accumulators (Blackwell FP8 MMA), BF16\n"
+                "# or E4M3 output format. For C = A @ B + bias, pass w = B.T so y = A @ B.\n"
                 + ipt_sig
             )
 
     if fp_fmt_path.exists():
         fmt_text = fp_fmt_path.read_text(encoding="utf-8", errors="replace")
         enum_blocks: list[str] = []
-        for enum_name in ("OutputFmtSel", "AddendSel"):
+        for enum_name in ("OutputFmtSel",):
             summary = _extract_enum_summary(fmt_text, enum_name)
             if summary:
                 enum_blocks.append(summary)
@@ -497,7 +497,6 @@ def _load_software_models_reference() -> str:
             "bf16_bits_to_f32",
             "encode_e4m3_normal",
             "decode_e4m3",
-            "sanitize_bf16",
             "round_right_shift4_rne",
         ):
             sig = _extract_function_signature(fmt_text, fn)
@@ -514,24 +513,16 @@ def _load_software_models_reference() -> str:
     if conv_path.exists():
         conv_text = conv_path.read_text(encoding="utf-8", errors="replace")
         conv_fn_blocks: list[str] = []
-        for fn in (
-            "bf16_scale_to_e4m3",
-            "output_conv_stage",
-            "e4m3_mul_to_prod",
-            "e4m3_prod_to_aligned_int",
-            "aligned_int_to_bf16",
-            "pack_e4m3_prod",
-        ):
+        for fn in ("bf16_scale_to_e4m3",):
             sig = _extract_function_signature(conv_text, fn)
             if sig:
                 conv_fn_blocks.append(sig)
         if conv_fn_blocks:
             blocks.append(
                 "# --- software_models.mxu1_ipt.converters ---\n"
-                "# BF16 <-> E4M3 / product-format conversions that mirror the\n"
-                "# VMATPUSH.ACC / VMATPOP quantization semantics of the hardware.\n"
-                "# For a BF16-valued tile that hardware will round-trip through FP8,\n"
-                "# `bf16_scale_to_e4m3(bits, scale_exp)` is the bit-exact mirror.\n"
+                "# The MXU0 FP8 pop: for a BF16-valued tile that MXU0 round-trips\n"
+                "# through FP8, `bf16_scale_to_e4m3(bits, scale_exp)` is the bit-exact\n"
+                "# mirror. MXU1 pops convert as npu_model.configs.cvt does.\n"
                 + "\n\n".join(conv_fn_blocks)
             )
 
@@ -616,11 +607,8 @@ def _generator_canonical_imports_block() -> str:
         # Software RTL models for MXU goldens (use for any test that pushes a
         # matmul tile through MXU1 — these are bit-exact against the RTL):
         from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
-        from software_models.mxu1_ipt.fp_formats import OutputFmtSel, AddendSel
-        from software_models.mxu1_ipt.converters import (
-            bf16_scale_to_e4m3,
-            output_conv_stage,
-        )
+        from software_models.mxu1_ipt.fp_formats import OutputFmtSel
+        from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
         """
     ).rstrip()
 
@@ -756,10 +744,11 @@ def _load_generator_helper_reference() -> str:
              - `software_models.mxu1_ipt.ipt_rtl_linear.IPTLinearRTLFunction` —
                MXU1 (inner-product-tree) golden for BF16 / FP8 matmul with
                optional bias.
-             - `software_models.mxu1_ipt.fp_formats` — canonical enums
-               (`OutputFmtSel`, `AddendSel`) and BF16/E4M3 rounding primitives.
-             - `software_models.mxu1_ipt.converters` — `bf16_scale_to_e4m3` and
-               `output_conv_stage` model the VMATPUSH.ACC / VMATPOP quantization.
+             - `software_models.mxu1_ipt.fp_formats` — the canonical enum
+               (`OutputFmtSel`) and BF16/E4M3 rounding primitives.
+             - `software_models.mxu1_ipt.converters` — `bf16_scale_to_e4m3`, a
+               BF16 to E4M3 quantization without E4M3 subnormals. MXU1 pops
+               convert as `npu_model.configs.cvt` does.
              - `software_models.vpu.vector_engine_model.VectorEngineModel` —
                the underlying VPU model; `vpu_gen_utils.MODEL` is a shared instance.
 
@@ -1565,7 +1554,7 @@ tests contribute coverage.
    `run_fp8_pack_rows`, `run_vli_rows`, `tensor_preloads`/`tensor_checks`), and
    `generators/software_models/` (the bit-exact MXU1 `IPTLinearRTLFunction`,
    VPU `VectorEngineModel`, and `bf16_scale_to_e4m3` /
-   `OutputFmtSel` / `AddendSel`). They are the single source of truth for every
+   `OutputFmtSel`). They are the single source of truth for every
    numerical model in the chip. If you find yourself writing a custom
    `bf16_word(v)` lookup, a `fp8_byte(v)` dict, a `(v << 8)` conversion, an
    ad-hoc matmul loop, or a hand-rolled `exp` / `tanh` / `rsum` oracle, stop and

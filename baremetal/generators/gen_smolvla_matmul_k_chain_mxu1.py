@@ -45,9 +45,7 @@ C_BANK3_BASE = C_BANK2_BASE + TILE  # beats 160..191
 
 
 def main():
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1, out_fmt_sel=OutputFmtSel.OutBF16
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     torch.manual_seed(44)
     input_a_fp8 = torch.randint(

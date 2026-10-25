@@ -151,10 +151,7 @@ def emit_bf16_rows_preload(preloads, byte_off, rows: list[list[int]]):
 # Functional models
 # ------------------------------------------------------------------
 
-ipt_bf16 = IPTLinearRTLFunction(
-    vec_len=32, num_lanes=32, pipeline_depth=1,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 # ------------------------------------------------------------------
 # Generate inputs

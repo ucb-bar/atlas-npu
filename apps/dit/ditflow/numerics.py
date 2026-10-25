@@ -1,117 +1,57 @@
-"""Vectorized Atlas RTL arithmetic, bit-exact with npu_model.configs.rtl_math.
+"""Vectorized Atlas mxu1 arithmetic, bit-exact with npu_model.configs.fp8_mma.
 
-npu_model's RtlNumerics evaluates the inner-product-tree MXU and its FP8 pop one element at a
-time in Python, about 30 ms per 32 x 32 x 32 matmul. A DiT sampler runs some 400,000 of
-them, so FastRtlNumerics computes the same integer datapaths on whole tiles with torch int64
-tensors. tests/test_numerics.py checks every function against rtl_math bit for bit.
+A DiT sampler runs some 400,000 32 x 32 x 32 matmuls on mxu1. FastRtlNumerics computes each one
+as a torch port of fp8_mma's integer datapath (one NVIDIA Blackwell FP8 MMA step per output, FP32
+accumulators). tests/test_numerics.py checks it against fp8_mma bit for bit.
 """
-from functools import lru_cache
-
 import torch
 
 from npu_model.configs.numerics import RtlNumerics
-from npu_model.configs.rtl_math import product
 
-
-@lru_cache(maxsize=None)
-def _product_tables():
-    """E4M3Mul for every (a, b) byte pair: sign, biased E5 exponent (0 = zero), 7 fraction bits."""
-    sign = torch.zeros(256, 256, dtype=torch.int64)
-    exp = torch.zeros(256, 256, dtype=torch.int64)
-    frac = torch.zeros(256, 256, dtype=torch.int64)
-    for a in range(256):
-        for b in range(256):
-            s, e, m = product(a, b)
-            sign[a, b], exp[a, b], frac[a, b] = s, e, m
-    return sign, exp, frac
-
-
-def _bits16(x: torch.Tensor) -> torch.Tensor:
-    return x.contiguous().view(torch.int16).to(torch.int64) & 0xFFFF
-
-
-def _from_bits16(bits: torch.Tensor) -> torch.Tensor:
-    return bits.to(torch.int32).to(torch.int16).view(torch.bfloat16)
+_CODES = torch.arange(256)
+_FIELD = (_CODES >> 3) & 15
+_SIG = torch.where(_FIELD > 0, 8 | (_CODES & 7), _CODES & 7)  # |E4M3| = _SIG / 8 x 2^_EXP
+_EXP = _FIELD.clamp(min=1) - 7
+_NAN = _CODES & 0x7F == 0x7F
+_NEG = _CODES >> 7 == 1
 
 
 def ipt_matmul(a: torch.Tensor, w: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
-    """AnchorAccumulationTree: c + a @ w.T, one rounding per output.
+    """AnchorAccumulationTree: c + a @ w.T, fp8_mma.matmul in torch.
 
     a: [R, K] FP8 activations; w: [N, K] FP8, row j = output column j (a weight slot);
-    c: [R, N] BF16 partial sums. Returns [R, N] BF16. Same arithmetic as rtl_math.ipt_row.
+    c: [R, N] FP32 accumulators. Returns [R, N] FP32 with fp8_mma's bits (K = 32 on mxu1).
     """
-    ps, pe, pm = _product_tables()
-    ai = a.contiguous().view(torch.uint8).to(torch.int64)
-    wi = w.contiguous().view(torch.uint8).to(torch.int64)
-    idx = ai[:, None, :] * 256 + wi[None, :, :]              # [R, N, K]
-    s, e, m = ps.view(-1)[idx], pe.view(-1)[idx], pm.view(-1)[idx]
-    valid = e != 0
-
-    cb = _bits16(c)
-    cpe, cpm = (cb >> 7) & 255, cb & 127
-    c_nonzero = (cb & 0x7FFF) != 0
-    neg_big = torch.full_like(cpe, -1024)
-    anchor = torch.maximum(torch.where(valid, e - 13, -1024).amax(-1),
-                           torch.where(c_nonzero, cpe - 127, neg_big)) + 7
-
-    shift = (anchor[..., None] - (e - 13)).clamp(0, 62)
-    magnitude = ((128 | m) << 24) >> shift
-    total = torch.where(valid, torch.where(s == 1, -magnitude, magnitude), 0).sum(-1)
-
-    cshift = anchor - (cpe - 127) - 24
-    sig = torch.where(cpe != 0, 128, 0) | cpm
-    right = sig >> cshift.clamp(0, 62)
-    left = (sig << (-cshift).clamp(0, 62)) & 0xFFFFFFFF
-    cmag = torch.where((cshift >= 32) | (cshift < -31), 0, torch.where(cshift >= 0, right, left))
-    total = total + torch.where((cb & 0x8000) != 0, -cmag, cmag)
-    total = ((total + (1 << 31)) & 0xFFFFFFFF) - (1 << 31)
-
-    sign = (total < 0).to(torch.int64)
-    mag = total.abs()
-    _, exponent = torch.frexp(mag.to(torch.float64))
-    lead = exponent.to(torch.int64) - 1                       # bit_length - 1
-    sh = (lead - 7).clamp(min=0)
-    sigr = mag >> sh
-    rem = mag & ((1 << sh) - 1)
-    half = torch.where(sh > 0, 1 << (sh - 1).clamp(min=0), 0)
-    up = (sh > 0) & ((rem > half) | ((rem == half) & ((sigr & 1) == 1)))
-    sigr = sigr + up.to(torch.int64)
-    over = sigr >= 256
-    sigr = torch.where(over, sigr >> 1, sigr)
-    lead = lead + over.to(torch.int64)
-    bexp = lead + anchor - 31 + 127
-    bits = torch.where(bexp <= 0, 0,
-                       torch.where(bexp >= 255, (sign << 15) | 0x7F7F,
-                                   (sign << 15) | (bexp.clamp(0, 255) << 7) | (sigr & 127)))
-    bits = torch.where(total == 0, 0, bits)
-    return _from_bits16(bits)
-
-
-def pack_fp8(value: torch.Tensor, scale: int) -> torch.Tensor:
-    """BF16ScaleToE4M3 (MXU pop), rtl_math.pack_row."""
-    raw = _bits16(value.flatten())
-    sign, exp, mant = raw >> 15, (raw >> 7) & 255, raw & 127
-    shift = min(127, max(-128, int(scale) - 127))
-    adjusted = exp - 127 + shift
-    sig = 128 | mant
-    rounded = (sig >> 4) + (((sig & 8) != 0) & (((sig & 7) != 0) | (((sig >> 4) & 1) != 0))).to(torch.int64)
-    carry = rounded == 16
-    adjusted = adjusted + carry.to(torch.int64)
-    rounded = torch.where(carry, 8, rounded)
-    frac = (rounded - 8) & 7
-    out = torch.where(adjusted > 8, (sign << 7) | 0x7E,
-                      torch.where(adjusted < -6, 0, (sign << 7) | ((adjusted + 7).clamp(0, 15) << 3) | frac))
-    out = torch.where((exp == 255) & (mant == 0), (sign << 7) | 0x7E, out)
-    out = torch.where((exp == 0) | ((exp == 255) & (mant != 0)), 0, out)
-    return out.to(torch.uint8)
+    ai = a.contiguous().view(torch.uint8).long()[:, None, :]
+    wi = w.contiguous().view(torch.uint8).long()[None, :, :]
+    product = _SIG[ai] * _SIG[wi]  # x 2^(e - 6)
+    e = _EXP[ai] + _EXP[wi]
+    negative = _NEG[ai] ^ _NEG[wi]
+    cb = c.contiguous().view(torch.int32).long() & 0xFFFF_FFFF
+    c_field = (cb >> 23) & 255
+    c_exp = c_field.clamp(min=1) - 127
+    c_sig = (cb & 0x7F_FFFF) | torch.where(c_field > 0, 0x80_0000, 0)  # x 2^(c_exp - 23)
+    emax = torch.maximum(c_exp, torch.where(product != 0, e, -1000).amax(-1))
+    # Terms in units of 2^(emax - 25), cut toward zero: P sits at bits 26..19 and C's significand
+    # at bits 25..2 when its exponent is emax.
+    term = (product << 19) >> (emax[..., None] - e).clamp(0, 63)
+    c_term = (c_sig << 2) >> (emax - c_exp).clamp(0, 63)
+    total = torch.where(negative, -term, term).sum(-1) + torch.where(cb >> 31 == 1, -c_term, c_term)
+    magnitude = total.abs()
+    lead = torch.frexp(magnitude.double())[1].long() - 1
+    mantissa = torch.where(lead > 23, magnitude >> (lead - 23).clamp(min=0), magnitude << (23 - lead).clamp(min=0))
+    d = torch.where(total < 0, 1 << 31, 0) | (lead + emax - 25 + 127) << 23 | (mantissa & 0x7F_FFFF)
+    d = torch.where(total == 0, 0, d)
+    # Without nonzero products the sum is C exactly; this also covers a subnormal C.
+    d = torch.where((product == 0).all(-1), torch.where(cb == 0x8000_0000, 0, cb), d)
+    d = torch.where(c_field == 255, cb, d)
+    nan = _NAN[ai].any(-1) | _NAN[wi].any(-1) | ((c_field == 255) & (cb & 0x7F_FFFF != 0))
+    d = torch.where(nan, 0x7FFF_FFFF, d)
+    return torch.where(d >= 1 << 31, d - (1 << 32), d).to(torch.int32).view(torch.float32)
 
 
 class FastRtlNumerics(RtlNumerics):
-    """RtlNumerics with the per-element Python loops replaced by tensor code (same bits)."""
-
-    @staticmethod
-    def acc_to_fp8(x: torch.Tensor, scale: int) -> torch.Tensor:
-        return pack_fp8(x.flatten(), scale).view(torch.float8_e4m3fn).reshape(x.shape)
+    """RtlNumerics with mxu1's matmul as torch tensor code (same bits)."""
 
     @staticmethod
     def inner_product_matmul(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:

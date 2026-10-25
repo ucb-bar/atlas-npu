@@ -53,10 +53,7 @@ OUT_BASE = 256                          # DRAM 0x2000
 
 
 def main():
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     torch.manual_seed(7)
     input_a_fp8 = torch.randint(-8, 8, (M, K), dtype=torch.int8).to(

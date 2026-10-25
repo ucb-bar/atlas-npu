@@ -121,10 +121,7 @@ def emit_bf16_rows_check(checks, byte_off_b0, byte_off_b1, rows_b0, rows_b1):
 
 # ── Functional models ──
 
-ipt_bf16 = IPTLinearRTLFunction(
-    vec_len=32, num_lanes=32, pipeline_depth=1,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 # ── Generate inputs ──
 

@@ -79,7 +79,7 @@ def float_to_bf16_bits(x: float) -> int:
 
 
 def e4m3_to_float(byte: int) -> float:
-    """Decode E4M3 to float (hardware semantics: subnormals and NaN flush to 0)."""
+    """Decode the test's E4M3 constants (normal codes) to float; subnormal and NaN codes give 0."""
     byte &= 0xFF
     sign = -1.0 if (byte & 0x80) else 1.0
     exp  = (byte >> 3) & 0xF

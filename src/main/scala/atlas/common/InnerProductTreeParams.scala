@@ -3,19 +3,18 @@ package atlas.common
 import chisel3._
 import chisel3.util._
 import sp26FPUnits.AtlasFPType
-import sp26FPUnits.E4M3ProdFmt
 import atlas.mxu.MxuParams
 
 case class InnerProductTreeParams(
   mxu:           MxuParams   = MxuParams(),
-  accumIntWidth: Int         = 0,
   pipelineCuts:  Set[Int]    = Set(1), // default: 2-stage pipelined
 ) {
   require(pipelineCuts.forall(c => c >= 0 && c <= 3),
     s"pipelineCuts must be in {0,...,3}, got $pipelineCuts")
-    
+
   require(mxu.arrayRows > 1, s"Inner product trees must have >1 rows, got ${mxu.arrayRows}")
   require(mxu.arrayCols > 1, s"Inner product trees must have >1 cols, got ${mxu.arrayCols}")
+  require(mxu.accumFmt == AtlasFPType.FP32, "the inner product trees accumulate in FP32")
 
   // ── Convenience aliases (match prior API so downstream code compiles) ──
   val numLanes: Int = mxu.arrayCols
@@ -23,33 +22,22 @@ case class InnerProductTreeParams(
   val tileRows: Int = mxu.accumBufferRows
 
   val inputFmt:  AtlasFPType = mxu.inputFmt
-  val outputFmt: AtlasFPType = mxu.outputFmt
   val accumFmt:  AtlasFPType = mxu.accumFmt
-  val mulFmt                 = E4M3ProdFmt
 
-  // ── Anchor-accumulation derived widths ──
-  val anchorHeadroom: Int = {
-    val total = vecLen + 1
-    BigInt(total).bitLength + 1
-  }
-
-  val intWidth:     Int = if (accumIntWidth > 0) accumIntWidth
-                          else mulFmt.sigWidth + anchorHeadroom + 17
-  val expWorkWidth: Int = Seq(inputFmt.expWidth, mulFmt.expWidth, outputFmt.expWidth).max + 4
+  // ── Fused dot-add (docs/fp8-mxu.md): terms in units of 2^(emax - 25) ──
+  /** Two's-complement width of the exact sum of vecLen products (each below 225 x 2^19) and C
+    * (below 2^24 x 4); 33 bits for vecLen = 32. */
+  val sumWidth: Int = log2Ceil(BigInt(vecLen) * 225 * (1 << 19) + ((1 << 24) - 1) * 4 + 1) + 1
 
   // ── Pipeline ──
   val numPipeCuts: Int = pipelineCuts.size
   val latency:     Int = numPipeCuts + 1
-  val shiftBits:   Int = log2Ceil(intWidth + 1)
   val tileRowBits: Int = log2Ceil(tileRows)
-
-  def isOriginalConfig: Boolean =
-    numLanes == 32 && vecLen == 32 && tileRows == 32
 
   override def toString: String = {
     val cutsStr = if (pipelineCuts.isEmpty) "none"
                   else pipelineCuts.toSeq.sorted.mkString(",")
-    s"InnerProductTreeParams(mxu=$mxu, intW=$intWidth, headroom=$anchorHeadroom, cuts={$cutsStr})"
+    s"InnerProductTreeParams(mxu=$mxu, sumW=$sumWidth, cuts={$cutsStr})"
   }
 }
 

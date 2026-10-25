@@ -64,10 +64,7 @@ OUT_BANK_BYTES = 1024
 # IPT functional model
 # ------------------------------------------------------------------
 
-ipt_bf16 = IPTLinearRTLFunction(
-    vec_len=32, num_lanes=32, pipeline_depth=1,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 
 def pad_cols_to_tile(mat: np.ndarray) -> np.ndarray:
@@ -147,10 +144,8 @@ def main():
     # IPTLinearRTLFunction computes F.linear: y = x @ w^T + b
     # We want C = A @ B + bias, so pass w = B^T → y = A @ B^T^T = A @ B.
     #
-    # Bias handling: IPTLinearRTLFunction adds the E4M3 bias at k_tile 0
-    # via AddendSel.UseBias, which is numerically equivalent to the
-    # hardware's VMATPUSH.ACC.FP8 + VMATMUL.ACC flow (the E4M3→aligned
-    # and BF16(E4M3)→aligned conversions produce identical results).
+    # Bias handling: IPTLinearRTLFunction starts the FP32 accumulator from
+    # the E4M3 bias, as the hardware's VMATPUSH.ACC.FP8 + VMATMUL.ACC do.
     # ------------------------------------------------------------------
 
     A_t = torch.from_numpy(A_q)

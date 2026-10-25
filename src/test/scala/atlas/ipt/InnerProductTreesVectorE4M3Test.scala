@@ -356,7 +356,7 @@ class InnerProductTreesVectorE4M3Test extends AnyFlatSpec with Matchers with Pee
           idle(dut)
           dut.clock.step(2)
         }
-      }
+      }.result
     } finally {
       outFile.close()
     }

@@ -375,7 +375,7 @@ class InnerProductTreesVectorTest extends AnyFlatSpec with Matchers with PeekPok
           idle(dut)
           dut.clock.step(2)
         }
-      }
+      }.result
     } finally {
       outFile.close()
     }

@@ -174,10 +174,7 @@ def flatten_rows(rows: list[list[int]]) -> list[int]:
 def mxu1_matmul(a_fp8_q: np.ndarray, b_fp8_q: np.ndarray) -> np.ndarray:
     """Run MXU1 (IPT) matmul software model. Inputs are FP8-quantized FP32
     arrays; output is FP32 holding BF16-rounded values."""
-    ipt = IPTLinearRTLFunction(
-        vec_len=TILE_ROWS, num_lanes=TILE_ROWS, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
     a_t = torch.from_numpy(a_fp8_q)
     w_t = torch.from_numpy(b_fp8_q.T.copy())
     return ipt(a_t, w_t, scale_exp=0).numpy().astype(np.float32)

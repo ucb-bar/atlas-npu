@@ -41,7 +41,7 @@ from vpu_gen_utils import (
     pack_u16_le,
     run_binary_rows,
 )
-from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction
+from software_models.mxu1_ipt.ipt_rtl_linear import IPTLinearRTLFunction, e4m3_words
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
 SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 333
@@ -82,7 +82,7 @@ def emit_fp8_preload(preloads, byte_off, tile):
 
 def emit_fp8_check(checks, byte_off, tile):
     checks += checks_from_words_packed(
-        beat_offset(byte_off), matrix_to_fp8_words(tile)
+        beat_offset(byte_off), e4m3_words(tile)
     )
 
 
@@ -198,10 +198,9 @@ def bf16_tile_to_scaled_fp8(tile_bf16, scale_e8m0):
 # Functional models
 # ------------------------------------------------------------------
 
-ipt_bf16 = IPTLinearRTLFunction(
-    vec_len=32, num_lanes=32, pipeline_depth=1,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
+
+ipt_fp8 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutE4M3)
 
 # ------------------------------------------------------------------
 # Generate inputs
@@ -240,13 +239,12 @@ Q_bf16 = ipt_bf16(X_t, WQ_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
 Q_fp8  = bf16_tile_to_scaled_fp8(Q_bf16, SCALE_E8M0)
 
 # ------------------------------------------------------------------
-# Phase B: MXU1 → K = X @ WK (BF16 acc → FP8 pop)
+# Phase B: MXU1 → K = X @ WK (FP32 acc → FP8 pop)
 # ------------------------------------------------------------------
 
 WK_t = torch.from_numpy(WK.T.copy())
 
-K_bf16 = ipt_bf16(X_t, WK_t, scale_exp=0).numpy().astype(np.float32)
-K_fp8  = bf16_tile_to_scaled_fp8(K_bf16, SCALE_E8M0)
+K_fp8 = ipt_fp8(X_t, WK_t, scale_exp=SCALE_E8M0 - 127).numpy()
 
 # ------------------------------------------------------------------
 # Phase C: MXU1 → S = Q @ K^T (BF16 pop)

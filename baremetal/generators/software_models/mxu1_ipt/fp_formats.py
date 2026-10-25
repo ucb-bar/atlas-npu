@@ -26,27 +26,6 @@ E4M3 = AtlasFPType("E4M3", ieeeWidth=8, expWidth=4, mantissaBits=3, ieeeBias=7)
 BF16 = AtlasFPType("BF16", ieeeWidth=16, expWidth=8, mantissaBits=7, ieeeBias=127)
 
 
-@dataclass(frozen=True)
-class E4M3ProdFmtDesc:
-    width: int = 13
-    expWidth: int = 5
-    mantissaBits: int = 7
-    bias: int = 13
-
-    @property
-    def sigWidth(self) -> int:
-        return 1 + self.mantissaBits
-
-
-E4M3ProdFmt = E4M3ProdFmtDesc()
-
-
-class AddendSel(Enum):
-    UseAct = 0
-    UseBias = 1
-    UsePsum = 2
-
-
 class OutputFmtSel(Enum):
     OutBF16 = 0
     OutE4M3 = 1
@@ -99,15 +78,6 @@ def clamp_signed(value: int, bits: int) -> int:
         return lo
     if value > hi:
         return hi
-    return value
-
-
-def wrap_signed(value: int, bits: int) -> int:
-    mask = (1 << bits) - 1
-    value &= mask
-    sign_bit = 1 << (bits - 1)
-    if value & sign_bit:
-        value -= 1 << bits
     return value
 
 
@@ -176,20 +146,3 @@ def round_right_shift4_rne(x: int) -> int:
     guard = (x >> 3) & 1
     sticky = int((x & 0x7) != 0)
     return trunc + (guard & (sticky | (trunc & 1)))
-
-
-def sanitize_bf16(bits: int) -> int:
-    bits &= 0xFFFF
-    exp = (bits >> 7) & 0xFF
-
-    if exp == 0:
-        frac = bits & 0x7F
-        return bits if frac == 0 else 0
-
-    if exp == 0xFF:
-        frac = bits & 0x7F
-        if frac != 0:
-            return 0
-        return BF16_MAX_NEG if (bits & 0x8000) else BF16_MAX_POS
-
-    return bits

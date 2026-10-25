@@ -87,10 +87,11 @@ def mm(a: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
 
 
 def mm_ipt(a: torch.Tensor, w: torch.Tensor, tile: int = 32) -> torch.Tensor:
-    """Atlas mxu1: each 32-wide K tile is added to a BF16 accumulator, rounding once per tile.
+    """Atlas mxu1 before ISA 2.0: each 32-wide K tile is added to a BF16 accumulator, rounding
+    once per tile.
 
     The partial sum of a tile is exact in FP32 for FP8 operands of nearby exponents; scale
-    exponents commute with the rounding. ditflow.numerics.ipt_matmul is the bit-exact datapath.
+    exponents commute with the rounding. ISA 2.0 mxu1 accumulates in FP32 (Blackwell FP8, mm).
     """
     acc = torch.zeros(*a.shape[:-1], w.shape[-2], device=a.device)
     for k in range(0, a.shape[-1], tile):

@@ -38,10 +38,9 @@ package atlas.ipt
 
 import chisel3._
 import chisel3.util._
-import atlas.common.{InnerProductTreeParams, MregParams, MregReadReq, MregWriteReq}
+import atlas.common.{Cvt, InnerProductTreeParams, MregParams, MregReadReq, MregWriteReq}
 import atlas.mxu.{MxuOp, MxuCmd, ComputeReq, WeightWriteReq,
-                  AccBufWriteReq, AccBufReadAddr, AccBufLoadReq, AccBufStoreAddr,
-                  FPUtils}
+                  AccBufWriteReq, AccBufReadAddr, AccBufLoadReq, AccBufStoreAddr}
 
 /** Port-aligned concurrent sequencer for the inner-product-tree MXU.
   *
@@ -74,7 +73,7 @@ class InnerProductTreesSequencer(
     // ── Core (InnerProductTrees) interface ──
     val weightWriteReq = Valid(new WeightWriteReq(p.mxu))
     val compute        = Valid(new ComputeReq(p.mxu))
-    val coreOut        = Flipped(Valid(Vec(p.numLanes, UInt(p.outputFmt.ieeeWidth.W))))
+    val coreOut        = Flipped(Valid(Vec(p.numLanes, UInt(p.accumFmt.ieeeWidth.W))))
 
     // ── Accumulation buffer interface ──
     val accComputeWrite    = Valid(new AccBufWriteReq(p.mxu))
@@ -84,7 +83,7 @@ class InnerProductTreesSequencer(
     val accLoadReq         = Valid(new AccBufLoadReq(p.mxu))
     val accStoreAddr       = Output(new AccBufStoreAddr(p.mxu))
     val accStoreReadEn     = Output(Bool())
-    val accStoreData       = Input(Vec(p.numLanes, UInt(16.W)))
+    val accStoreData       = Input(Vec(p.numLanes, UInt(p.accumFmt.ieeeWidth.W)))
 
     // ── Interlock: the command on io.cmd.bits would be accepted this cycle ──
     val cmdReady    = Output(Bool())
@@ -112,13 +111,6 @@ class InnerProductTreesSequencer(
   private val rowBits   = p.tileRowBits
   private val maxCount  = Seq(p.numLanes, tileRows).max
   private val rowCountW = log2Ceil(maxCount + 1)
-
-  // ==========================================================================
-  // (De)quantization — FPUtils converter banks
-  // ==========================================================================
-
-  val deqBank   = FPUtils.E4M3ToBF16Bank(p.numLanes)
-  val quantBank = FPUtils.BF16ToE4M3Bank(p.numLanes)
 
   // ==========================================================================
   // Port defaults
@@ -457,7 +449,7 @@ class InnerProductTreesSequencer(
 
   // Drive the per-row push outputs for the row whose mreg response just
   // arrived.  PushWeight writes one weight-buffer column; PushAccFP8
-  // dequantizes and drives one accBuf load.
+  // converts E4M3 to FP32 (exact) and drives one accBuf load.
   private def processPushRow(cmd: MxuCmd, row: UInt, mregResp: UInt): Unit = {
     when(cmd.op === MxuOp.PushWeight) {
       io.weightWriteReq.valid           := true.B
@@ -469,7 +461,7 @@ class InnerProductTreesSequencer(
       io.accLoadReq.valid       := true.B
       io.accLoadReq.bits.accSel := cmd.accSel
       io.accLoadReq.bits.rowIdx := row(rowBits - 1, 0)
-      io.accLoadReq.bits.data   := deqBank(fp8Row)
+      io.accLoadReq.bits.data   := VecInit(fp8Row.map(Cvt.e4m3ToF32))
     }
   }
 
@@ -494,22 +486,21 @@ class InnerProductTreesSequencer(
       // same row.
       val lo = io.mregReadResp0.bits
       val hi = io.mregReadResp1.bits
-      val bf16Row = Wire(Vec(p.numLanes, UInt(16.W)))
+      val f32Row = Wire(Vec(p.numLanes, UInt(32.W)))
       for (i <- 0 until p.numLanes) {
-        if (i < 16) bf16Row(i) := lo((i + 1) * 16 - 1, i * 16)
-        else        bf16Row(i) := hi((i - 16 + 1) * 16 - 1, (i - 16) * 16)
+        if (i < 16) f32Row(i) := Cat(lo((i + 1) * 16 - 1, i * 16), 0.U(16.W))
+        else        f32Row(i) := Cat(hi((i - 16 + 1) * 16 - 1, (i - 16) * 16), 0.U(16.W))
       }
       io.accLoadReq.valid       := true.B
       io.accLoadReq.bits.accSel := p0Cmd.accSel
       io.accLoadReq.bits.rowIdx := p0Row(rowBits - 1, 0)
-      io.accLoadReq.bits.data   := bf16Row
+      io.accLoadReq.bits.data   := f32Row
     }.elsewhen(p0Cmd.op === MxuOp.Matmul || p0Cmd.op === MxuOp.MatmulAcc) {
       io.compute.valid             := true.B
       io.compute.bits.act          := unpackRow(io.mregReadResp0.bits, p.inputFmt.ieeeWidth, p.vecLen)
       io.compute.bits.psum         := Mux(p0Cmd.op === MxuOp.MatmulAcc,
                                           io.accComputeReadData,
                                           VecInit.fill(p.numLanes)(0.U(p.accumFmt.ieeeWidth.W)))
-      io.compute.bits.accumulate   := (p0Cmd.op === MxuOp.MatmulAcc)
       io.compute.bits.weightBufSel := p0Cmd.weightSlot
     }
 
@@ -597,16 +588,16 @@ class InnerProductTreesSequencer(
 
   when(w0CmdValid) {
     when(w0Cmd.op === MxuOp.PopAccFP8) {
-      val fp8Row = quantBank(io.accStoreData, w0Cmd.scaleE8M0)
+      val fp8Row = io.accStoreData.map(Cvt.e4m3RnSatfinite(_, w0Cmd.scaleE8M0))
       io.mregWriteReq0.valid       := true.B
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
-      io.mregWriteReq0.bits.data   := packMregRow(fp8Row.map(_.pad(8)))
+      io.mregWriteReq0.bits.data   := packMregRow(fp8Row)
     }.elsewhen(w0Cmd.op === MxuOp.PopAccBF16) {
       io.mregWriteReq0.valid       := true.B
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
-      io.mregWriteReq0.bits.data   := packMregRow(io.accStoreData.take(16))
+      io.mregWriteReq0.bits.data   := packMregRow(io.accStoreData.take(16).map(Cvt.bf16Rne(_)))
     }
 
     when(!w0Boundary) {
@@ -642,7 +633,7 @@ class InnerProductTreesSequencer(
     io.mregWriteReq1.valid       := true.B
     io.mregWriteReq1.bits.mregId := w1Cmd.mregId + 1.U
     io.mregWriteReq1.bits.row    := w1Row
-    io.mregWriteReq1.bits.data   := packMregRow(io.accStoreData.drop(16))
+    io.mregWriteReq1.bits.data   := packMregRow(io.accStoreData.drop(16).map(Cvt.bf16Rne(_)))
 
     when(!w1Boundary) {
       w1Row := w1Row + 1.U

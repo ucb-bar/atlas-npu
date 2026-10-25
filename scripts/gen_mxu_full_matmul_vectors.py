@@ -21,23 +21,19 @@ from numpy.random import default_rng
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baremetal", "generators"))
+# The IPT model uses npu-model's FP8 MMA and conversions (npu_model.configs).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "npu-model"))
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     _E4M3_FLOAT_LUT,
 )
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 
-# ── Build pool of valid E4M3 (byte, float) pairs from the model's own LUT ──
+# ── Pool of E4M3 (byte, float) pairs: +0 and the normal values below 256 ──
 
 def build_e4m3_pool():
-    valid_bytes = []
-    valid_floats = []
-    for b in range(256):
-        f = _E4M3_FLOAT_LUT[b].item()
-        if b == 0 or f != 0.0:
-            valid_bytes.append(b)
-            valid_floats.append(f)
-    return np.array(valid_bytes, dtype=np.uint8), np.array(valid_floats, dtype=np.float32)
+    valid_bytes = np.array([b for b in range(256) if b == 0 or 1 <= (b >> 3) & 15 <= 14], dtype=np.uint8)
+    return valid_bytes, _E4M3_FLOAT_LUT.numpy()[valid_bytes]
 
 POOL_BYTES, POOL_FLOATS = build_e4m3_pool()
 
@@ -139,10 +135,7 @@ def main():
           f"[{args.inner_dim}x{args.num_lanes}], {nt} tiles")
 
     # IPT model — matches doc 20
-    ipt_model = IPTLinearRTLFunction(
-        vec_len=32, num_lanes=32, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_model = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
     ipt_cases = []
 

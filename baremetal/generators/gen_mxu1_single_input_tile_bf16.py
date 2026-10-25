@@ -54,10 +54,7 @@ if TILE != 32:
 # IPT functional model
 # ------------------------------------------------------------------
 
-ipt_bf16 = IPTLinearRTLFunction(
-    vec_len=32, num_lanes=32, pipeline_depth=1,
-    out_fmt_sel=OutputFmtSel.OutBF16,
-)
+ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
 
 # ------------------------------------------------------------------
 # Generate FP8-safe random inputs and compute reference

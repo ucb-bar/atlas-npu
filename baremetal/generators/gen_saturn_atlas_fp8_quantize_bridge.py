@@ -176,10 +176,7 @@ def main() -> int:
 
     # ── Atlas-side golden via IPT + VPU bias add (same chain as
     #    gen_smolvla_fused_matmul_bias_v2_mxu1.py) ────────────────────────────
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE_ROWS, num_lanes=TILE_ROWS, pipeline_depth=1,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
     # e4m3_bytes_to_float wants torch tensors (uses .device).
     a_fp32 = e4m3_bytes_to_float(A_fp8_expected)
     w_fp32 = e4m3_bytes_to_float(B_fp8.T.contiguous())

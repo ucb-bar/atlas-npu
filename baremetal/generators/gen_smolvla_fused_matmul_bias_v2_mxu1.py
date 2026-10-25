@@ -96,9 +96,7 @@ def main():
     a_bytes = a_fp8.view(torch.uint8).contiguous()
     b_bytes = b_fp8.view(torch.uint8).contiguous()
 
-    ipt_bf16 = IPTLinearRTLFunction(
-        vec_len=TILE, num_lanes=TILE, pipeline_depth=1, out_fmt_sel=OutputFmtSel.OutBF16
-    )
+    ipt_bf16 = IPTLinearRTLFunction(out_fmt_sel=OutputFmtSel.OutBF16)
     # IPT computes y = x @ w^T. For A @ B, pass w = B^T.
     # IPT requires FP32 inputs, so decode the same E4M3 bytes that feed
     # DRAM back to FP32 via e4m3_bytes_to_float.

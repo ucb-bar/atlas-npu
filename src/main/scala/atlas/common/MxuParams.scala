@@ -20,6 +20,7 @@ case class MxuParams(
   arrayCols:         Int = 32,   // MXU_ARRAY_COLS   — output lanes / weight-tile columns
   accumBufferRows:   Int = 32,   // ACCUM_BUFFER_ROWS
   weightSlotsPerMxu: Int = 2,    // WEIGHT_SLOTS_PER_MXU
+  accumFmt:          AtlasFPType = AtlasFPType.FP32,  // accumulation buffer element format
 ) {
   require(arrayRows > 1,          s"arrayRows must be > 1, got $arrayRows")
   require(arrayCols > 1,          s"arrayCols must be > 1, got $arrayCols")
@@ -28,7 +29,6 @@ case class MxuParams(
 
   // ── Frozen formats ──
   val inputFmt:  AtlasFPType = AtlasFPType.E4M3    // activation & weight element format
-  val accumFmt:  AtlasFPType = AtlasFPType.BF16    // accumulation buffer element format
   val outputFmt: AtlasFPType = AtlasFPType.BF16    // output element format
 
   // ── Spec-derived constants ──

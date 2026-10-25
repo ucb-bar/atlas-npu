@@ -8,8 +8,9 @@ umi.mp4, the file videos/observation.image/chunk-000/file-000.mp4 of the LeRobot
 lerobot/umi_cup_in_the_wild (a gripper-mounted fisheye camera).
 
 run writes OUT/<model>.json and prints its tables. check runs each emulated matmul and the
-bit-exact model of the same matmul (Atlas mxu1, Blackwell FP8, the Atlas NVFP4 MXU) on real layer
-inputs and writes OUT/<model>-check.json. docs/nvfp4-accuracy.md describes the method.
+bit-exact model of the same matmul (Blackwell FP8, which ISA 2.0 mxu1 is, and the Atlas NVFP4 MXU)
+on real layer inputs and writes OUT/<model>-check.json. docs/nvfp4-accuracy.md describes the
+method.
 """
 import argparse
 import json
@@ -26,7 +27,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import ImageFolder
 
-from ditflow import numerics, quant
+from ditflow import quant
 from npu_model.configs import fp8_mma, nvfp4
 from . import formats as Fm
 from . import vit as V
@@ -350,14 +351,6 @@ def check(args) -> dict:
         y = (a @ w.T).cpu()
         ea, ew = quant.exponent_for(amax, 2.0), quant.exponent_for(m.wmax)
         k = a.shape[1]
-
-        ca, cw = quant.to_fp8(a, ea).cpu(), quant.to_fp8(w, ew).cpu()
-        acc = torch.zeros(len(a), len(w), dtype=torch.bfloat16)
-        for i in range(0, k, 32):
-            acc = numerics.ipt_matmul(ca[:, i:i + 32].view(torch.float8_e4m3fn),
-                                      cw[:, i:i + 32].view(torch.float8_e4m3fn), acc)
-        fast = ATLAS.mm(ATLAS.act(a, amax), ATLAS.weight(w, m.wmax)).cpu()
-        out[name, "atlas-ipt"] = gap(fast, acc.float() * 2.0 ** (ea + ew), y)
 
         ca = (a * 2.0 ** -ea).clamp(-448, 448).to(torch.float8_e4m3fn).view(torch.uint8).cpu().numpy()
         cw = (w * 2.0 ** -ew).clamp(-448, 448).to(torch.float8_e4m3fn).view(torch.uint8).cpu().numpy()
