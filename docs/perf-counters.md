@@ -29,7 +29,7 @@ cycles until the halt) plus the halting instruction's cycle and that tail.
 | 3 | `stall_data` | S1 holds an instruction for a data hazard: MREG reservation or port, VMEM bank, scalar load, scale register |
 | 4 | `stall_dma` | `dma.wait` waits for a busy channel |
 | 5 | `stall_delay` | a `delay` counts down |
-| 6 | `mxu0_busy` | MXU slot 0 (systolic array or NVFP4 MXU) has any engine active |
+| 6 | `mxu0_busy` | MXU slot 0 (the NVFP4 MXU) has any engine active |
 | 7 | `mxu0_feed` | a slot-0 matmul feeds one row of A: the MAC array is fully used |
 | 8 | `mxu1_busy` | MXU1 has any engine active |
 | 9 | `mxu1_feed` | an MXU1 matmul feeds one row of A |
@@ -56,6 +56,9 @@ A stalled cycle counts in exactly one of counters 2 to 5, in the order `stall_de
 front-end bubbles (after a taken branch, after a start) and the tail after the halt.
 `mxu*_feed / cycles` is the MAC utilization: a matmul feeds 32 rows in 32 cycles and does 1024
 (FP8) or 2048 (NVFP4) multiply-accumulates per row.
+
+The `mxu0` counters (6, 7 and 16) count MXU slot 0: the NVFP4 MXU in `ipt-nvfp4`. In `default`,
+slot 0 is empty and they stay 0. The `mxu1` counters count the inner-product-tree MXU.
 
 Counters 16 to 26 give the causes of the `stall_unit` and `stall_data` cycles. They are *not*
 exclusive: a cycle counts in each cause that holds in that cycle. For example, an instruction
@@ -108,12 +111,12 @@ The ISA CSR tells programs and the host which instruction set and units the core
 | 31:24 | ISA major version, 1 |
 | 23:16 | ISA minor version, 0 |
 | 15:4 | 0 |
-| 3:0 | units, as sys_regs FEATURES: [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
+| 3:0 | units, as sys_regs FEATURES: [0] hardware interlock, [1] 0, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 
 A change of instruction encoding or semantics increments the version. The version is the highest
 `ver` of the ISA table, `npu-model/npu_model/isa/atlas_isa.toml`. The RTL gets it from the
 generated `Instructions.ISA_MAJOR` and `ISA_MINOR`, and npu_model has it as
-`npu_model.isa.ISA_VERSION`. npu_model reads the ISA CSR with all four unit bits set.
+`npu_model.isa.ISA_VERSION`. npu_model reads the ISA CSR with unit bits 0, 2 and 3 set.
 `make_bundle.py` writes the assembler's version into each bundle (`"isa": [1, 0]`).
 `atlas_host.Atlas` reads the ISA CSR when it connects, and `Atlas.run` does not run a bundle built
 for another version: the status is ERROR. A bundle without `"isa"` counts as ISA 1.0, and so does

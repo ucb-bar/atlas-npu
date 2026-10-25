@@ -108,7 +108,7 @@ its golden, and the chunk is 1.45% from FP32, against 1.29% for fake quant.
 The first steps of the same schedule also run in the Verilator model with every RTL assertion
 enabled, via `run_tests.py` on `bundle_checked.json`:
 
-| Steps | Verilator `ipt-nvfp4` | Verilator `default` (both MXUs) | VCU118 `ipt-nvfp4` |
+| Steps | Verilator `ipt-nvfp4` | Verilator, systolic array + IPT | VCU118 `ipt-nvfp4` |
 |---|---|---|---|
 | 1 | PASS: 3,072 words equal the golden, 522,137 cycles | PASS, 522,137 cycles | PASS, 522,137 cycles |
 | 2 | PASS: 4,096 words, 966,632 cycles | PASS, 966,632 cycles | PASS, 966,632 cycles |
@@ -292,4 +292,4 @@ functional model (docs/interlock.md, "Randomized hazard test").
   holds its unit and registers for fewer cycles, and a write of some rows also reads the rest
   of the register. A row-broadcast operand reads one row, and a vector-scalar op can use the
   VPU's second slot. A scaled pop reads a scale register and waits for a pending `seld`. The
-  NVFP4 MXU (2- and 4-register transfers, the scale sidecar) and `mxu0` are not in `OPS` yet.
+  NVFP4 MXU (2- and 4-register transfers, the scale sidecar) is not in `OPS` yet.

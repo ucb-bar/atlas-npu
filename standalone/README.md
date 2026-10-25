@@ -42,10 +42,12 @@ host ─ UDP ─ PHY ─ eth_udp_stack ─ eth_tsi ─┴─ tl_arbiter ─ tl_x
 
 ## Configurations
 
-`--config=NAME` selects the Atlas configuration (docs/nvfp4-mxu.md): `default` (systolic array +
-inner-product trees), `ipt` (inner-product trees only) or `ipt-nvfp4` (inner-product trees + the
-NVFP4 MXU). `run_tests.py --config NAME` expects every test that needs a missing unit, or that has
-the line `# @EXPECT_ILLEGAL`, to stop with an illegal instruction, and every other test to pass.
+`--config=NAME` selects the Atlas configuration (docs/nvfp4-mxu.md): `default` (inner-product
+trees) or `ipt-nvfp4` (inner-product trees + the NVFP4 MXU). The results dated before 2026-10-25
+name the configurations of that time: `default` had the systolic array (`mxu0`) too, and `ipt`
+was today's `default`. `run_tests.py --config NAME` expects every test that needs a missing unit,
+or that has the line `# @EXPECT_ILLEGAL`, to stop with an illegal instruction, and every other test
+to pass.
 
 The ISA CSR (CSR block `+0x1C`, docs/perf-counters.md) gives the ISA version and the units. Each
 bundle has the ISA version of the assembler that built it. `Atlas.run` does not run a bundle
@@ -266,8 +268,8 @@ outputs = link.read_words(0x9000_0800, 256)
 | `0x014` | CLK_HZ | |
 | `0x018` | BAUD | |
 | `0x01C` | DRAM_BYTES | 2 GiB of DDR4 (`0x8000_0000`) on the board; the model's size in Verilator |
-| `0x020` | ATLAS | [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
-| `0x024` | FEATURES | [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
+| `0x020` | ATLAS | [0] halted, [1] 0, [2] MXU slot 0 (NVFP4 MXU) busy, [3] MXU1 data busy, [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy |
+| `0x024` | FEATURES | [0] hardware interlock, [1] 0, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 | `0x028` | LEDS | [2:0] |
 | `0x02C` | RUN_CYCLES | cycles the scalar core has run (not halted); a write clears it |
 | `0x030` | ETH_IP | the FPGA's IPv4 address, read/write; 172.20.1.18 (`0xAC14_0112`) after reset |
@@ -304,3 +306,10 @@ illegal), `ipt` 129 / 129 (94, 35) and `ipt-nvfp4` 129 / 129 (99, 30). The origi
 `csr_isa_perf` reads the ISA CSR as `0x0100_0007`, `0x0100_0005` and `0x0100_000D`.
 `perf_mm_single` measures its window as 32 cycles (100% MXU utilization, 106% before: a `csrrw`
 to the unmapped CSR `0xC20` cleared the cycle counter).
+
+Verilator, 2026-10-25, without the systolic array: the suite has 114 tests. 13 tests that used
+`mxu0` with DMA, VPU, XLU or interlock traffic now use `mxu1`. The `mxu0` copies of `mxu1` tests and
+the two dual-MXU tests (15 tests) are gone. With the original kernels and with every `DELAY`
+removed, `default` gives 114 / 114 as expected (107 pass, 7 illegal) and `ipt-nvfp4` 114 / 114
+(112, 2). The other 101 tests keep their status and cycle count on both configurations, and
+`default` gives the same cycles and performance counters as `ipt` did.

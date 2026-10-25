@@ -2,19 +2,18 @@
 
 ## Configurations
 
-`atlas.common.AtlasConfigs` names three configurations. MXU slot 0 holds the systolic array or
-the NVFP4 MXU; slot 1 is always the inner-product-tree (IPT) MXU.
+`atlas.common.AtlasConfigs` names two configurations. MXU slot 1 is always the
+inner-product-tree (IPT) MXU; slot 0 holds the NVFP4 MXU or nothing.
 
 | Name | `AtlasParams` | MXUs | Chipyard fragment |
 |---|---|---|---|
-| `default` | `AtlasParams()` | systolic array (`.mxu0`) + IPT (`.mxu1`) | `WithAtlasTile()` |
-| `ipt` | `hasSystolicArray = false` | IPT only | `WithAtlasTileIptOnly` |
-| `ipt-nvfp4` | `hasSystolicArray = false, nvfp4 = Some(Nvfp4MxuParams())` | IPT + NVFP4 (`.nv`) | `WithAtlasTileNvfp4` |
+| `default` | `AtlasParams()` | IPT (`.mxu1`) | `WithAtlasTile()` |
+| `ipt-nvfp4` | `nvfp4 = Some(Nvfp4MxuParams())` | IPT + NVFP4 (`.nv`) | `WithAtlasTileNvfp4` |
 
 An instruction for a unit the configuration does not have is illegal: the core halts and
 CSR STATUS reads 3 (halted, illegal instruction). The standalone build selects a configuration
-with `EmitAtlasCore --config=NAME`; sys_regs FEATURES reports it ([1] systolic array, [2] IPT,
-[3] NVFP4).
+with `EmitAtlasCore --config=NAME`; sys_regs FEATURES reports it ([2] IPT, [3] NVFP4; [1] is
+0).
 
 ## NVFP4 format and storage
 
