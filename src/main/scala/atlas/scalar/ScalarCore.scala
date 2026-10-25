@@ -78,11 +78,13 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val memLoadPending = RegInit(false.B)
   val memLoadCmd     = Reg(UInt(4.W))
   val memLoadRd      = Reg(UInt(5.W))
+  val memLoadXrd     = Reg(Bool())      // the load writes x[rd] (not seld's e-register)
   val memLoadByteOff = Reg(UInt(2.W))
   val memLoadRespValid   = RegInit(false.B)
   val memLoadRespWord    = RegInit(0.U(32.W))
   val memLoadRespCmd     = RegInit(0.U(4.W))
   val memLoadRespRd      = RegInit(0.U(5.W))
+  val memLoadRespXrd     = RegInit(false.B)
   val memLoadRespByteOff = RegInit(0.U(2.W))
   val scalarMemCmdReg    = RegInit(0.U.asTypeOf(new LsuScalarCmd(spP)))
   val scalarMemCmdValid  = RegInit(false.B)
@@ -384,14 +386,14 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
 
   // ── Scalar loads ──
   // A load writes rd at T+3 without bypass, and the response shares the one
-  // register-file write port. Tensor instructions carry no scalar operands.
-  val xLoadPending = memLoadPending && memLoadCmd =/= MEM_SELD
-  val xLoadWb      = memLoadRespValid && memLoadRespCmd =/= MEM_SELD
+  // register-file write port. An instruction waits while an x-register that it
+  // names (decode column xr) has a pending load.
+  val xLoadPending = memLoadPending && memLoadXrd
+  val xLoadWb      = memLoadRespValid && memLoadRespXrd
   private def xPending(r: UInt): Bool = r =/= 0.U &&
     ((xLoadPending && memLoadRd === r) || (xLoadWb && memLoadRespRd === r))
-  val tensorOp = dec.is_mxu || dec.vpu_cmd =/= VPU_NONE || dec.xlu_cmd =/= XLU_NONE
-  val xRegHazard = (!tensorOp && (xPending(dec.rs1) || xPending(dec.rs2) || xPending(dec.rd))) ||
-                   (memLoadRespValid && dec.rd_wen && dec.rd =/= 0.U)
+  val xRegHazard = (dec.rs1_ren && xPending(dec.rs1)) || (dec.rs2_ren && xPending(dec.rs2)) ||
+                   (dec.rd_x && xPending(dec.rd)) || (memLoadRespValid && dec.rd_wen && dec.rd =/= 0.U)
 
   // seld writes a scale register at T+3; vpack/vunpack, vmatpop.fp8 and the
   // scaled BF16 pops read one, and seli shares its write port.
@@ -559,6 +561,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     memLoadPending := true.B
     memLoadCmd     := dec.mem_cmd
     memLoadRd      := dec.rd
+    memLoadXrd     := dec.rd_x
     memLoadByteOff := alu_result(1, 0)
   }
 
@@ -569,6 +572,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     memLoadRespWord      := io.scalarMemResp.bits
     memLoadRespCmd       := memLoadCmd
     memLoadRespRd        := memLoadRd
+    memLoadRespXrd       := memLoadXrd
     memLoadRespByteOff   := memLoadByteOff
   }.elsewhen(memLoadRespValid) {
     memLoadRespValid := false.B
@@ -629,7 +633,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   scaleRF.io.writeIdx  := Mux(seldWriteEn, memLoadRespRd, dec.rd)
   scaleRF.io.writeData := Mux(seldWriteEn, memLoadResult(7, 0), dec.vi_imm(7, 0))
 
-  val isMemLoadWB = memRespArrived && memLoadRespCmd =/= MEM_SELD
+  val isMemLoadWB = memRespArrived && memLoadRespXrd
   val wb_data = Mux(isMemLoadWB, memLoadResult,
     Mux(dec.is_csr, io.csrPort.rdata,
     Mux(dec.is_jal || dec.is_jalr, link_value, alu_result)))

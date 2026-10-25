@@ -150,6 +150,14 @@ object ScalarISA {
   val SC_DELAY = 2.U(2.W)
   val SC_X     = 0.U(2.W)
 
+  // ── x-register fields (3-bit): bit 2 rd, bit 1 rs2, bit 0 rs1 ───────
+  val XR_N   = 0.U(3.W)
+  val XR_1   = 1.U(3.W)
+  val XR_12  = 3.U(3.W)
+  val XR_D   = 4.U(3.W)
+  val XR_D1  = 5.U(3.W)
+  val XR_D12 = 7.U(3.W)
+
   // ── XLU command (2-bit) ────────────────────────────────────────────
   val XLU_NONE    = 0.U(1.W)
   val XLU_TRPOSE  = 1.U(1.W)

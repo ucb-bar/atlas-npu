@@ -27,6 +27,9 @@ class DecodedInstr extends Bundle {
   val xlu_cmd  = UInt(1.W)
   val mem_cmd  = UInt(4.W)   // scalar load/store type
   val lsu_cmd  = UInt(3.W)   // vload / vstore / vload.scale / vstore.scale
+  val rs1_ren  = Bool()      // reads x[rs1]
+  val rs2_ren  = Bool()      // reads x[rs2]
+  val rd_x     = Bool()      // rd is an x-register: written, or read by dma.load and dma.store
 
   // Standard RV32I field extraction
   val rd       = UInt(5.W)
@@ -119,6 +122,9 @@ class ScalarDecoder extends Module {
   dec.xlu_cmd  := cs(13)
   dec.mem_cmd  := cs(14)
   dec.lsu_cmd  := cs(15)
+  dec.rs1_ren  := cs(17)(0)
+  dec.rs2_ren  := cs(17)(1)
+  dec.rd_x     := cs(17)(2)
 
   dec.rd      := rd
   dec.rs1     := rs1

@@ -10,6 +10,7 @@ import scala.util.Random
   * with random operands decode as their instruction, legal and with its unit. A word one bit away
   * from an instruction's match word decodes as the table says: a word that sets a bit that the
   * table fixes, for example a reserved operand bit, is illegal unless it is another instruction.
+  * The decoder's x-register fields (rd_x, rs1_ren, rs2_ren) are the table's x operands.
   */
 class ScalarDecoderTest extends AnyFlatSpec {
   import ScalarISA._
@@ -54,6 +55,18 @@ class ScalarDecoderTest extends AnyFlatSpec {
         }
       }
       assert(illegal > 0)
+    }
+  }
+
+  it should "name the x-registers that the ISA table gives each instruction" in {
+    simulate(new ScalarDecoder) { dut =>
+      val d = dut.io.decoded
+      for ((name, p, _) <- Instructions.all) {
+        dut.io.instr.poke(p.value.U(32.W))
+        val fields = Seq("rd" -> d.rd_x, "rs1" -> d.rs1_ren, "rs2" -> d.rs2_ren)
+          .collect { case (f, b) if b.peek().litToBoolean => f }.toSet
+        assert(fields == Instructions.xRegs.getOrElse(name, Set.empty[String]), name)
+      }
     }
   }
 }

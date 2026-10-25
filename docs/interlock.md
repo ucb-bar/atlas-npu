@@ -39,7 +39,7 @@ instruction in S1 (`ScalarCore.scala`, section "Interlock"). They fall into two 
 | Physical MREG ports (`mN` and `m(N+32)` share one read and one write port) | the tracker's busy bits folded onto 32 physical banks |
 | LSU scalar and vector paths must not share a VMEM bank | LSU `vloadVmemBank` / `vstoreVmemBank` |
 | DMA must not overtake a VLOAD/VSTORE on the banks it touches | the same bank reports against the DMA's line range |
-| Scalar load result (no bypass) and register-file write port | pending load `rd`, response cycle |
+| Scalar load result (no bypass) and register-file write port | pending load `rd` against the x-registers the instruction names (decode column `xr`), response cycle |
 | `seld` result and the scale-register write port | pending `seld`, for `vpack`/`vunpack`, `vmatpop.fp8`, the scaled BF16 pops, `seli` |
 
 The NVFP4 MXU (docs/nvfp4-mxu.md) exports the same `cmdReady`, the 2- and 4-register transfers
@@ -72,6 +72,15 @@ source pairs in the same cycles. Two different pairs in one physical bank, such 
 can never be read together, and no amount of waiting fixes that. Such an instruction is
 illegal: the core halts with STATUS 3. Naming the same pair twice is fine, since one read serves
 both operands.
+
+### Scalar registers
+
+An instruction waits for a pending scalar load only on the x-registers that it names: rs1 and rs2
+when it reads them, and rd when it writes x[rd] (`dma.load` and `dma.store` read x[rd]). The decode
+column `xr` gives these fields. They are the x operands of the ISA table, and `ScalarDecoderTest`
+checks this. Before 2026-10-25, every instruction that was not a tensor instruction compared rs1,
+rs2 and rd with the pending load. So `seli`, `delay`, `lui`, `vload` and others, whose bits in these
+fields hold an immediate or an e- or m-register, could wait for no reason (`interlock_xreg.S`).
 
 ### Jump targets
 
