@@ -153,14 +153,14 @@ class DiTProgram:
         # ---------------- VMEM working set -------------------------------------------------
         vt = lambda name, rows, cols, kind: self.vm.setdefault(name, b.vmem.tensor(name, rows, cols, kind))
         C, Tdim = d.cond_dim, d.tdim
-        vt("condq", 64, len(cond_perm) if cond_perm is not None else C, "fp8")   # row tile 1: unused
+        vt("condq", 32, len(cond_perm) if cond_perm is not None else C, "fp8")
         for l in range(d.layers):
             vt(f"{l}.condmod", 32, 6 * d.hidden, "bf16")
             vt(f"{l}.mod", 32, 6 * d.hidden, "bf16")
         vt("e00", 32, 32, "bf16")
         vt("embq", 32, Tdim, "fp8")
         vt("t1q", 32, 2 * Tdim, "fp8")
-        vt("stq", 64, Tdim, "fp8")                      # row tile 1: unused
+        vt("stq", 32, Tdim, "fp8")
         vt("x", self.T, self.H, "bf16")
         vt("xq", self.T, self.H, "fp8")
         vt("qkv", self.T, 3 * self.H, "bf16")
@@ -274,7 +274,7 @@ class DiTProgram:
         for l in range(self.d.layers):
             lin = self.lin[f"{l}.ada_c"]
             self.lk.linear_rows(lin, lin.addr, condq, a["ada_c"] + lin.a_w,
-                                [Stream("cm", vm[f"{l}.condmod"], per_row=False)], row0(self.lk.epi_store("cm")))
+                                [Stream("cm", vm[f"{l}.condmod"], per_row=False)], self.lk.epi_store("cm"))
 
     def time_path(self) -> None:
         """mod[l] = SiLU(time_mlp(t)) @ W_t[l]^T + condmod[l], replicated over rows."""
@@ -310,7 +310,7 @@ class DiTProgram:
             lin = self.lin[f"{l}.ada_t"]
             self.lk.linear_rows(lin, lin.addr, vm["stq"], a["ada_t"] + lin.a_w,
                                 [Stream("cm", vm[f"{l}.condmod"], per_row=False), Stream("mod", vm[f"{l}.mod"], per_row=False)],
-                                row0(self.epi_add_mod))
+                                self.epi_add_mod)
 
     def epi_add_mod(self, o: int, r: int, ptrs: dict) -> None:
         b = self.b
@@ -355,11 +355,6 @@ class DiTProgram:
         b.vstore2(t, vm["x_lo"].tile(r, 0))
         k.quant_store(o, r, vm["xin_q"].tile(r, 0), 127 - self.a["x"])
         b.regs.release(pairs=(dd, kk, t))
-
-
-def row0(epilogue):
-    """An epilogue for row tile 0 only (linear_rows works on row pairs; row 1 is padding)."""
-    return lambda o, r, ptrs: epilogue(o, r, ptrs) if r == 0 else None
 
 
 def compile_dit(d, plan, x0, cond, steps=None, trace=True) -> Compiled:

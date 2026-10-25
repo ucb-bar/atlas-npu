@@ -3,7 +3,8 @@
 The kernels in kernels.py unroll everything; at a few hundred tokens that would not fit the
 128 KiB IMEM. These iterate over row tiles, output tiles and key tiles at run time, with tile
 addresses relative to pointer registers (asm.Ptr). Arithmetic is the same as in kernels.py.
-Row counts are padded to even numbers of tiles (linear_rows works on row pairs).
+Row counts are padded to even numbers of tiles (linear_rows works on row pairs), unless they
+are one tile.
 """
 from dataclasses import dataclass
 
@@ -54,13 +55,15 @@ class LoopKernels:
     def linear_rows(self, lin: Linear, wbase, xq: Tensor, deq: int, streams: list[Stream], epilogue) -> None:
         """For every output tile (r, n): y = acc * 2**deq + bias, then epilogue(y_pair, r, ptrs) with
         ptrs[name] the Ptr of tile (r, n) (or (0, n)) of each stream. wbase: DRAM address of the
-        first weight block, an int or (reg, offset). xq must have an even number of row tiles."""
+        first weight block, an int or (reg, offset). xq must have one or an even number of row
+        tiles."""
         b, k, regs = self.b, self.k, self.b.regs
         RT, KT, NT = xq.rt, lin.kt, lin.nt
-        assert RT % 2 == 0 and xq.ct == KT, (lin.name, RT, xq.ct, KT)
+        R = min(RT, 2)                                  # row tiles per pass
+        assert RT % R == 0 and xq.ct == KT, (lin.name, RT, xq.ct, KT)
         BB = lin.block_bytes
         assert BB <= k.stage_bytes
-        resident = 2 * KT <= 24
+        resident = R * KT <= 24
         b.prog.comment(f"linear_rows {lin.name}: {RT}x{KT} @ {KT}x{NT}, deq 2^{deq}")
         xrow, xd = b.xreg(), b.xreg()
         srow = {s.name: b.xreg() for s in streams if s.per_row}
@@ -72,10 +75,10 @@ class LoopKernels:
         deqt = k.const(pow2_bits(deq))
         wreg = [regs.one(), regs.one()]
         bias = regs.pair() if lin.has_bias else None
-        xr = [regs.one() for _ in range(2 * KT)] if resident else [regs.one() for _ in range(4)]
+        xr = [regs.one() for _ in range(R * KT)] if resident else [regs.one() for _ in range(4)]
         chans = [[0, 1, 2], [3, 4, 5]]
-        row_steps = [(xrow, 2 * KT * FP8_TILE // 4)] + \
-                    [(srow[s.name], 2 * s.t.ct * s.t.tile_bytes // 4) for s in streams if s.per_row]
+        row_steps = [(xrow, R * KT * FP8_TILE // 4)] + \
+                    [(srow[s.name], R * s.t.ct * s.t.tile_bytes // 4) for s in streams if s.per_row]
 
         def nt_body(par, prefetch_off):
             """Output tile nt = (2 * pass + par): weights in stage[par]; prefetch the block at
@@ -91,11 +94,11 @@ class LoopKernels:
                 b.v("vmatpush.weight.mxu1", f"w{slot}", f"m{wreg[slot]}")
                 if kk + 1 < KT:
                     b.vload(wreg[(kk + 1) % 2], stage + (kk + 1) * FP8_TILE)
-                for r in range(2):
+                for r in range(R):
                     if resident:
                         xm = xr[r * KT + kk]
                     else:
-                        xm = xr[(kk * 2 + r) % 4]
+                        xm = xr[(kk * R + r) % 4]
                         b.vload(xm, Ptr(xrow, (r * KT + kk) * FP8_TILE))
                     b.v("vmatmul.acc.mxu1" if kk else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
                 for _ in range(per_k):
@@ -105,7 +108,7 @@ class LoopKernels:
                 pending.pop(0)()
             if bias is not None:
                 b.vload2(bias, stage + KT * FP8_TILE)
-            for r in range(2):
+            for r in range(R):
                 o = regs.pair()
                 b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
                 b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{deqt}")
@@ -116,9 +119,9 @@ class LoopKernels:
                 epilogue(o, r, ptrs)
                 regs.release(pairs=(o,))
 
-        with b.loop(RT // 2, steps=row_steps):
+        with b.loop(RT // R, steps=row_steps):
             if resident:
-                for r in range(2):
+                for r in range(R):
                     for kk in range(KT):
                         b.vload(xr[r * KT + kk], Ptr(xrow, (r * KT + kk) * FP8_TILE))
             if isinstance(wbase, int):
