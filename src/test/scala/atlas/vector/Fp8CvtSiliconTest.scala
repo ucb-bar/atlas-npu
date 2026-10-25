@@ -59,20 +59,18 @@ class CvtLanes extends Module {
     val e    = Input(Vec(16, UInt(8.W)))
     val e4m3 = Output(Vec(16, UInt(8.W)))
     val bf16 = Output(Vec(16, UInt(16.W)))
-    val bf16Unscaled = Output(Vec(16, UInt(16.W)))
     val f32  = Output(Vec(16, UInt(32.W)))
   })
   io.e4m3 := VecInit(io.x.zip(io.e).map { case (x, e) => Cvt.e4m3RnSatfinite(x, e) })
   io.bf16 := VecInit(io.x.zip(io.e).map { case (x, e) => Cvt.bf16Rne(x, e) })
-  io.bf16Unscaled := VecInit(io.x.map(Cvt.bf16Rne(_)))
   io.f32  := VecInit(io.x.map(x => Cvt.e4m3ToF32(x(7, 0))))
 }
 
-class Fp8CvtSiliconTest extends AnyFlatSpec {
+object CvtVectors {
   private val root = Paths.get(sys.env.getOrElse("MILL_WORKSPACE_ROOT", sys.props("user.dir")))
 
   /** The columns of a cvt-vectors-v1 file, each as little-endian unsigned values. */
-  private def readCvt(name: String): Map[String, Array[Long]] = {
+  def read(name: String): Map[String, Array[Long]] = {
     val path = root.resolve(s"baremetal/generators/fp8_silicon/$name.cvt.gz")
     val raw  = new GZIPInputStream(Files.newInputStream(path)).readAllBytes()
     val nl   = raw.indexOf('\n'.toByte)
@@ -88,7 +86,9 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
       c(0).str -> Array.fill(n)(get())
     }.toMap
   }
+}
 
+class Fp8CvtSiliconTest extends AnyFlatSpec {
   private class Mismatches(what: String) {
     private var count = 0L
     private val first = ArrayBuffer[String]()
@@ -115,7 +115,7 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
   behavior of "FP8 conversions"
 
   it should "give the RTX 5090 result in FP8Pack for every BF16 x at every e" in {
-    val want = readCvt("vpack")("rtx5090")
+    val want = CvtVectors.read("vpack")("rtx5090")
     val bad  = new Mismatches("vpack")
     simulate(new FP8PackRows) { dut =>
       reset(dut)
@@ -137,7 +137,7 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
   }
 
   it should "give the RTX 5090 result in FP8Unpack for every E4M3 x at every e" in {
-    val want = readCvt("vunpack")("rtx5090")
+    val want = CvtVectors.read("vunpack")("rtx5090")
     val bad  = new Mismatches("vunpack")
     simulate(new FP8UnpackRows) { dut =>
       reset(dut)
@@ -160,12 +160,12 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
   }
 
   it should "give the RTX 5090 results in Cvt for FP32 inputs" in {
-    val pop  = readCvt("pop")
-    val push = readCvt("push")("rtx5090")
+    val pop  = CvtVectors.read("pop")
+    val push = CvtVectors.read("push")("rtx5090")
     val bad  = new Mismatches("Cvt")
     // Both ends of each run, at e = 127; the last run ends at 0xFFFFFFFF.
     def ends(name: String): IndexedSeq[(Long, Long)] = {
-      val runs = readCvt(name)
+      val runs = CvtVectors.read(name)
       val x    = runs("x")
       x.indices.flatMap { k =>
         val last = if (k + 1 < x.length) x(k + 1) - 1 else 0xffffffffL
@@ -195,7 +195,6 @@ class Fp8CvtSiliconTest extends AnyFlatSpec {
       }
       sweep(bf16.length, bf16(_)._1, _ => 127) { (i, lane) =>
         bad.check(f"bf16 x 0x${bf16(i)._1}%08x", peek(dut.io.bf16(lane)), bf16(i)._2)
-        bad.check(f"bf16 unscaled x 0x${bf16(i)._1}%08x", peek(dut.io.bf16Unscaled(lane)), bf16(i)._2)
       }
       sweep(256, _.toLong, _ => 127) { (i, lane) =>
         bad.check(f"push x 0x$i%02x", peek(dut.io.f32(lane)), push(i))

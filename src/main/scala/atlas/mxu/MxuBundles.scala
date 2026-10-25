@@ -24,13 +24,14 @@ import chisel3.util._
   * matrix-multiply on the loaded weights and activations.
   */
 object MxuOp extends ChiselEnum {
-  val PushWeight  = Value(0.U)  // mreg → weight slot.
-  val PushAccBF16 = Value(1.U)  // mreg (BF16) → accum buffer.
-  val PushAccFP8  = Value(3.U)  // mreg (FP8)  → accum buffer (converted to accumFmt).
-  val PopAccBF16  = Value(4.U)  // accum buffer → mreg (BF16).
-  val PopAccFP8   = Value(7.U)  // accum buffer → mreg (quant to FP8).
-  val Matmul      = Value(8.U)  // compute, result overwrites accum buffer.
-  val MatmulAcc   = Value(9.U)  // compute, result accumulates into accum buffer.
+  val PushWeight       = Value(0.U)  // mreg → weight slot.
+  val PushAccBF16      = Value(1.U)  // mreg (BF16) → accum buffer.
+  val PushAccFP8       = Value(3.U)  // mreg (FP8)  → accum buffer (converted to accumFmt).
+  val PopAccBF16       = Value(4.U)  // accum buffer → mreg (BF16).
+  val PopAccBF16Scaled = Value(5.U)  // accum buffer × 2^(scaleE8M0 - 127) → mreg (BF16).
+  val PopAccFP8        = Value(7.U)  // accum buffer → mreg (quant to FP8).
+  val Matmul           = Value(8.U)  // compute, result overwrites accum buffer.
+  val MatmulAcc        = Value(9.U)  // compute, result accumulates into accum buffer.
 }
 
 /** Sequencer command issued by the scalar core.
@@ -43,7 +44,7 @@ class MxuCmd(mregIdBits: Int) extends Bundle {
   val mregId     = UInt(mregIdBits.W)   // Source/destination matrix register.
   val accSel     = Bool()               // Which accumulation buffer (0 or 1).
   val weightSlot = Bool()               // Which weight slot (0 or 1).
-  val scaleE8M0  = UInt(8.W)            // E8M0 block-scaling factor (PopAccFP8).
+  val scaleE8M0  = UInt(8.W)            // E8M0 block-scaling factor (PopAccFP8, PopAccBF16Scaled).
 }
 
 // ============================================================================

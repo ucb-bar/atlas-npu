@@ -162,7 +162,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     when(mxuOp(dec, MXU_POP_FP8)) {
       h := rb(dec.vd) || wb(dec.vd)
     }
-    when(mxuOp(dec, MXU_POP_BF16)) {
+    when(mxuOp(dec, MXU_POP_BF16, MXU_POP_BF16_SCALED)) {
       h := rb(dec.vd) || wb(dec.vd) || rb(dec.vd + 1.U) || wb(dec.vd + 1.U)
     }
     when(dec.is_lsu && dec.lsu_cmd === LSU_VLOAD) {
@@ -182,12 +182,12 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // names its weight slot in vs2.
   private def buildMxuCmd(d: DecodedInstr): MxuCmd = {
     val cmd = Wire(new MxuCmd)
-    val pop = mxuOp(d, MXU_POP_BF16, MXU_POP_FP32, MXU_POP_FP8)
+    val pop = mxuOp(d, MXU_POP_BF16, MXU_POP_BF16_SCALED, MXU_POP_FP32, MXU_POP_FP8)
     cmd.op         := d.mxu_cmd
     cmd.mregBank   := Mux(pop, d.vd, d.vs1)
     cmd.accSel     := Mux(pop, d.vs2(0), d.vd(0))
     cmd.weightSlot := Mux(mxuOp(d, MXU_MATMUL, MXU_MATMUL_ACC), d.vs2(0), d.vd(0))
-    cmd.scaleE8M0  := Mux(mxuOp(d, MXU_POP_FP8), scaleRF.io.regs(d.vs1(4, 0)), 0.U)
+    cmd.scaleE8M0  := Mux(mxuOp(d, MXU_POP_FP8, MXU_POP_BF16_SCALED), scaleRF.io.regs(d.vs1(4, 0)), 0.U)
     cmd
   }
 
@@ -326,8 +326,8 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
                             MXU_MATMUL, MXU_MATMUL_ACC)
   val mxuReadsPair  = mxuOp(dec, MXU_PUSH_ACC_BF16, MXU_PUSH_ACC_FP32)
   val mxuReadsQuad  = mxuOp(dec, MXU_PUSH_ACC_FP32)
-  val mxuWritesVd   = mxuOp(dec, MXU_POP_BF16, MXU_POP_FP32, MXU_POP_FP8)
-  val mxuWritesPair = mxuOp(dec, MXU_POP_BF16, MXU_POP_FP32)
+  val mxuWritesVd   = mxuOp(dec, MXU_POP_BF16, MXU_POP_BF16_SCALED, MXU_POP_FP32, MXU_POP_FP8)
+  val mxuWritesPair = mxuOp(dec, MXU_POP_BF16, MXU_POP_BF16_SCALED, MXU_POP_FP32)
   val mxuWritesQuad = mxuOp(dec, MXU_POP_FP32)
   val mregReads: Seq[(Bool, UInt)] = Seq(
     (mxuReadsVs1,                                              dec.vs1),
@@ -393,12 +393,12 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val xRegHazard = (!tensorOp && (xPending(dec.rs1) || xPending(dec.rs2) || xPending(dec.rd))) ||
                    (memLoadRespValid && dec.rd_wen && dec.rd =/= 0.U)
 
-  // seld writes a scale register at T+3; vpack/vunpack and vmatpop.fp8 read
-  // one, and seli shares its write port.
+  // seld writes a scale register at T+3; vpack/vunpack, vmatpop.fp8 and the
+  // scaled BF16 pops read one, and seli shares its write port.
   val seldPending = (memLoadPending && memLoadCmd === MEM_SELD) ||
                     (memLoadRespValid && memLoadRespCmd === MEM_SELD)
   val readsScale  = (dec.vpu_cmd =/= VPU_NONE && vpuIsPackUnpack(dec.vpu_cmd)) ||
-                    mxuOp(dec, MXU_POP_FP8)
+                    mxuOp(dec, MXU_POP_FP8, MXU_POP_BF16_SCALED)
   val scaleHazard = (seldPending && readsScale) || (dec.is_seli && (seldPending || memLoadRespValid))
 
   val interlock = s1_valid && (mxuNotReady || vpuNotReady || xluNotReady || lsuNotReady ||

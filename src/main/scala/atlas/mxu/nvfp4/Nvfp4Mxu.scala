@@ -53,13 +53,14 @@ class Fp4Fedp extends BlackBox with HasBlackBoxResource {
 
 /** NVFP4 MXU commands: funct7[3:0] of the instruction. */
 object NvOp extends ChiselEnum {
-  val PushWeight  = Value(0.U)
-  val PushAccBF16 = Value(1.U)
-  val PushAccFP32 = Value(2.U)
-  val PopBF16     = Value(4.U)
-  val PopFP32     = Value(6.U)
-  val Matmul      = Value(8.U)
-  val MatmulAcc   = Value(9.U)
+  val PushWeight    = Value(0.U)
+  val PushAccBF16   = Value(1.U)
+  val PushAccFP32   = Value(2.U)
+  val PopBF16       = Value(4.U)
+  val PopBF16Scaled = Value(5.U)
+  val PopFP32       = Value(6.U)
+  val Matmul        = Value(8.U)
+  val MatmulAcc     = Value(9.U)
 }
 
 class NvCmd(mregIdBits: Int) extends Bundle {
@@ -67,6 +68,7 @@ class NvCmd(mregIdBits: Int) extends Bundle {
   val mregId     = UInt(mregIdBits.W)  // source (push, matmul) or destination (pop) register
   val accSel     = Bool()
   val weightSlot = Bool()
+  val scaleE8M0  = UInt(8.W)           // PopBF16Scaled: the pop multiplies by 2^(scaleE8M0 - 127)
 }
 
 object Nvfp4 {
@@ -202,7 +204,7 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   val isMat = cmd.op === Matmul || cmd.op === MatmulAcc
   val isPushW   = cmd.op === PushWeight
   val isPushAcc = cmd.op === PushAccBF16 || cmd.op === PushAccFP32
-  val isPop     = cmd.op === PopBF16 || cmd.op === PopFP32
+  val isPop     = cmd.op === PopBF16 || cmd.op === PopBF16Scaled || cmd.op === PopFP32
 
   /** A matmul on accumulator b is feeding or has writebacks in flight. */
   private def computePending(b: Bool): Bool =
@@ -345,8 +347,8 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   when(wv) {
     val r    = row(wn)
     val data = accRdData(w.accSel)
-    when(w.op === PopBF16) {
-      val bf = data.map(Cvt.bf16Rne(_))
+    when(w.op === PopBF16 || w.op === PopBF16Scaled) {  // BF16_RNE(acc x 2^(e - 127))
+      val bf = data.map(Cvt.bf16Rne(_, Mux(w.op === PopBF16Scaled, w.scaleE8M0, 127.U)))
       io.mregWriteReq0.valid := true.B
       io.mregWriteReq0.bits.mregId := w.mregId
       io.mregWriteReq0.bits.row := r

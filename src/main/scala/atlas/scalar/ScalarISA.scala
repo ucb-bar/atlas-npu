@@ -94,15 +94,16 @@ object ScalarISA {
   val LSU_X            = 0.U(3.W)
 
   // ── MXU command (4-bit): funct7[3:0] of an MXU instruction ─────────
-  val MXU_PUSH_WEIGHT   = 0.U(4.W)
-  val MXU_PUSH_ACC_BF16 = 1.U(4.W)
-  val MXU_PUSH_ACC_FP32 = 2.U(4.W)
-  val MXU_PUSH_ACC_FP8  = 3.U(4.W)
-  val MXU_POP_BF16      = 4.U(4.W)
-  val MXU_POP_FP32      = 6.U(4.W)
-  val MXU_POP_FP8       = 7.U(4.W)
-  val MXU_MATMUL        = 8.U(4.W)
-  val MXU_MATMUL_ACC    = 9.U(4.W)
+  val MXU_PUSH_WEIGHT     = 0.U(4.W)
+  val MXU_PUSH_ACC_BF16   = 1.U(4.W)
+  val MXU_PUSH_ACC_FP32   = 2.U(4.W)
+  val MXU_PUSH_ACC_FP8    = 3.U(4.W)
+  val MXU_POP_BF16        = 4.U(4.W)
+  val MXU_POP_BF16_SCALED = 5.U(4.W)
+  val MXU_POP_FP32        = 6.U(4.W)
+  val MXU_POP_FP8         = 7.U(4.W)
+  val MXU_MATMUL          = 8.U(4.W)
+  val MXU_MATMUL_ACC      = 9.U(4.W)
 
   // ── MXU slot (1-bit): funct7[4] of an MXU instruction ──────────────
   val MXUSEL_0 = 0.U(1.W)   // the NVFP4 MXU

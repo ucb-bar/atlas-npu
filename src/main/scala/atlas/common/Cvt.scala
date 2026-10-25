@@ -49,15 +49,6 @@ object Cvt {
     Mux(nan, "h7fff".U(16.W), Cat(sign, Mux(special || code > 0x7f80.U, 0x7f80.U, code)(14, 0)))
   }
 
-  /** BF16_RNE(x), unscaled: the same bits as bf16Rne(x, 127.U), from one adder. FP32 and BF16
-    * have the same exponent field, so the carry of the rounding increment handles subnormals
-    * and overflow to Inf.
-    */
-  def bf16Rne(x: UInt): UInt = {
-    val nan = x(30, 23).andR && x(22, 0).orR
-    Mux(nan, "h7fff".U(16.W), (x + (0x7fff.U(32.W) + x(16)))(31, 16))
-  }
-
   /** FP32 bits of an E4M3 code, exact; 0x7F and 0xFF give 0x7FFFFFFF. */
   def e4m3ToF32(code: UInt): UInt = {
     val field = code(6, 3)

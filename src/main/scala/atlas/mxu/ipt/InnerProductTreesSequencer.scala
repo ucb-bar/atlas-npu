@@ -106,6 +106,10 @@ class InnerProductTreesSequencer(
     VecInit((0 until n).map(i => x((i + 1) * elemWidth - 1, i * elemWidth)))
   private def packMregRow(x: Seq[UInt]): UInt =
     (if (x.nonEmpty) Cat(x.reverse) else 0.U(1.W)).pad(mregP.mregRowBits)
+  private def isBF16Pop(op: MxuOp.Type): Bool = op === MxuOp.PopAccBF16 || op === MxuOp.PopAccBF16Scaled
+  /** One m-register row of a BF16 pop: BF16_RNE(acc x 2^(e - 127)), e = 127 for the plain pop. */
+  private def bf16Row(acc: Seq[UInt], cmd: MxuCmd): UInt =
+    packMregRow(acc.map(Cvt.bf16Rne(_, Mux(cmd.op === MxuOp.PopAccBF16Scaled, cmd.scaleE8M0, 127.U))))
 
   private val tileRows  = p.tileRows
   private val rowBits   = p.tileRowBits
@@ -151,7 +155,7 @@ class InnerProductTreesSequencer(
   val isPushBF16   = (cmdOp === MxuOp.PushAccBF16)
   val isPush       = isPushW || isPushAccFP8                         // single-port push
   val isPopFP8     = (cmdOp === MxuOp.PopAccFP8)
-  val isPopBF16    = (cmdOp === MxuOp.PopAccBF16)
+  val isPopBF16    = isBF16Pop(cmdOp)
   val isPop        = isPopFP8 || isPopBF16
 
   // ==========================================================================
@@ -593,11 +597,11 @@ class InnerProductTreesSequencer(
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
       io.mregWriteReq0.bits.data   := packMregRow(fp8Row)
-    }.elsewhen(w0Cmd.op === MxuOp.PopAccBF16) {
+    }.elsewhen(isBF16Pop(w0Cmd.op)) {
       io.mregWriteReq0.valid       := true.B
       io.mregWriteReq0.bits.mregId := w0Cmd.mregId
       io.mregWriteReq0.bits.row    := w0Row
-      io.mregWriteReq0.bits.data   := packMregRow(io.accStoreData.take(16).map(Cvt.bf16Rne(_)))
+      io.mregWriteReq0.bits.data   := bf16Row(io.accStoreData.take(16), w0Cmd)
     }
 
     when(!w0Boundary) {
@@ -629,11 +633,11 @@ class InnerProductTreesSequencer(
   // ==========================================================================
 
   when(w1CmdValid) {
-    // Only PopAccBF16 ever lands on w1 — drive hi half.
+    // Only the BF16 pops land on w1 — drive hi half.
     io.mregWriteReq1.valid       := true.B
     io.mregWriteReq1.bits.mregId := w1Cmd.mregId + 1.U
     io.mregWriteReq1.bits.row    := w1Row
-    io.mregWriteReq1.bits.data   := packMregRow(io.accStoreData.drop(16).map(Cvt.bf16Rne(_)))
+    io.mregWriteReq1.bits.data   := bf16Row(io.accStoreData.drop(16), w1Cmd)
 
     when(!w1Boundary) {
       w1Row := w1Row + 1.U
@@ -663,7 +667,7 @@ class InnerProductTreesSequencer(
     assert(p0Row === p1Row,                "IPT: BF16 push p0/p1 row counters out of sync")
     assert(p0Cmd.accSel === p1Cmd.accSel,  "IPT: BF16 push p0/p1 accSel mismatch")
   }
-  when(w0CmdValid && w1CmdValid && (w0Cmd.op === MxuOp.PopAccBF16)) {
+  when(w0CmdValid && w1CmdValid && isBF16Pop(w0Cmd.op)) {
     assert(w0Row === w1Row,                "IPT: BF16 pop w0/w1 row counters out of sync")
     assert(w0Cmd.accSel === w1Cmd.accSel,  "IPT: BF16 pop w0/w1 accSel mismatch")
   }
