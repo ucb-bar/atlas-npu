@@ -110,12 +110,14 @@ The ISA CSR tells programs and the host which instruction set and units the core
 | 15:4 | 0 |
 | 3:0 | units, as sys_regs FEATURES: [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU, [3] NVFP4 MXU |
 
-A change of instruction encoding or semantics increments the version (`ScalarISA.ISA_MAJOR`,
-`ISA_MINOR`). npu_model has the same number (`npu_model.isa.ISA_VERSION`) and reads the ISA CSR
-with all four unit bits set. `make_bundle.py` writes the assembler's version into each bundle
-(`"isa": [1, 0]`). `atlas_host.Atlas` reads the ISA CSR when it connects, and `Atlas.run` does
-not run a bundle built for another version: the status is ERROR. A bundle without `"isa"` counts
-as ISA 1.0, and so does a bitstream without the ISA CSR (it reads 0).
+A change of instruction encoding or semantics increments the version. The version is the highest
+`ver` of the ISA table, `npu-model/npu_model/isa/atlas_isa.toml`. The RTL gets it from the
+generated `Instructions.ISA_MAJOR` and `ISA_MINOR`, and npu_model has it as
+`npu_model.isa.ISA_VERSION`. npu_model reads the ISA CSR with all four unit bits set.
+`make_bundle.py` writes the assembler's version into each bundle (`"isa": [1, 0]`).
+`atlas_host.Atlas` reads the ISA CSR when it connects, and `Atlas.run` does not run a bundle built
+for another version: the status is ERROR. A bundle without `"isa"` counts as ISA 1.0, and so does
+a bitstream without the ISA CSR (it reads 0).
 
 The baremetal tests `csr_isa_perf`, `csr_illegal_unmapped` and `csr_illegal_ro_write` check
 these rules. The two `csr_illegal_*` tests have `# @EXPECT_ILLEGAL`: `run_tests.py --config`

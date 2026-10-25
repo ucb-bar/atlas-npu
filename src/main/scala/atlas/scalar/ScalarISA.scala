@@ -170,10 +170,5 @@ object ScalarISA {
   val CSR_PERF_NUM      = 0xCC1.U(12.W)
   val CSR_PERF_BASE     = 0xCC2.U(12.W)
 
-  // CSR_ISA bits 31:24 and 23:16 (npu_model isa.ISA_VERSION). A change of instruction encoding
-  // or semantics increments it.
-  val ISA_MAJOR = 1
-  val ISA_MINOR = 0
-
   val NUM_SCALE_REGS = 32
 }

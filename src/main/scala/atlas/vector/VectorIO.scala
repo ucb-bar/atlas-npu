@@ -48,7 +48,7 @@ class VectorInput(val p: VpuParams) extends Bundle {
   val instReadBank2   = UInt(6.W)
   val instWriteBank   = UInt(6.W)
   val imm             = SInt(16.W)
-  val packScaleE8M0   = UInt(8.W)   // E8M0 scale for VFP8PACK
+  val packScaleE8M0   = UInt(8.W)   // E8M0 scale for VPACK_BF16_FP8
   val unpackScaleE8M0 = UInt(8.W)   // E8M0 scale for VFP8UNPACK
 }
 

@@ -157,7 +157,7 @@ class CSRFile(tlBP: TLBundleParameters) extends Module {
     4.U -> reg_dbg0,
     5.U -> reg_dbg1,
     6.U -> Cat(0.U(31.W), reg_execRun),
-    isaIdx         -> Cat(ISA_MAJOR.U(8.W), ISA_MINOR.U(8.W), 0.U(12.W), io.features),
+    isaIdx         -> Cat(Instructions.ISA_MAJOR.U(8.W), Instructions.ISA_MINOR.U(8.W), 0.U(12.W), io.features),
     perfInhibitIdx -> perfInhibit,
     perfNumIdx     -> nPerf.U
   ) ++ perfWords)
