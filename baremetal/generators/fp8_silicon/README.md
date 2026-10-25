@@ -6,6 +6,8 @@ MXU arithmetic contract: `../check_fp8_silicon.py` compares the model
 dot-add (FDA) of MMA-Sim (arXiv 2511.10909, section IV-C) with F = 25 fractional bits, as the
 model's docstring states it.
 
+The section [Conversions](#conversions) gives the vectors of the FP8 and BF16 conversions.
+
 ## Silicon
 
 - GPU: NVIDIA GeForce RTX 5090 (sm_120), driver 595.99.02, VBIOS 98.02.2E.80.05, Linux
@@ -97,3 +99,93 @@ python3 -I fp8_vectors.py records wide_s3.vec.gz wide_s3.bin         # the recor
 
 CUDA 12 cannot target `sm_120a`. With CUDA 13.2, `-arch=sm_120a` also embeds `compute_120` PTX,
 and `ptxas` then rejects kind 1. Use `-gencode` as above.
+
+## Conversions
+
+The `*.cvt.gz` files hold RTX 5090 outputs of the conversions of the Atlas FP8 path (ISA v2,
+section 5.2). `../check_cvt_silicon.py` compares the model (`npu-model/npu_model/configs/cvt.py`)
+with them, bit for bit. The GPU, the driver, the CUDA version and the date are the same as in
+[Silicon](#silicon).
+
+`fp8_cvt.cu` runs each conversion through these instructions:
+
+- `vpack.bf16.fp8` and `vmatpop.fp8.acc.mxu1`: x * G(e), then `cvt.rn.satfinite.e4m3x2.f32`
+  (SASS `F2FP.SATFINITE.E4M3.F32.PACK_AB_MERGE_C`).
+- `vunpack.fp8.bf16`: `cvt.rn.f16x2.e4m3x2` (`F2FP.F16.E4M3.UNPACK_B`), `cvt.f32.f16`
+  (`HADD2.F32`), x * G(e), then `cvt.rn.bf16.f32` (`F2FP.BF16.F32.PACK_AB`).
+- `vmatpush.acc.fp8.mxu1`: `cvt.rn.f16x2.e4m3x2`, then `cvt.f32.f16`.
+- The BF16 pops: `cvt.rn.bf16.f32`. In the `bf16` mode it compiles to `F2F.BF16.F32`.
+  The `bf16x2` mode uses `cvt.rn.bf16x2.f32` (`F2FP.BF16.F32.PACK_AB`). The two SASS forms give
+  the same output for all 2^32 FP32 inputs. The scaled BF16 pops round acc * G(e) once. The GPU
+  has no instruction for this: FMUL, then `cvt.rn.bf16.f32`, rounds two times when the FP32
+  product is below 2^-126 and not exact. No vectors here check the scaled pops.
+
+The harness forms x * G(e) = x * 2^(e - 127) in FP32 with FMUL (`__fmul_rn`). For e = 255 it
+uses two FMULs (2^127, then 2), because 2^128 is not an FP32 value. The model applies the scale
+exactly and rounds once. It gives the same result as the GPU on every vector.
+
+The GPU gives these results. `cvt.py` states them as rules:
+
+- E4M3 (`cvt.rn.satfinite.e4m3x2.f32`): round to nearest, ties to even, with E4M3 subnormals.
+  A value above 448 after rounding and +-Inf give +-448 (`0x7E`, `0xFE`). Every NaN gives `0x7F`,
+  for both signs and all payloads. A value that rounds to zero keeps its sign (`0x00`, `0x80`).
+- BF16 (`cvt.rn.bf16.f32`): round to nearest, ties to even, with BF16 subnormals (no flush to
+  zero). A value that rounds above the largest BF16 value gives +-Inf. Every NaN gives `0x7FFF`,
+  for both signs and all payloads. A zero keeps its sign.
+- E4M3 to FP32: exact, with subnormals. `0x80` gives -0 (`0x80000000`). `0x7F` and `0xFF` give
+  `0x7FFFFFFF`.
+- The two halves of each x2 conversion gave the same result on every input.
+
+| File | Vectors | Content |
+|---|---|---|
+| `vpack.cvt.gz` | 16,777,216 | E4M3 of x * G(e) for every BF16 x at every e |
+| `vunpack.cvt.gz` | 65,536 | BF16 of x * G(e) for every E4M3 x at every e |
+| `push.cvt.gz` | 256 | FP32 of every E4M3 x |
+| `pop.cvt.gz` | 489,344 | E4M3 of x * G(e) for FP32 x at E4M3 boundaries, special and random x |
+| `e4m3_runs.cvt.gz` | 256 runs | E4M3 of every FP32 x (2^32 inputs) |
+| `bf16_runs.cvt.gz` | 65,284 runs | BF16 of every FP32 x (2^32 inputs) |
+
+`cvt_vectors.py` (`pop_inputs()`) makes the inputs of `pop.cvt.gz`:
+
+- 385,248 vectors. At every e, each FP32 x for which x * G(e) is an E4M3 boundary: a positive
+  finite E4M3 value, the midpoint of two neighbours (a tie, from 2^-10 up), or 464 (the tie above
+  448). Also the FP32 values one ULP below and above each x, and the negatives of all of them.
+- 4,096 vectors. The 16 values of `SPECIAL` at every e: +-0, +-Inf, 4 NaNs, and with both signs
+  the smallest and the largest FP32 subnormal, the smallest FP32 normal and FLT_MAX.
+- 100,000 vectors with a random e (`numpy.random.default_rng(1)`): 50,000 x with x * G(e) from
+  2^-12 up to 2^10, and 50,000 random FP32 bit patterns. If the exponent field of such an x
+  would be below 1, x is an FP32 subnormal.
+
+The model equals the GPU on all 17,463,432 comparisons of the stored files: every vector of
+`vpack`, `vunpack`, `push` and `pop`, and the first and the last input of each run. A separate
+check, not stored here, compared the model with the two runs files at each of the 2^32 FP32
+inputs: 0 differences for E4M3 and 0 for BF16.
+
+### Format
+
+A file is a gzip-compressed `cvt-vectors-v1` file. It has one JSON header line, then one column
+for each entry of `columns`, in that order. A column has `count` little-endian values of the
+numpy type that the entry gives. `vpack`, `vunpack` and `push` store only the output column,
+`rtx5090`. The header field `inputs` gives the inputs of vector i, for example e = i >> 16 and
+x = BF16 bits i & 0xFFFF for `vpack`. `pop` stores x (FP32 bits), e and `rtx5090`. A runs file
+stores x and `rtx5090`: each FP32 x from x[k] up to x[k + 1] - 1 converts to `rtx5090[k]`. The
+last run goes up to `0xFFFFFFFF`.
+
+### Commands
+
+```bash
+python3 -I baremetal/generators/check_cvt_silicon.py                 # model vs silicon
+```
+
+On an sm_120 GPU, in this directory:
+
+```bash
+/usr/local/cuda-13.2/bin/nvcc -O2 -gencode arch=compute_120a,code=sm_120a -o fp8_cvt fp8_cvt.cu
+cuobjdump -sass fp8_cvt | grep -E 'F2F|HADD2|FMUL'
+./fp8_cvt vpack vpack.out                       # also vunpack, push, e4m3, bf16 and bf16x2
+python3 -I cvt_vectors.py gen in
+./fp8_cvt pop in/pop.bin pop.out
+```
+
+Each mode takes less than one second. `vpack.out`, `vunpack.out`, `push.out` and `pop.out` are
+the `rtx5090` columns. The runs modes write {uint32 x, uint32 d} records.
