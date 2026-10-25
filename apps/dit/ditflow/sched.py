@@ -60,6 +60,7 @@ OPS = {
     "vadd.bf16": _vpu("Mw Mr Mr", "addsub", both=True),
     "vsub.bf16": _vpu("Mw Mr Mr", "addsub", both=True),
     "vmul.bf16": _vpu("Mw Mr Mr", "mul", both=True),
+    "vminimum.bf16": _vpu("Mw Mr Mr", "min", both=True),
     "vmaximum.bf16": _vpu("Mw Mr Mr", "max", both=True),
     "vadd.bf16.vx": _vpu("Mw Mr xr", "addsub"), "vsub.bf16.vx": _vpu("Mw Mr xr", "addsub"),
     "vmul.bf16.vx": _vpu("Mw Mr xr", "mul"), "vminimum.bf16.vx": _vpu("Mw Mr xr", "min"),
