@@ -34,6 +34,12 @@ In VMEM a register's scales are 128 bytes (4 lines): line l holds rows 8l .. 8l 
 bytes 4(r % 8) .. 4(r % 8) + 3. DMA moves them like any data. A register's data and its scale
 sidecar are independent: `vload`, VPU, XLU and MXU writes leave the sidecar unchanged.
 
+Tensor registers and their scales are undefined after reset. `vmatpush.weight.nv` and
+`vmatmul(.acc).nv` read the scales of `m[vs1]` together with its data, so a program loads the
+scales of new data with `vload.scale`. The lint `python -m npu_model.scale_lint PROGRAM.S` (in
+`npu-model`; it runs only on request) warns when such a read can see scales that no `vload.scale`
+loaded since reset, or data written after the register's last `vload.scale`.
+
 An FP32 accumulator tile moves through four consecutive m-registers: register q of
 `{m[r], m[r+1], m[r+2], m[r+3]}` holds columns 8q .. 8q + 7 of every row (little-endian words).
 A BF16 tile uses a register pair like the other MXUs: columns 0-15 in `m[r]`, 16-31 in `m[r+1]`.
@@ -97,6 +103,48 @@ other documented differences from silicon, 28 subnormal and 6 normal outputs off
 600,054 random vectors (<https://ucb-bar.github.io/nvfp4/> section 4, Model accuracy), are all
 MXFP4 vectors (ucb-bar/nvfp4@0c611e1 `tcgen05/tcgen05_results.zip`, `summary.json`), a mode
 Atlas does not use.
+
+The 40,000 vectors keep the hard cases on purpose (`nvfp4_silicon/README.md`), so 1 in 40,000 is
+not a rate: on the full sets the model is off silicon on 1 of 200,018 random vectors and on none
+of the 300,025 stored vectors. The gap is also not limited to 1 ULP. The emax rule sets the bit
+at which C is cut, and in a `vmatmul.acc.nv` chain C is the partial sum. In 20,000 runs of the
+model (`nvfp4.dot`: block 0 all zero with both scales from `0x50` to `0x7E`, the other blocks and
+C random), the result when block 0 sets emax differed by up to 0.35%, or 52,952 ULPs, from the
+result when it cannot (`0xb9eb0000` against `0xb9ea3128`). As the silicon rule is not known, the
+largest difference between model and silicon in a chain is not known either.
+
+### Global scales and bias
+
+An NVFP4 tensor also has one FP32 global scale: x = E2M1 value x block scale x global scale
+(Transformer Engine,
+<https://nvidia.github.io/TransformerEngine/features/low_precision_training/nvfp4/nvfp4.html>).
+The global scales are not MMA operands, on NVIDIA or on Atlas. `tcgen05.mma` with `.block_scale`
+computes (A * scale_A) * (B * scale_B) + D, and its only scale operands are the two block-scale
+matrices (<https://docs.nvidia.com/cuda/parallel-thread-execution/>, PTX ISA 9.4, sections
+9.7.18.10.7 and 9.7.18.10.10.1). Transformer Engine folds the product of the two global scales
+into the GEMM alpha, which multiplies only the accumulated product
+(NVIDIA/TransformerEngine@491d557 `transformer_engine/common/gemm/cublaslt_gemm.cu`, lines
+387-390; <https://docs.nvidia.com/cuda/cublas/> section 3.1.4.4), and cuBLASLt adds a bias after
+that product (section 3.1.4.1).
+
+The VPU is BF16 only, so Atlas cannot multiply an FP32 accumulator by an FP32 alpha. Its epilogue
+contract:
+
+- Each global scale is a power of two, 2^gA for A and 2^gW for W, at least amax / (6 x 448) of
+  its tensor, so that every block scale fits in UE4M3 (448 or less). Transformer Engine uses
+  amax / (6 x 448) itself as the FP32 global scale.
+- After `vmatpop.bf16.acc.nv`, the epilogue multiplies by a BF16 tile of 2^(gA + gW)
+  (`vmul.bf16`). A power-of-two factor adds no rounding: BF16(acc) x 2^(gA + gW) equals
+  BF16(acc x 2^(gA + gW)) while the result stays in the BF16 normal range.
+- The epilogue adds a bias after that scaling (`vadd.bf16`), or it preloads the bias divided by
+  2^(gA + gW) into the accumulator (`vmatpush.acc.bf16.nv` or `vmatpush.acc.fp32.nv`). The
+  division is exact, and the bias is then the C of the first `vmatmul.acc.nv`.
+- All the matmuls into one accumulator (a `vmatmul.acc.nv` chain) have the same gA + gW. Operands
+  with a different gA + gW go into a separate chain, and the VPU adds the chains after it scales
+  each one.
+
+The FP8 flow uses the same epilogue: `apps/dit/ditflow/kernels.py` pops BF16, multiplies by a
+power-of-two tile and then adds the bias.
 
 ### Provenance
 
