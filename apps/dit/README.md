@@ -149,6 +149,25 @@ arithmetic and LeRobot's sampler, with the same random weights and inputs.
 The conditioning vector's error is the encoder's FP8 quantization (the fake quant is within
 0.1 point of Atlas); the DiT then turns it into a 1.5% error on the chunk.
 
+### ISA 2.0 VPU numerics (2026-10-25)
+
+`vadd` and `vsub` now round to nearest even (they truncated), `vsquare` and `vcube` round the
+exact power once, `vpack` and `vunpack` are the Blackwell FP8 conversions, and `quant.to_fp8`
+keeps E4M3 subnormals. `mxu1` is unchanged: it still flushes subnormal FP8 inputs and rounds to
+BF16 per K tile. The same sampler (100 steps, the weights and inputs of the table above) in the
+functional model:
+
+| vs FP32 | final chunk (rel. L2 / max abs / cosine) | per-step velocity (rel. L2, mean) |
+|---|---|---|
+| FP8 fake quant | 1.28% / 0.037 / 0.99992 | 4.9% (step 0) |
+| Atlas, v1 VPU numerics | 1.54% / 0.055 / 0.99988 | 5.9% |
+| Atlas, ISA 2.0 VPU numerics | 1.29% / 0.037 / 0.99992 | 5.5% |
+
+The chunk is now 0.23% from fake quant (rel. L2), against 0.87% with the v1 VPU. The program
+and its cycle counts do not change: in Verilator with every RTL assertion, 2 steps take 694,553
+cycles in `default` and in `ipt-nvfp4`, and every output word equals the functional model. The
+whole policy was not run again.
+
 ## Instruction scheduling (2026-10-24)
 
 The core issues in program order and holds each instruction until its unit and its operands are

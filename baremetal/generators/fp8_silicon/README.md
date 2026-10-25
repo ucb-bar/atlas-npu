@@ -161,6 +161,11 @@ The model equals the GPU on all 17,463,432 comparisons of the stored files: ever
 check, not stored here, compared the model with the two runs files at each of the 2^32 FP32
 inputs: 0 differences for E4M3 and 0 for BF16.
 
+The RTL equals the GPU too. `atlas.vector.Fp8CvtSiliconTest` runs `FP8Pack`, `FP8Unpack` and
+`atlas.common.Cvt` in Verilator on every vector of `vpack`, `vunpack`, `pop` and `push`, and on
+the first and the last input of each run: 0 differences (`./mill atlas.test.testOnly
+atlas.vector.Fp8CvtSiliconTest`, about one minute).
+
 ### Format
 
 A file is a gzip-compressed `cvt-vectors-v1` file. It has one JSON header line, then one column
