@@ -4,7 +4,7 @@ The Tapeout NPU is a statically-scheduled, single-issue, in-order accelerator wi
 
 ## Programming Model
 
-The machine fetches one 32-bit instruction per cycle from IMEM, decodes it, and issues it to the appropriate functional unit. Long-latency tensor operations (MXU matmuls, VPU ops, XLU transforms) execute concurrently with each other and with scalar instructions, but only one new instruction issues per cycle. Issue stalls when the targeted unit is busy. Control flow uses branches and jumps with exactly 2 mandatory delay slots (no branch-in-delay-slot allowed). The `delay N` instruction stalls the frontend for N cycles. `dma.wait.chN` stalls the frontend until the specified DMA channel completes.
+The machine fetches one 32-bit instruction per cycle from IMEM, decodes it, and issues it to the appropriate functional unit. Long-latency tensor operations (MXU matmuls, VPU ops, XLU transforms) execute concurrently with each other and with scalar instructions, but only one new instruction issues per cycle. Issue stalls when the targeted unit is busy. Branches and jumps have no delay slot: a taken one drops the instruction after it. The `delay N` instruction stalls the frontend for N cycles. `dma.wait.chN` stalls the frontend until the specified DMA channel completes.
 
 ## Architectural State
 
@@ -13,7 +13,7 @@ The machine fetches one 32-bit instruction per cycle from IMEM, decodes it, and 
 - **Scale registers:** 32 × 8-bit (`e0`–`e31`). Used for FP8 quantization/dequantization scaling.
 - **MXU state (per MXU, ×2):** 2 weight slots (1024 bytes each, holding 32×32 FP8 tiles) and 2 accumulation buffers (2048 bytes each, holding 32×32 BF16 tiles). These are not directly addressable as `m` registers; data moves via explicit push/pop instructions.
 - **DMA state:** Shared `dma.base` register (32-bit), 8 architected channels each with busy/idle state.
-- **PC:** Instruction-word index (increments by 1 per instruction, not by 4).
+- **PC:** Byte address (increments by 4 per instruction, as in RV32I).
 
 ## Memory Hierarchy
 
@@ -57,6 +57,6 @@ VMEM staging at `0x2000`, `0x2400`, `0x2800`). These are the actual values to pu
 
 6. **No hardware hazard detection.** The compiler must insert sufficient `delay` cycles between a producing instruction and any consumer. Matmul: 32 cycles. VPU simple: 2 cycles. VPU complex: 8 cycles. XLU: 4 cycles. Blocking transfers complete before the next instruction issues.
 
-7. **Branch delay slots (2 required).** Two instructions after a branch/jump always execute. Fill with useful work or NOPs. No branches allowed in delay slot positions.
+7. **No branch delay slots.** A taken branch or jump drops the instruction after it, so put work before the branch. Branch and JAL offsets are byte offsets, and a taken target with bit 1 set is illegal.
 
 8. **Immediate encoding limits.** Scalar immediates are 12-bit sign-extended. Addresses larger than ±2047 require `lui`/`addi` sequences. VMEM tensor addresses use `imm12 << 5` (32-byte granularity, covering ±64 KiB offset range).

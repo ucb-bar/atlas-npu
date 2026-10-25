@@ -1555,7 +1555,7 @@ tests contribute coverage.
 1. **Uphold every Test Correctness Invariant.** The invariants in the user prompt are
    non-negotiable. Each one is the direct root cause of a past silent failure and covers
    a general class of bug — dataflow closure, unit discipline, MREG pair discipline,
-   delay-slot semantics, scalar LSU isolation, value-domain golden compute via
+   branch semantics, scalar LSU isolation, value-domain golden compute via
    `gen_utils`, and DMA serialization. Before you emit a test, mentally check each
    invariant against it.
 2. **Helper reuse is mandatory.** The generator helpers live in three layers —
@@ -1838,7 +1838,7 @@ def build_fix_user_prompt(
            `0x7e` saturation, a scale/exponent register was read before being loaded.
            If the assembler/generator crashed, re-read the failure log verbatim.
         3. **Every Test Correctness Invariant above still applies.** Trace iteration 0
-           of every loop, check MREG pair usage, check delay-slot semantics, check
+           of every loop, check MREG pair usage, check branch semantics, check
            scalar LSU isolation, check that generator preloads/checks match the
            assembly's memory map byte-for-byte.
         4. **You may change the memory map, operand selection, or oracle path** if that

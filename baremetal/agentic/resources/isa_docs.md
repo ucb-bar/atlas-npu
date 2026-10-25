@@ -1,6 +1,6 @@
 # Atlas ISA and scheduling companion
 
-The pinned instruction syntax and operation reference is [`npu-model/npu_spec/06_instruction_set/README.md`](../../../npu-model/npu_spec/06_instruction_set/README.md). The pinned spec controls instruction syntax and encoding; this companion controls RTL timing and addressing where they differ. Atlas branches and jumps have two delay slots.
+The pinned instruction syntax and operation reference is [`npu-model/npu_spec/06_instruction_set/README.md`](../../../npu-model/npu_spec/06_instruction_set/README.md). The pinned spec controls instruction syntax and encoding; this companion controls RTL timing and addressing where they differ. Atlas branches and jumps have no delay slot.
 
 ## Canonical assembly syntax
 
@@ -22,7 +22,7 @@ CSR instructions use real RISC-V operand order (`rd, csr, rs1`); `csrr` and `csr
 
 ## Atlas scheduling and hardware rules
 
-Atlas scalar control flow uses IMEM word indices, not byte addresses. Numeric branch and JAL offsets are in words, and branches and jumps have two architectural delay slots. The scalar pipeline stalls only for `delay imm` and `dma.wait chN`; accelerator commands otherwise run asynchronously. Place no branch or jump in either delay slot.
+Atlas scalar control flow follows RV32I: the PC, link values and numeric branch and JAL offsets are byte addresses. Branches and jumps have no delay slot: a taken branch or jump drops the instruction after it, and a taken target with bit 1 set is illegal. The scalar pipeline stalls only for `delay imm` and `dma.wait chN`; accelerator commands otherwise run asynchronously.
 
 Scalar loads, stores, and `seld` use local VMEM byte addresses. `vload`/`vstore` bases and DMA VMEM operands use local VMEM word addresses. DMA DRAM operands are byte offsets added to the configured DMA base. The DMA beat is 32 bytes, and one MREG bank is 1024 bytes. Do not substitute runtime model memory-window defaults for Atlas harness addresses.
 
