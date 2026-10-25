@@ -191,6 +191,15 @@ RTL assertion, 1 step takes 378,496 cycles and 2 steps 694,553, in `default` and
 and every output word equals the functional model. The whole policy (the encoder and 1 sampler
 step) also passes in both configurations, in 9,901,025 cycles.
 
+### ISA 2.0 build (2026-10-25)
+
+One build has the ISA 2.0 encodings, the byte PC without delay slots and the numerics above. The
+outputs are bit-identical to those of the previous section. The loops end with one branch and
+no delay slot, so the cycle counts are those of the byte-PC program: in Verilator with every RTL
+assertion, 1 step takes 378,308 cycles, 2 steps 694,270, and the whole policy (the encoder and
+1 sampler step) 9,884,386, in `default` and in `ipt-nvfp4`. Every output word equals the
+functional model.
+
 ## Instruction scheduling (2026-10-24)
 
 The core issues in program order and holds each instruction until its unit and its operands are
