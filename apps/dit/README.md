@@ -218,7 +218,8 @@ VPU, the LSU, `mxu1` and the DMA mostly take turns: 95% of a step's cycles were 
   `DMA.WAIT`, and each DMA channel keeps its order. DRAM has no address tracking: a load of DRAM
   stays behind the `DMA.WAIT` of an earlier store, and a store stays behind the `DMA.WAIT` of an
   earlier load. Labels, branches, CSR accesses, `ECALL` and instructions that are not in `OPS`
-  stay in place.
+  stay in place. `OPS` also has the `.vx` and `.vr` VPU forms, which no kernel emits yet: a `.vx`
+  reads its x-register, and a `.vr` reads row 0 of T(vs2) in its issue cycle only.
 - `Machine` is a model of the interlock. It gives the cycle in which the core issues each
   instruction: unit occupancy, register reservations on the 64 registers and the 32 physical
   banks, the VPU's two slots, `mxu1`'s ports and paths, the LSU's bank rule, and the DMA. The
@@ -230,7 +231,8 @@ The schedule does not change the arithmetic, so the outputs stay bit-identical.
 `build --no-sched` keeps the program order. `tests/test_sched.py` compares scheduled and
 unscheduled programs bit for bit under five DMA timing models: the source read and the
 destination write of each transfer happen at issue or at its `DMA.WAIT`. Directed tests cover the
-DRAM order across `DMA.WAIT`, which the DiT and the policy do not exercise.
+DRAM order across `DMA.WAIT` and the operands of `.vx` and `.vr`, which the DiT and the policy do
+not exercise.
 
 Four compiler changes come with the scheduler:
 

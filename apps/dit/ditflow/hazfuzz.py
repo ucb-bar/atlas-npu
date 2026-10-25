@@ -1,11 +1,12 @@
 """Randomized hazard test of the interlock.
 
 Each program is a random stream of dependent tensor instructions with no DELAY: vload, vstore,
-VPU operations, MXU push / matmul / pop, and XLU transposes, over 20 registers (m0-m11 and
-m32-m39, so m_i and m_i+32 also share a bank) and a few VMEM tiles. Instructions are biased to
-read or overwrite what the previous ones touch, so RAW, WAR and WAW hazards on MREG registers,
-weight slots, accumulators and VMEM tiles are frequent. The program ends by storing every
-register and the VMEM tiles to DRAM.
+VPU operations (with the .vx and .vr forms), MXU push / matmul / pop, and XLU transposes, over 20
+registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a bank) and a few VMEM tiles.
+Instructions are biased to read or overwrite what the previous ones touch, so RAW, WAR and WAW
+hazards on MREG registers, weight slots, accumulators and VMEM tiles are frequent. A .vx often
+reads x4 right after a scalar load writes it. The program ends by storing every register and the
+VMEM tiles to DRAM.
 
 The expected DRAM comes from the functional model (funcsim.py), which executes in program
 order: on an interlocked core that is the architecture's meaning. A hazard the interlock lets
@@ -39,11 +40,13 @@ QUADS = [r for r in REGS if r % 4 == 0]
 DATA_TILES = [0 * SEGMENT + i * FP8_TILE for i in range(12)] + [1 * SEGMENT + i * FP8_TILE for i in range(8)]
 SCALE_TILES = [3 * SEGMENT + i * 128 for i in range(8)]        # 128 B: one register's NVFP4 scales
 OUT_BASE = 2 * SEGMENT
+SCALAR_WORD = 4 * SEGMENT                                     # byte address of the .vx scalar
 MAX_BOUND = 60          # log2 of the largest magnitude a BF16 value may reach
 FP8_BOUND = 9           # 448 < 2**9
 NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
 
-VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vmaximum.bf16")
+VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vminimum.bf16", "vmaximum.bf16")
+SCALARS = (0.5, -1.25, 3.0, 0.0078125)                        # .vx operands, |s| < 2^2
 VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16")
 
 
@@ -149,6 +152,7 @@ class Gen:
                 b.op(f"vload.scale m{r}, {b._vaddr(SCALE_TILES[j % len(SCALE_TILES)])}")
         for e, raw in enumerate((121, 124, 127, 129)):
             b._erf[raw] = e
+        b.li(19, SCALAR_WORD)
 
     # -- one random instruction -----------------------------------------------------------------
     def step(self):
@@ -199,19 +203,26 @@ class Gen:
             return True
         if kind < 0.65:
             op = rng.choice(VPU_BINARY)
+            form = rng.choice(("", ".vx", ".vr"))
             srcs = self.bf16_pairs()
             a, c = self.pick(srcs), self.pick(srcs)
-            # Two different source pairs in one physical bank are an illegal instruction.
-            if a is None or (a % 32 == c % 32 and a != c):
+            # Two different source pairs in one physical bank are an illegal .bf16 instruction.
+            if a is None or (form == "" and a % 32 == c % 32 and a != c):
                 return False
-            ba, bc = self.rbound[a], self.rbound[c]
-            bound = ba + bc if op == "vmul.bf16" else max(ba, bc) + (0 if op == "vmaximum.bf16" else 1)
+            ba, bc = self.rbound[a], 2 if form == ".vx" else self.rbound[c]
+            bound = ba + bc if op == "vmul.bf16" else max(ba, bc) + (1 if op in ("vadd.bf16", "vsub.bf16") else 0)
             if bound > MAX_BOUND:
                 return False
+            if form == ".vx":
+                self.b.li(4, L.bf16_bits(rng.choice(SCALARS)) << 16 | rng.getrandbits(16))
+                if rng.random() < 0.5:                           # through VMEM: the .vx waits for x4
+                    self.b.op("SW x4, 0(x19)")
+                    self.b.li(4, 0)
+                    self.b.op("LW x4, 0(x19)")
             dst = self.pick(PAIRS)
-            self.emit(op, f"m{dst}", f"m{a}", f"m{c}")
+            self.emit(op + form, f"m{dst}", f"m{a}", "x4" if form == ".vx" else f"m{c}")
             self.set_regs(dst, 2, "bf16", bound)
-            self.touch(dst, dst + 1, a, a + 1, c, c + 1)
+            self.touch(dst, dst + 1, a, a + 1, *(() if form == ".vx" else (c, c + 1)))
             return True
         op = rng.choice(VPU_UNARY)
         a = self.pick(self.bf16_pairs())

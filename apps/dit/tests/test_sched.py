@@ -128,6 +128,57 @@ def test_dram_order():
             assert outputs(mode, sched, blobs, regions) == gold, (mode, sched)
 
 
+def test_broadcast_forms():
+    """.vx reads its x-register and .vr row 0 of T(vs2) at issue: a later write of either stays
+    behind the read, and the scheduled program computes what the program order computes."""
+    body = """    LI x1, 0
+    dma.load x1, x2, x3, ch0
+    LI x1, 0x100
+    LI x2, {hi:#x}
+    dma.load x1, x2, x3, ch1
+    dma.wait ch0
+    dma.wait ch1
+    vload m0, 0(x20)
+    vload m1, 8(x20)
+    vload m2, 8(x20)
+    vload m3, 0(x20)
+    LI x4, 0x3fc01234
+    vadd.bf16.vx m4, m0, x4
+    LI x4, 0xc0a00000
+    vsub.bf16.vx m8, m0, x4
+    vmul.bf16.vr m6, m0, m2
+    vload m2, 0(x20)
+    vmaximum.bf16.vr m10, m2, m2
+    vstore m4, 0(x20)
+    vstore m5, 8(x20)
+    vstore m6, 16(x20)
+    vstore m7, 24(x20)
+    vstore m8, 32(x20)
+    vstore m9, 40(x20)
+    vstore m10, 48(x20)
+    vstore m11, 56(x20)
+    LI x1, 0
+    LI x2, {out:#x}
+    LI x3, 4096
+    dma.store x2, x1, x3, ch3
+    LI x1, 0x400
+    LI x2, {out2:#x}
+    dma.store x2, x1, x3, ch4
+    dma.wait ch3
+    dma.wait ch4
+    ECALL
+"""
+    g = torch.Generator().manual_seed(4)
+    source = f"""    LI x20, 0
+    LI x5, 0
+    dma.config x5, ch0
+    LI x2, {DRAM:#x}
+    LI x3, 1024
+{body.format(hi=DRAM + 0x400, out=DRAM + 0x1000, out2=DRAM + 0x2000)}"""
+    blobs = [("d", DRAM, torch.randn(1024, generator=g).to(torch.bfloat16).view(torch.uint8).numpy().tobytes())]
+    check(source, blobs, [(DRAM + 0x1000, 8192)])
+
+
 def test_instruction_after_a_branch_is_scheduled():
     """No delay slot: the instruction after a branch starts the next block, so it can move."""
     branch, pop, exp = "    BEQ x0, x0, L1\n", "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n"

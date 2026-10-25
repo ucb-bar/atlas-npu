@@ -44,10 +44,10 @@ def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False) -> Op:
     return Op("vpu2" if both else "vpu", roles, lat, cls)
 
 
-# Operand roles: x scalar register, e scale register, m m-register, M BF16 pair (m, m+1),
-# Q FP32 quad (m .. m+3), a accumulator, w weight slot, each followed by r (read), w (write) or
-# rw; v VMEM tile and s scalar VMEM access, both imm(x), followed by r or w; c DMA channel;
-# i immediate.
+# Operand roles: x scalar register, e scale register, m m-register, M BF16 pair (m, m+1), R row 0
+# of a BF16 pair (read in the issue cycle only), Q FP32 quad (m .. m+3), a accumulator, w weight
+# slot, each followed by r (read), w (write) or rw; v VMEM tile and s scalar VMEM access, both
+# imm(x), followed by r or w; c DMA channel; i immediate.
 # Latencies: npu-model/docs/rtl-timing.md and npu_model/hardware (vpu.py, mxu.py).
 OPS = {
     "LI": Op("alu", "xw i"), "ADDI": Op("alu", "xw xr i"), "ADD": Op("alu", "xw xr xr"),
@@ -60,6 +60,12 @@ OPS = {
     "vsub.bf16": _vpu("Mw Mr Mr", "addsub", both=True),
     "vmul.bf16": _vpu("Mw Mr Mr", "mul", both=True),
     "vmaximum.bf16": _vpu("Mw Mr Mr", "max", both=True),
+    "vadd.bf16.vx": _vpu("Mw Mr xr", "addsub"), "vsub.bf16.vx": _vpu("Mw Mr xr", "addsub"),
+    "vmul.bf16.vx": _vpu("Mw Mr xr", "mul"), "vminimum.bf16.vx": _vpu("Mw Mr xr", "min"),
+    "vmaximum.bf16.vx": _vpu("Mw Mr xr", "max"),
+    "vadd.bf16.vr": _vpu("Mw Mr Rr", "addsub", 67), "vsub.bf16.vr": _vpu("Mw Mr Rr", "addsub", 67),
+    "vmul.bf16.vr": _vpu("Mw Mr Rr", "mul", 67), "vminimum.bf16.vr": _vpu("Mw Mr Rr", "min", 67),
+    "vmaximum.bf16.vr": _vpu("Mw Mr Rr", "max", 67),
     "vredsum.row.bf16": _vpu("Mw Mr", "addsub", 39, both=True),
     "vredmax.row.bf16": _vpu("Mw Mr", "max", 34, both=True),
     "vredsum.bf16": _vpu("Mw Mr", "csum", 130),
@@ -151,9 +157,9 @@ class Block:
             if kind in "xe":
                 if s != "x0":
                     (ins.reads if acc == "r" else ins.writes).append(s)
-            elif kind in "mMQ":
+            elif kind in "mMRQ":
                 n = _num(s)
-                regs = [f"m{n + i}" for i in range({"m": 1, "M": 2, "Q": 4}[kind])]
+                regs = [f"m{n + i}" for i in range({"m": 1, "M": 2, "R": 2, "Q": 4}[kind])]
                 (ins.reads if acc == "r" else ins.writes).extend(regs)
             elif kind in "aw":
                 if kind == "a":
@@ -212,10 +218,12 @@ class Block:
         streams m, m+1 in T+1 .. T+32 and m+2, m+3 in T+33 .. T+64."""
         op = ins.op
         for role, s in zip(op.roles.split(), ins.args):
-            if role[0] not in "mMQ":
+            if role[0] not in "mMRQ":
                 continue
             n, read = _num(s), role[1] == "r"
-            if op.unit == "xlu":
+            if role[0] == "R":
+                c = 1
+            elif op.unit == "xlu":
                 c = 33 if read else op.lat
             elif op.unit in ("vpu", "vpu2") and read:
                 c = 33 if op.lat < 65 else op.lat - 1    # a row reduction reads both halves at once
@@ -226,7 +234,7 @@ class Block:
             if role[0] == "Q":
                 regs = [(n + i, 32 * (1 + i // 2)) for i in range(4)]
             else:
-                regs = [(r, c) for r in ([n, n + 1] if role[0] == "M" else [n])]
+                regs = [(r, c) for r in ([n, n + 1] if role[0] in "MR" else [n])]
             (ins.rr if read else ins.rw).extend(regs)
 
     def _propagate(self, ins: Ins) -> None:
@@ -311,13 +319,14 @@ class Machine:
     It follows the interlock's checks (docs/interlock.md): unit occupancy; m-register
     reservations on the 64 registers and on the 32 physical banks (m and m+32 share ports);
     the VPU's two slots (single-input ops of different lane boxes overlap, two-input ops and row
-    reductions take both); mxu1's sequencer (one feed port, one weight-write path, one
+    reductions take both, .vx and .vr take one, and a .vr waits until the other slot has read its
+    last row); mxu1's sequencer (one feed port, one weight-write path, one
     accumulator-push path, accumulator ports); the LSU's VMEM bank rule; DMA channels, with
     transfers at DMA_BEAT cycles per beat."""
 
     def __init__(self):
         self.f = defaultdict(int)                    # resource -> first cycle it is free
-        self.slots = [[0, ""], [0, ""]]              # VPU: free cycle, lane box ("*": both)
+        self.slots = [[0, "", 0], [0, "", 0]]        # VPU: free cycle, lane box ("*": both), reads end
         self.lsu = {"vload": None, "vstore": None}   # VMEM bank of each LSU vector path
         self.dma = 0                                 # cycle the DMA engine has no beats queued
 
@@ -337,13 +346,15 @@ class Machine:
             if self.lsu[other] == ins.bank:
                 e = max(e, f[other])
         elif u in ("vpu", "vpu2"):
-            (fa, _), (fb, cb) = sorted(self.slots)
+            (fa, _, _), (fb, cb, rb) = sorted(self.slots)
             if u == "vpu2":
                 e = max(e, fb)
             else:
                 e = max(e, fa)
                 if e < fb and cb in ("*", ins.op.cls):
                     e = fb
+                if ins.name.endswith(".vr"):             # it reads row 0 on both read ports
+                    e = max(e, rb)
         elif u == "xlu":
             e = max(e, f["xlu"])
         elif u == "mm":
@@ -384,9 +395,9 @@ class Machine:
         elif u in ("vpu", "vpu2"):
             end = T + ins.lat - 1
             if u == "vpu2":
-                self.slots = [[end, "*"], [end, "*"]]
+                self.slots = [[end, "*", end], [end, "*", end]]
             else:
-                min(self.slots)[:] = [end, ins.op.cls]
+                min(self.slots)[:] = [end, ins.op.cls, T + max((c for _, c in ins.rr), default=0)]
         elif u == "xlu":
             f["xlu"] = T + ins.lat
         elif u == "mm":
