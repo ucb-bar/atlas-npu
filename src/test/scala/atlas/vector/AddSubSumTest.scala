@@ -1,6 +1,6 @@
 // ============================================================================
-// AddSubSumTest.scala — Functional tests for the flexible vector unit
-// including Add, Sub, Sum Reduction.
+// AddSubSumTest.scala — Functional tests for the vector add/sub unit
+// (AddSubSumVec): Add and Sub.
 //
 // RUN: (from sp26-atlas-acc)
 //    mill atlas.test.testOnly atlas.vector.AddSubSumTest
@@ -96,7 +96,7 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
   behavior of "AddSubSumVec"
 
-  it should "correctly compute pointwise Add/Sub, and Sum Reduction" in {
+  it should "correctly compute pointwise Add/Sub" in {
     PersistentVcsAddSubSumSimulator.simulate(new AddSubSumVec(fptype, numLanes, tagWidth)) { module =>
       val dut = module.wrapped
 
@@ -111,21 +111,18 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
       def rne(d: Double): Double = bf16IntToDouble(VectorTestUtils.fpToBf16(d.toFloat) & 0xFFFF)
       val expectedAdd = aVals.zip(bVals).map { case (a, b) => rne(a + b) }
       val expectedSub = aVals.zip(bVals).map { case (a, b) => rne(a - b) }
-      val expectedSum = Seq.fill(numLanes)(aVals.sum)
 
-      // Test sequence: (Operation Name, isSub, isSum, Expected Results)
-      // Note: We issue them in an order that won't cause fast-path/slow-path collisions
+      // Test sequence: (Operation Name, isSub, Expected Results)
       val requests = Seq(
-        ("ADD", false, false, false, expectedAdd),
-        ("SUB", true,  false, false, expectedSub),
-        ("SUM", false, true,  false, expectedSum)
+        ("ADD", false, expectedAdd),
+        ("SUB", true,  expectedSub)
       )
 
       // --- PIPELINE FLUSH ---
       dut.io.req.valid.poke(false.B)
       dut.clock.step(5) // Step 5 cycles to clear out any reset garbage
       
-      println(s"\n>>> STIMULATING ADD/SUB/SUM PIPELINE")
+      println(s"\n>>> STIMULATING ADD/SUB PIPELINE")
       var reqIdx = 0
       var resultsFound = 0
       var cycles = 0
@@ -135,11 +132,10 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         
         // 1. DRIVE INPUTS
         if (reqIdx < requests.length) {
-          val (_, isSub, isSum, _, _) = requests(reqIdx)
+          val (_, isSub, _) = requests(reqIdx)
           
           dut.io.req.valid.poke(true.B)
           dut.io.req.bits.isSub.poke(isSub.B)
-          dut.io.req.bits.isSum.poke(isSum.B)
           
           for (i <- 0 until numLanes) {
             dut.io.req.bits.aVec(i).poke(doubleToBF16Int(aVals(i)).U)
@@ -151,7 +147,7 @@ class AddSubSumTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
 
         // 2. MONITOR OUTPUTS
         if (dut.io.resp.valid.peek().litToBoolean) {
-          val (reqName, _, isSumOp, _, expected) = requests(resultsFound)
+          val (reqName, _, expected) = requests(resultsFound)
           
           println(f"\n>>> RESPONSE RECEIVED FOR '$reqName' AT CYCLE $cycles")
 
