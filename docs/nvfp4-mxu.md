@@ -217,3 +217,6 @@ With these rules a weight push to one slot overlaps a matmul on the other, back-
 `vmatmul.acc.nv` on one accumulator run at the 32-cycle stride, and the scalar core's interlock
 needs no `DELAY` (docs/interlock.md). The interlock also treats `vload.scale` / `vstore.scale`
 as VLOAD / VSTORE (same LSU path and VMEM bank), with no WAR exemption for `vload.scale`.
+
+The baremetal test `nvfp4_mxu1_overlap` runs the NVFP4 MXU and mxu1 together: their pushes,
+matmuls and pops alternate with no `DELAY`, on registers in distinct physical banks.
