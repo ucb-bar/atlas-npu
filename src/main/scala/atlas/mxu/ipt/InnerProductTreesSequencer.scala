@@ -123,8 +123,10 @@ class InnerProductTreesSequencer(
   private def reg1(cmd: MxuCmd, row: UInt): UInt =
     Mux(cmd.op === MxuOp.PushWeight || cmd.op === MxuOp.PushAccFP8, cmd.mregId, reg0(cmd, row) + 1.U)
   /** Columns 16h..16h+15 of the accumulator row read for step `row` of an FP32 pop, phase h. */
-  private def fp32Half(row: UInt): Vec[UInt] =
-    Mux(phase(row).asBool, VecInit(io.accStoreData.drop(16)), VecInit(io.accStoreData.take(16)))
+  private def fp32Half(row: UInt): Seq[UInt] = {
+    val cols = io.accStoreData.padTo(32, 0.U(32.W))
+    (0 until 16).map(j => Mux(phase(row).asBool, cols(16 + j), cols(j)))
+  }
 
   private val tileRows  = p.tileRows
   private val rowBits   = p.tileRowBits
