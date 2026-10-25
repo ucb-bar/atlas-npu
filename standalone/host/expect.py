@@ -1,7 +1,8 @@
 """Which baremetal tests each configuration can run (run_tests.py --config).
 
 A test that uses a unit the configuration lacks, or has the line `# @EXPECT_ILLEGAL`, must stop
-with an illegal instruction; every other test must pass.
+with an illegal instruction; every other test must pass, and so must a bundle that is not a
+baremetal test (DiT, hazfuzz).
 """
 import re
 from pathlib import Path
@@ -18,6 +19,9 @@ def needs(test: str) -> set:
 
 
 def expected(test: str, config: str) -> str:
-    if _ILLEGAL.search((ASSEMBLY / f"{test}.S").read_text()):
+    source = ASSEMBLY / f"{test}.S"
+    if not source.exists():
+        return "PASS"
+    if _ILLEGAL.search(source.read_text()):
         return "ILLEGAL"
     return "PASS" if needs(test) <= UNITS[config] else "ILLEGAL"
