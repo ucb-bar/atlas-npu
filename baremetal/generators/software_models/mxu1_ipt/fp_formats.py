@@ -34,10 +34,6 @@ BF16_MAX_POS = 0x7F7F
 BF16_MAX_NEG = 0xFF7F
 
 
-F32_SIGN_MASK = 0x80000000
-F32_EXP_MASK = 0x7F800000
-F32_FRAC_MASK = 0x007FFFFF
-
 _E4M3_BIAS = E4M3.ieeeBias
 
 
@@ -61,21 +57,6 @@ def u32_to_float(x: int) -> float:
 
 def float_to_u32(x: float) -> int:
     return _unpack(">I", _pack(">f", float(x)))[0]
-
-
-def sign_extend(value: int, bits: int) -> int:
-    sign_bit = 1 << (bits - 1)
-    return (value & (sign_bit - 1)) - (value & sign_bit)
-
-
-def clamp_signed(value: int, bits: int) -> int:
-    lo = -(1 << (bits - 1))
-    hi = (1 << (bits - 1)) - 1
-    if value < lo:
-        return lo
-    if value > hi:
-        return hi
-    return value
 
 
 def _decode_e4m3_uncached(bits: int) -> DecodedFloat:
