@@ -269,6 +269,8 @@ functional model (docs/interlock.md, "Randomized hazard test").
 - `ditflow/funcsim.py`, `ditflow/numerics.py`: the functional model.
 - `ditflow/flow.py`: the command line.
 - `ditflow/hazfuzz.py`: the randomized hazard test of the interlock.
+- `quantstudy/`: the NVFP4, MXFP4 and FP8 accuracy study on trained DINOv3 weights
+  (docs/nvfp4-accuracy.md). It also needs `transformers==5.5.4` and `av`.
 
 ## Limits
 
