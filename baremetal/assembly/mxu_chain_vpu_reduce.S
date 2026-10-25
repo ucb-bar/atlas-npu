@@ -5,8 +5,8 @@
 #
 # Attention-like pipeline exercising all three functional units:
 #
-#   Phase A: MXU1 computes Q = X @ WQ   (32×32, BF16 acc → FP8 pop)
-#   Phase B: MXU1 computes K = X @ WK   (32×32, BF16 acc → FP8 pop)
+#   Phase A: MXU1 computes Q = X @ WQ   (32×32, FP32 acc → FP8 pop)
+#   Phase B: MXU1 computes K = X @ WK   (32×32, FP32 acc → FP8 pop)
 #   Phase C: MXU1 computes S = Q @ K^T  (32×32, BF16 pop — final scores)
 #   Phase D: VPU computes bias_add = S + bias_vpu  (BF16 element-wise)
 #

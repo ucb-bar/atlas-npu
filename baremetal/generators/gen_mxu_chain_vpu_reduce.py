@@ -26,8 +26,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 from gen_utils import (
     rand_matrix_fp8_safe,
     quantize_fp8,
-    float_to_bf16_bits,
-    fp8_e4m3_bits_to_float,
     matrix_to_fp8_words,
     matrix_to_bf16_words,
     preloads_from_words_packed,
@@ -126,75 +124,6 @@ def emit_bf16_rows_check(checks, byte_off_b0, byte_off_b1, rows_b0, rows_b1):
 
 
 # ------------------------------------------------------------------
-# BF16 → E4M3 conversion (models the VMATPOP.FP8 stage)
-#
-# Reuse the same conversion logic from gen_mxu1_qk_scores.py.
-# ------------------------------------------------------------------
-
-def round_right_shift_4_rne(x: int) -> int:
-    trunc = (x >> 4) & 0xF
-    guard = (x >> 3) & 0x1
-    sticky = 1 if (x & 0x7) != 0 else 0
-    lsb = trunc & 0x1
-    inc = 1 if (guard and (sticky or lsb)) else 0
-    return trunc + inc
-
-
-def bf16_to_e4m3_scaled_bits(bf16_bits: int, scale_e8m0: int) -> int:
-    sign = (bf16_bits >> 15) & 0x1
-    exp_bf16 = (bf16_bits >> 7) & 0xFF
-    frac_bf16 = bf16_bits & 0x7F
-
-    is_zero = (exp_bf16 == 0) and (frac_bf16 == 0)
-    is_sub = (exp_bf16 == 0) and (frac_bf16 != 0)
-    is_inf = (exp_bf16 == 0xFF) and (frac_bf16 == 0)
-    is_nan = (exp_bf16 == 0xFF) and (frac_bf16 != 0)
-
-    E4M3_MAX_POS = 0x7E
-    E4M3_MAX_NEG = 0xFE
-
-    if is_zero or is_sub or is_nan:
-        return 0
-    if is_inf:
-        return E4M3_MAX_NEG if sign else E4M3_MAX_POS
-
-    unb_exp = exp_bf16 - 127
-    scale_exp = scale_e8m0 - 127
-    scaled_unb_exp = unb_exp + scale_exp
-
-    mant8 = (1 << 7) | frac_bf16
-    rounded_norm = round_right_shift_4_rne(mant8)
-    norm_carry = (rounded_norm == 16)
-
-    final_unb_exp = scaled_unb_exp + (1 if norm_carry else 0)
-
-    rounded_minus_8 = rounded_norm - 8
-    norm_mant = 0 if norm_carry else (rounded_minus_8 & 0x7)
-
-    if final_unb_exp > 8:
-        return E4M3_MAX_NEG if sign else E4M3_MAX_POS
-    elif final_unb_exp >= -6:
-        exp_e4 = final_unb_exp + 7
-        return ((sign & 0x1) << 7) | ((exp_e4 & 0xF) << 3) | (norm_mant & 0x7)
-    else:
-        return 0
-
-
-def bf16_to_e4m3_scaled_float(x: float, scale_e8m0: int) -> float:
-    bits = float_to_bf16_bits(float(x))
-    e4m3_bits = bf16_to_e4m3_scaled_bits(bits, scale_e8m0)
-    return fp8_e4m3_bits_to_float(e4m3_bits)
-
-
-def bf16_tile_to_scaled_fp8(tile_bf16, scale_e8m0):
-    out = np.zeros_like(tile_bf16, dtype=np.float32)
-    for r in range(tile_bf16.shape[0]):
-        for c in range(tile_bf16.shape[1]):
-            out[r, c] = bf16_to_e4m3_scaled_float(tile_bf16[r, c], scale_e8m0)
-    return out
-
-
-# ------------------------------------------------------------------
 # Functional models
 # ------------------------------------------------------------------
 
@@ -225,18 +154,17 @@ bias_vpu_b1_rows = float_matrix_to_bf16_rows(bias_vpu[:, 16:])
 zero_bias = np.zeros((TILE, TILE), dtype=np.float32)
 
 # ------------------------------------------------------------------
-# Phase A: MXU1 → Q = X @ WQ (BF16 acc → FP8 pop)
+# Phase A: MXU1 → Q = X @ WQ (FP32 acc → FP8 pop)
 #
 # MXU1 (IPT) uses F.linear: y = x @ w^T. Pass w = WQ^T.
-# Accumulate in BF16, then pop as FP8 with identity scale.
+# Accumulate in FP32, then pop as FP8 with identity scale.
 # ------------------------------------------------------------------
 
 X_t  = torch.from_numpy(X)
 WQ_t = torch.from_numpy(WQ.T.copy())
 b0_t = torch.zeros(TILE)
 
-Q_bf16 = ipt_bf16(X_t, WQ_t, b_q=b0_t, scale_exp=0).numpy().astype(np.float32)
-Q_fp8  = bf16_tile_to_scaled_fp8(Q_bf16, SCALE_E8M0)
+Q_fp8 = ipt_fp8(X_t, WQ_t, scale_exp=SCALE_E8M0 - 127).numpy()
 
 # ------------------------------------------------------------------
 # Phase B: MXU1 → K = X @ WK (FP32 acc → FP8 pop)

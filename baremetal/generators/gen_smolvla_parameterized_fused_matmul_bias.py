@@ -8,7 +8,7 @@ smolvla_fused_matmul_bias per-tile body:
   out[m,n] = (A[m,0] @ B[0,n]) + bias[m,n]
 
   - A BF16 quantized on-chip to FP8 via VMATPUSH.ACC.BF16 + VMATPOP.FP8
-    (golden side: bf16_tile_to_e4m3_bytes)
+    (golden side: bf16_tile_to_e4m3_bytes_mxu1)
   - B pre-quantized FP8 in DRAM (same converter)
   - Per-tile FP8 matmul through IPTLinearRTLFunction (FP32-decoded
     inputs), so the BF16 output matches the MXU1 RTL bit-exactly.
@@ -23,7 +23,7 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from gen_utils import emit_test_data
-from mxu_fp8_utils import bf16_tile_to_e4m3_bytes
+from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
 from vpu_gen_utils import (
     BF16_PER_BEAT,
     FP8_PER_BEAT,
@@ -111,7 +111,7 @@ def main():
     b_tiles_fp8: list[torch.Tensor] = []   # keep for golden
     for n in range(N_TILES):
         b_tile_bf16 = B[0:TILE, n * TILE:(n + 1) * TILE]
-        b_tile_fp8 = bf16_tile_to_e4m3_bytes(b_tile_bf16, scale_exp=0)
+        b_tile_fp8 = bf16_tile_to_e4m3_bytes_mxu1(b_tile_bf16, scale_exp=0)
         b_tiles_fp8.append(b_tile_fp8)
         b_beats = fp8_tile_to_beats(b_tile_fp8)
         for i, beat_lanes in enumerate(b_beats):
@@ -135,7 +135,7 @@ def main():
     out_offset = OUT_BASE
     for m in range(M_TILES):
         a_tile_bf16 = A[m * TILE:(m + 1) * TILE, 0:TILE]
-        a_tile_fp8 = bf16_tile_to_e4m3_bytes(a_tile_bf16, scale_exp=0)
+        a_tile_fp8 = bf16_tile_to_e4m3_bytes_mxu1(a_tile_bf16, scale_exp=0)
         for n in range(N_TILES):
             b_tile_fp8 = b_tiles_fp8[n]
             bias_tile = BIAS[m * TILE:(m + 1) * TILE, n * TILE:(n + 1) * TILE]

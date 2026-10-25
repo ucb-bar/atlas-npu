@@ -25,11 +25,13 @@ exp_s @ V_left pushes V_mlir[:32, :] as W (since V_left = V_mlir[:32, :]^T).
 
 Golden mirrors atlas hardware, routed per-phase through the matching
 software model so each rounding path is bit-exact:
-  - IPTLinearRTLFunction (MXU1 / IPT) handles Q @ K^T (a K-chain with a
-    BF16 accumulator between the two K tiles) and exp_s_q @ V_left|V_right:
-    aligned-tree accumulation with a single RNE rounding at the tree
-    output. IPT requires FP32 inputs, so raw E4M3 bytes are decoded via
+  - IPTLinearRTLFunction (MXU1 / IPT) handles Q @ K^T (a K-chain in the
+    FP32 accumulator over the two K tiles) and exp_s_q @ V_left|V_right:
+    Blackwell FP8 MMA steps into FP32 and one rounding at the BF16 pop.
+    IPT requires FP32 inputs, so raw E4M3 bytes are decoded via
     `e4m3_bytes_to_float`.
+  - bf16_tile_to_e4m3_bytes_mxu1 models the BF16 → FP8 accumulator round
+    trip (vmatpush.acc.bf16, vmatpop.fp8).
   - VPU pair ops, row-reduces, and unaries route through
     vpu_gen_utils.MODEL (atlas's VectorEngineModel) for bit-exact pipeline
     match. VMAX.BF16 → "pairmax".
@@ -53,6 +55,7 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from gen_utils import emit_test_data
+from mxu_fp8_utils import bf16_tile_to_e4m3_bytes_mxu1
 from vpu_gen_utils import (
     BF16_PER_BEAT,
     ROWS_PER_REGISTER,
@@ -63,41 +66,11 @@ from vpu_gen_utils import (
     run_row_reduce_tensor,
     run_unary_rows,
 )
-from software_models.mxu1_ipt.converters import bf16_scale_to_e4m3
 from software_models.mxu1_ipt.fp_formats import OutputFmtSel
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     e4m3_bytes_to_float,
 )
-
-
-def bf16_tile_to_e4m3_bytes(tile: torch.Tensor) -> torch.Tensor:
-    """Quantize a BF16 tile to raw E4M3 bytes with the IPT converter.
-
-    Keep this path for Q/K/V tiles, which are not especially sensitive to
-    the softmax-tail underflow edge.
-    """
-    if tile.dtype != torch.bfloat16:
-        raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
-    bits = tile.contiguous().view(torch.int16).numpy().astype(np.uint16)
-    flat = bits.ravel()
-    out = np.empty(flat.size, dtype=np.uint8)
-    for i in range(flat.size):
-        out[i] = bf16_scale_to_e4m3(int(flat[i]), 0) & 0xFF
-    return torch.from_numpy(out.reshape(bits.shape))
-
-
-def bf16_tile_to_e4m3_bytes_torch_cast(tile: torch.Tensor) -> torch.Tensor:
-    """Quantize BF16 tile via PyTorch's float8 cast and return raw FP8 bytes.
-
-    This is used for the online-softmax `exp_s` path, where values cluster
-    near the E4M3 underflow boundary and empirically track the MXU pop path
-    more closely when routed through the float8 cast semantics.
-    """
-    if tile.dtype != torch.bfloat16:
-        raise ValueError(f"expected bfloat16 tile, got {tile.dtype}")
-    fp8 = tile.to(torch.float32).to(torch.float8_e4m3fn).contiguous()
-    return fp8.view(torch.uint8)
 
 
 Q_ROWS    = 32
@@ -191,11 +164,11 @@ def main():
         + constant_bf16_rows(ROWS_PER_REGISTER, SCALE_BITS)
     )
 
-    Q_FP8 = bf16_tile_to_e4m3_bytes(Q_RAW)
+    Q_FP8 = bf16_tile_to_e4m3_bytes_mxu1(Q_RAW)
 
     # ── Per K-tile flash-attention body ──
     for K_RAW, V_MLIR in [(K0_RAW, V0_MLIR), (K1_RAW, V1_MLIR)]:
-        K_FP8 = bf16_tile_to_e4m3_bytes(K_RAW)
+        K_FP8 = bf16_tile_to_e4m3_bytes_mxu1(K_RAW)
         scores_bf16 = ipt_bf16(
             e4m3_bytes_to_float(Q_FP8), e4m3_bytes_to_float(K_FP8), scale_exp=0
         ).to(torch.bfloat16)
@@ -223,11 +196,11 @@ def main():
         exp_s_rows = run_unary_rows("exp", exp_s_pre_rows)
 
         exp_s_bf16 = bank_rows_to_bf16_tile(exp_s_rows)
-        exp_s_fp8  = bf16_tile_to_e4m3_bytes_torch_cast(exp_s_bf16)
+        exp_s_fp8  = bf16_tile_to_e4m3_bytes_mxu1(exp_s_bf16)
 
         # V_top = V_mlir[:32, :] [32, 32]; pushed as W → A @ V_top^T = exp_s @ V_left
-        V_top_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[:Q_ROWS, :].contiguous())
-        V_bot_fp8 = bf16_tile_to_e4m3_bytes(V_MLIR[Q_ROWS:, :].contiguous())
+        V_top_fp8 = bf16_tile_to_e4m3_bytes_mxu1(V_MLIR[:Q_ROWS, :].contiguous())
+        V_bot_fp8 = bf16_tile_to_e4m3_bytes_mxu1(V_MLIR[Q_ROWS:, :].contiguous())
 
         # probs @ V: decode E4M3 bytes to FP32 since IPT doesn't accept uint8.
         exp_s_fp32 = e4m3_bytes_to_float(exp_s_fp8)
