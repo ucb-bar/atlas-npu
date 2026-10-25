@@ -1,0 +1,106 @@
+# The ScalarDecoder control vector of each ISA table entry, checked by ScalarDecoderTest.
+# A line has the entry's name and each field that is not 0, by its ScalarISA name (ALU_SUB:
+# alu=SUB); rd_wen, jal and jalr if set; mxu1= or nv= and the MXU command (funct7[3:0]).
+# Write it again after a change of IDecode, and review the diff:
+#   ATLAS_DECODE_GOLDEN=write ./mill atlas.test.testOnly atlas.scalar.ScalarDecoderTest
+ADD rd_wen
+SUB alu=SUB rd_wen
+SLL alu=SLL rd_wen
+SLT alu=SLT rd_wen
+SLTU alu=SLTU rd_wen
+XOR alu=XOR rd_wen
+SRL alu=SRL rd_wen
+SRA alu=SRA rd_wen
+OR alu=OR rd_wen
+AND alu=AND rd_wen
+ADDI op2=IMM rd_wen
+SLTI alu=SLT op2=IMM rd_wen
+SLTIU alu=SLTU op2=IMM rd_wen
+XORI alu=XOR op2=IMM rd_wen
+ORI alu=OR op2=IMM rd_wen
+ANDI alu=AND op2=IMM rd_wen
+SLLI alu=SLL op2=IMM rd_wen
+SRLI alu=SRL op2=IMM rd_wen
+SRAI alu=SRA op2=IMM rd_wen
+BEQ br=EQ imm=B
+BNE br=NE imm=B
+BLT br=LT imm=B
+BGE br=GE imm=B
+BLTU br=LTU imm=B
+BGEU br=GEU imm=B
+JAL op1=PC op2=IMM imm=J rd_wen jal
+JALR op2=IMM rd_wen jalr
+LUI alu=PASS_B op2=IMM imm=U rd_wen
+AUIPC op1=PC op2=IMM imm=U rd_wen
+CSRRW csr=RW rd_wen
+CSRRS csr=RS rd_wen
+CSRRC csr=RC rd_wen
+CSRRWI imm=Z csr=RWI rd_wen
+CSRRSI imm=Z csr=RSI rd_wen
+CSRRCI imm=Z csr=RCI rd_wen
+ECALL
+EBREAK
+FENCE
+LB op2=IMM mem=LB
+LH op2=IMM mem=LH
+LW op2=IMM mem=LW
+LBU op2=IMM mem=LBU
+LHU op2=IMM mem=LHU
+SB op2=IMM imm=S mem=SB
+SH op2=IMM imm=S mem=SH
+SW op2=IMM imm=S mem=SW
+SELD op2=ZERO mem=SELD
+SELI sc=SELI
+DELAY sc=DELAY
+VLOAD op2=IMM imm=VLS lsu=VLOAD
+VSTORE op2=IMM imm=VLS lsu=VSTORE
+VLOAD_SCALE op2=IMM imm=VLS lsu=VLOAD_SCALE
+VSTORE_SCALE op2=IMM imm=VLS lsu=VSTORE_SCALE
+DMA_LOAD dma=LD
+DMA_STORE dma=ST
+DMA_CONFIG dma=CONFIG
+DMA_WAIT dma=WAIT
+VMATPUSH_WEIGHT_MXU1 mxu1=PUSH_WEIGHT
+VMATPUSH_ACC_FP8_MXU1 mxu1=PUSH_ACC_FP8
+VMATPUSH_ACC_BF16_MXU1 mxu1=PUSH_ACC_BF16
+VMATPOP_FP8_ACC_MXU1 mxu1=POP_FP8
+VMATPOP_BF16_ACC_MXU1 mxu1=POP_BF16
+VMATMUL_MXU1 mxu1=MATMUL
+VMATMUL_ACC_MXU1 mxu1=MATMUL_ACC
+VMATPUSH_WEIGHT_NV nv=PUSH_WEIGHT
+VMATPUSH_ACC_BF16_NV nv=PUSH_ACC_BF16
+VMATPUSH_ACC_FP32_NV nv=PUSH_ACC_FP32
+VMATPOP_BF16_ACC_NV nv=POP_BF16
+VMATPOP_FP32_ACC_NV nv=POP_FP32
+VMATMUL_NV nv=MATMUL
+VMATMUL_ACC_NV nv=MATMUL_ACC
+VADD_BF16 vpu=ADD
+VSUB_BF16 vpu=SUB
+VMUL_BF16 vpu=MUL
+VMINIMUM_BF16 vpu=PAIRMIN
+VMAXIMUM_BF16 vpu=PAIRMAX
+VREDSUM_BF16 vpu=CSUM
+VREDMIN_BF16 vpu=CMIN
+VREDMAX_BF16 vpu=CMAX
+VREDSUM_ROW_BF16 vpu=RSUM
+VREDMIN_ROW_BF16 vpu=RMIN
+VREDMAX_ROW_BF16 vpu=RMAX
+VMOV vpu=MOV
+VRECIP_BF16 vpu=RCP
+VEXP_BF16 vpu=EXP
+VEXP2_BF16 vpu=EXP2
+VSQUARE_BF16 vpu=SQUARE
+VCUBE_BF16 vpu=CUBE
+VPACK_BF16_FP8 vpu=FP8PACK
+VUNPACK_FP8_BF16 vpu=FP8UNPACK
+VRELU_BF16 vpu=RELU
+VSIN_BF16 vpu=SIN
+VCOS_BF16 vpu=COS
+VTANH_BF16 vpu=TANH
+VLOG2_BF16 vpu=LOG
+VSQRT_BF16 vpu=SQRT
+VLI_ALL vpu=LI_ALL
+VLI_ROW vpu=LI_ROW
+VLI_COL vpu=LI_COL
+VLI_ONE vpu=LI_ONE
+VTRPOSE_XLU xlu=TRPOSE
