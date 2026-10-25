@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
-gen_mxu_vectors.py: generate MXU test vectors using SA and IPT functional models,
+gen_mxu_vectors.py: generate MXU test vectors using the IPT functional model,
 then convert expected outputs to E4M3 with scaling.
 
 Test data is generated using the IPT model's own E4M3 LUT so that
 the float→byte round-trip inside the model is consistent with the hex values
 written to the test vector files.
 
-Produces four files:
-  1. sa_<base>.txt          – BF16-expected vectors (SA model)
-  2. ipt_<base>.txt         – BF16-expected vectors (IPT model)
-  3. sa_<base>_e4m3.txt     – E4M3-converted (SA model)
-  4. ipt_<base>_e4m3.txt    – E4M3-converted (IPT model)
+Produces two files:
+  1. ipt_<base>.txt         – BF16-expected vectors (IPT model)
+  2. ipt_<base>_e4m3.txt    – E4M3-converted (IPT model)
 
 Usage:
     python3 scripts/gen_mxu_vectors.py
@@ -23,7 +21,6 @@ from numpy.random import default_rng
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baremetal", "generators"))
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     _E4M3_FLOAT_LUT,
@@ -70,7 +67,7 @@ def sample_e4m3(rng, n):
 
 def compute_expected_row(model, act_f32, wgt_f32, sel, bias_f32):
     """
-    Both models use F.linear convention: y = x @ w^T + b
+    The model uses the F.linear convention: y = x @ w^T + b
       act_f32:  [1, vec_len]
       wgt_f32:  [num_lanes, vec_len]
       bias_f32: [num_lanes] (for sel=1) or None
@@ -169,11 +166,6 @@ def main():
     ap.add_argument("--num-lanes", type=int, default=32)
     args = ap.parse_args()
 
-    # SA model — matches doc 21: rows=32, cols=32
-    sa_model = SARTLLinearFunction(
-        rows=32, cols=32,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
     # IPT model — matches doc 20
     ipt_model = IPTLinearRTLFunction(
         vec_len=32, num_lanes=32, pipeline_depth=1,
@@ -190,15 +182,10 @@ def main():
     def outpath(name):
         return os.path.join(outdir, name) if outdir else name
 
-    sa_bf16_path = outpath(f"sa_{base}.txt")
     ipt_bf16_path = outpath(f"ipt_{base}.txt")
-    sa_e4m3_path = outpath(f"sa_{base}_e4m3.txt")
     ipt_e4m3_path = outpath(f"ipt_{base}_e4m3.txt")
 
-    generate_vectors(sa_bf16_path, sa_model, args)
     generate_vectors(ipt_bf16_path, ipt_model, args)
-
-    convert_file(sa_bf16_path, sa_e4m3_path)
     convert_file(ipt_bf16_path, ipt_e4m3_path)
 
 if __name__ == "__main__":

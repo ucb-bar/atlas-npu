@@ -12,10 +12,6 @@ class InnerProductTreesDefaultConfig extends Config(
   new WithInnerProductTrees
 )
 
-class SystolicArrayDefaultConfig extends Config(
-  new WithSystolicArray
-)
-
 // // Full Atlas configs
 // class AtlasRocketConfig extends Config(
 //   new freechips.rocketchip.rocket.WithNHugeCores(1) ++
@@ -25,7 +21,6 @@ class SystolicArrayDefaultConfig extends Config(
 
 class AtlasDefaultConfig extends Config(
   new WithInnerProductTrees() ++
-  new WithSystolicArray() ++
   new WithDma() ++
   new WithVmem() ++
   new WithAtlasTile()

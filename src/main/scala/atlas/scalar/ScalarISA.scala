@@ -102,7 +102,7 @@ object ScalarISA {
   val MXU_POP_BF16      = 5.U(4.W)
   val MXU_MATMUL        = 6.U(4.W)
   val MXU_MATMUL_ACC    = 7.U(4.W)
-  // NVFP4 MXU (configs with AtlasParams.nvfp4); mxu_sel is unused.
+  // NVFP4 MXU (configs with AtlasParams.nvfp4).
   val MXU_NV_PUSH_WEIGHT    = 8.U(4.W)
   val MXU_NV_PUSH_ACC_BF16  = 9.U(4.W)
   val MXU_NV_PUSH_ACC_FP32  = 10.U(4.W)
@@ -112,9 +112,9 @@ object ScalarISA {
   val MXU_NV_MATMUL_ACC     = 14.U(4.W)
   val MXU_X             = 0.U(4.W)
 
-  // ── MXU select (1-bit) ─────────────────────────────────────────────
-  val MXUSEL_0 = 0.U(1.W)
-  val MXUSEL_1 = 1.U(1.W)
+  // ── MXU slot (1-bit) ───────────────────────────────────────────────
+  val MXUSEL_0 = 0.U(1.W)   // the NVFP4 MXU
+  val MXUSEL_1 = 1.U(1.W)   // the inner-product-tree MXU (mxu1)
   val MXUSEL_X = 0.U(1.W)
 
 // ── VPU command (5-bit) ────────────────────────────────────────────

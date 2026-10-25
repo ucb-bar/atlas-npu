@@ -85,7 +85,6 @@ class LsuCmd(vmemP: VmemParams) extends Bundle {
 class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val imemFetch     = new ImemFetchPort
   val dmaCmd        = Valid(new DmaCmd)
-  val mxu0Cmd       = Valid(new MxuCmd)
   val mxu1Cmd       = Valid(new MxuCmd)
   val nvCmd         = Valid(new MxuCmd)   // NVFP4 MXU (MXU_NV_* in op)
   val vpuCmd        = Valid(new VpuCmd)
@@ -107,7 +106,6 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val mregWriteBusy  = Input(UInt(64.W))
 
   // Interlock: each unit's ability to take the command decoded in S1.
-  val mxu0Ready       = Input(Bool())   // MXU0 would accept mxu0Cmd.bits this cycle
   val mxu1Ready       = Input(Bool())   // MXU1 would accept mxu1Cmd.bits this cycle
   val nvReady         = Input(Bool())   // the NVFP4 MXU would accept nvCmd.bits this cycle
   val xlu_busy        = Input(Bool())
@@ -133,7 +131,7 @@ class ScalarPerfEvents extends Bundle {
   val stallDma   = Bool()   // dma.wait on a busy channel
   val stallDelay = Bool()   // a delay instruction counts down
   // The causes of the stallUnit and stallData cycles; a cycle sets every cause that holds.
-  val stallUnitMxu0    = Bool()   // MXU slot 0 (systolic array or NVFP4 MXU) cannot take the command
+  val stallUnitMxu0    = Bool()   // MXU slot 0 (the NVFP4 MXU) cannot take the command
   val stallUnitMxu1    = Bool()   // MXU1 cannot take the command
   val stallUnitVpu     = Bool()   // the VPU cannot take the command
   val stallUnitXlu     = Bool()   // the XLU is busy

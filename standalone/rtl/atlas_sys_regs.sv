@@ -9,9 +9,9 @@
 //   0x014  CLK_HZ      RO
 //   0x018  BAUD        RO
 //   0x01C  DRAM_BYTES  RO  size of the DRAM (aliased over 0x8000_0000 up): 2 GiB of DDR4 on the board
-//   0x020  ATLAS       RO  [0] halted, [1] MXU0 data busy, [2] MXU0 compute busy, [3] MXU1 data busy,
+//   0x020  ATLAS       RO  [0] halted, [1] 0, [2] MXU slot 0 (NVFP4 MXU) busy, [3] MXU1 data busy,
 //                          [4] MXU1 compute busy, [5] XLU busy, [6] LSU busy, [15:8] DMA channel busy
-//   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required), [1] systolic-array MXU,
+//   0x024  FEATURES    RO  [0] hardware interlock (DELAY not required), [1] 0 (reserved),
 //                          [2] inner-product-tree MXU, [3] NVFP4 MXU (AtlasCore io_features)
 //   0x028  LEDS        RW  [2:0] user LEDs
 //   0x02C  RUN_CYCLES  RW  cycles the Atlas scalar core has spent running (not halted); any write clears it

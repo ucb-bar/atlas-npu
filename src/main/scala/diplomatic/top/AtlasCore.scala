@@ -23,7 +23,6 @@ import atlas.scalar.{ScalarCore, ScalarISA, VpuStatus, AtlasMemMap,
                       MxuCmd => ScalarMxuCmd, VpuCmd, XluCmd,
                       MregBankTracker}
 import atlas.ipt.InnerProductTreesTop
-import atlas.sa.SystolicArrayTop
 import atlas.mxu.{MxuOp, MxuCmd}
 import atlas.vector.VectorEngineTop
 import atlas.dma.{DmaEngine, DmaCommand, DmaDirection}
@@ -46,7 +45,6 @@ class AtlasCore(
   private val mregP = tp.mreg
   private val dmaP  = tp.dma
   private val vmemP = tp.vmem
-  private val saP   = tp.sa
   import ScalarISA._
 
   val io = IO(new Bundle {
@@ -55,12 +53,11 @@ class AtlasCore(
     val dmaTL  = new TLBundle(dmaBP)
     val vmemTL = Flipped(new TLBundle(vmemBP))
     val halted = Output(Bool())
-    // Constant: [0] hardware interlock, [1] systolic-array MXU, [2] inner-product-tree MXU,
+    // Constant: [0] hardware interlock, [1] 0 (reserved), [2] inner-product-tree MXU,
     // [3] NVFP4 MXU and scale sidecar.
     val features = Output(UInt(4.W))
     val dbg = Output(new Bundle {
-      val mxu0DataBusy = Bool()
-      val mxu0CompBusy = Bool()
+      val mxu0CompBusy = Bool()   // MXU slot 0: the NVFP4 MXU
       val mxu1DataBusy = Bool()
       val mxu1CompBusy = Bool()
       val xluBusy      = Bool()
@@ -79,12 +76,10 @@ class AtlasCore(
   val imem    = Module(new InstrMem(imemBP))
   val csrfile = Module(new CSRFile(csrBP))
   val vmem    = Module(new Vmem(vmemP, vmemBP))
-  val scalar  = Module(new ScalarCore(vmemP, hasMxu0 = tp.hasSystolicArray, hasNvfp4 = tp.hasNvfp4))
+  val scalar  = Module(new ScalarCore(vmemP, hasNvfp4 = tp.hasNvfp4))
   val dma     = Module(new DmaEngine(tp, dmaBP))
   val lsu     = Module(new LSU(vmemP, mregP))
-  // MXU slot 0: the systolic array, or the NVFP4 MXU (which then uses slot 0's
-  // MregFile ports), or nothing.
-  val mxu0    = Option.when(tp.hasSystolicArray)(Module(new SystolicArrayTop(saP, mregP)))
+  // MXU slot 0: the NVFP4 MXU (on slot 0's MregFile ports), or nothing.
   val nv      = tp.nvfp4.map(np => Module(new Nvfp4Mxu(np, mregP)))
   val mscale  = tp.nvfp4.map(_ => Module(new MregScaleFile(mregP)))
   val mxu1    = Module(new InnerProductTreesTop(iptP, mregP))
@@ -201,20 +196,8 @@ class AtlasCore(
   }
 
   // ==========================================================================
-  // MXU-0 / MXU-1 / VPU / XLU command dispatch
+  // NVFP4 MXU / MXU-1 / VPU / XLU command dispatch
   // ==========================================================================
-
-  val mxu0CmdWire = Wire(new MxuCmd(mregP.mregIdBits))
-  val sc0 = scalar.io.mxu0Cmd.bits
-  mxu0CmdWire.op         := MxuOp.safe((sc0.op - 1.U)(2, 0))._1
-  mxu0CmdWire.mregId     := sc0.mregBank
-  mxu0CmdWire.accSel     := sc0.accSel
-  mxu0CmdWire.weightSlot := sc0.weightSlot
-  mxu0CmdWire.scaleE8M0  := sc0.scaleE8M0
-  mxu0.foreach { m =>
-    m.io.cmd.valid := scalar.io.mxu0Cmd.valid
-    m.io.cmd.bits  := mxu0CmdWire
-  }
 
   val nvCmdWire = Wire(new NvCmd(mregP.mregIdBits))
   val scn = scalar.io.nvCmd.bits
@@ -251,7 +234,6 @@ class AtlasCore(
   scalar.io.vpu_status := makeVpuStatus(vpu.io.busy, vpu.io.issueBusy)
 
   // Interlock: readiness of each unit for the command decoded in S1.
-  scalar.io.mxu0Ready            := mxu0.map(_.io.cmdReady).getOrElse(false.B)
   scalar.io.mxu1Ready            := mxu1.io.cmdReady
   scalar.io.nvReady              := nv.map(_.io.cmdReady).getOrElse(false.B)
   scalar.io.xlu_busy             := xlu.io.busy
@@ -268,11 +250,9 @@ class AtlasCore(
   val mregTracker = Module(new MregBankTracker(numBanks, numReaders = 12, numWriters = 12))
   private val noBank = 0.U.asTypeOf(Valid(UInt(mregP.mregIdBits.W)))
   private def slot0Reads: Seq[Valid[UInt]] =
-    mxu0.map(m => Seq(m.io.activeReads(0), m.io.activeReads(1), noBank, noBank))
-      .orElse(nv.map(n => n.io.activeReads.toSeq)).getOrElse(Seq.fill(4)(noBank))
+    nv.map(n => n.io.activeReads.toSeq).getOrElse(Seq.fill(4)(noBank))
   private def slot0Writes: Seq[Valid[UInt]] =
-    mxu0.map(m => Seq(m.io.activeWrites(0), m.io.activeWrites(1), noBank, noBank))
-      .orElse(nv.map(n => n.io.activeWrites.toSeq)).getOrElse(Seq.fill(4)(noBank))
+    nv.map(n => n.io.activeWrites.toSeq).getOrElse(Seq.fill(4)(noBank))
 
   mregTracker.io.readers(0)  := slot0Reads(0)
   mregTracker.io.readers(1)  := slot0Reads(1)
@@ -315,14 +295,6 @@ class AtlasCore(
   mreg.io.mxu1WriteReq1 := mxu1.io.mregWriteReq1
 
   private def off[T <: Data](v: Valid[T]): Unit = { v.valid := false.B; v.bits := 0.U.asTypeOf(v.bits) }
-  mxu0.foreach { m =>
-    mreg.io.mxu0ReadReq0  := m.io.mregReadReq0
-    mreg.io.mxu0ReadReq1  := m.io.mregReadReq1
-    m.io.mregReadResp0    := mreg.io.mxu0ReadResp0
-    m.io.mregReadResp1    := mreg.io.mxu0ReadResp1
-    mreg.io.mxu0WriteReq0 := m.io.mregWriteReq0
-    mreg.io.mxu0WriteReq1 := m.io.mregWriteReq1
-  }
   nv.foreach { n =>
     mreg.io.mxu0ReadReq0  := n.io.mregReadReq0
     mreg.io.mxu0ReadReq1  := n.io.mregReadReq1
@@ -331,7 +303,7 @@ class AtlasCore(
     mreg.io.mxu0WriteReq0 := n.io.mregWriteReq0
     mreg.io.mxu0WriteReq1 := n.io.mregWriteReq1
   }
-  if (mxu0.isEmpty && nv.isEmpty) {
+  if (nv.isEmpty) {
     Seq(mreg.io.mxu0ReadReq0, mreg.io.mxu0ReadReq1).foreach(off(_))
     Seq(mreg.io.mxu0WriteReq0, mreg.io.mxu0WriteReq1).foreach(off(_))
   }
@@ -369,11 +341,11 @@ class AtlasCore(
   // Performance counter events (CSRFile, PerfCounters.names). They count while the core runs
   // and after it halts until every unit is idle: a halt does not wait for running units, and a
   // kernel may ecall while its last matmul or DMA store is still in flight.
-  private val slot0Busy = mxu0.map(m => m.io.dataBusy || m.io.computeBusy).orElse(nv.map(_.io.busy)).getOrElse(false.B)
+  private val slot0Busy = nv.map(_.io.busy).getOrElse(false.B)
   private val unitsBusy = slot0Busy || mxu1.io.dataBusy || mxu1.io.computeBusy || vpu.io.busy || xlu.io.busy ||
     lsu.io.scalarBusy || lsu.io.vecBusy || dma.io.channelBusy.asUInt.orR
   private val run = scalar.io.perf.running || unitsBusy
-  private val slot0Feed = mxu0.map(_.io.feeding).orElse(nv.map(_.io.feeding)).getOrElse(false.B)
+  private val slot0Feed = nv.map(_.io.feeding).getOrElse(false.B)
   private val perfEvents: Seq[Bool] = Seq(
     run,
     scalar.io.perf.issue,
@@ -405,10 +377,8 @@ class AtlasCore(
   require(perfEvents.size == PerfCounters.num)
   csrfile.io.perfEvents := VecInit(perfEvents)
 
-  // Slot 0 busy bits report the systolic array or the NVFP4 MXU.
-  io.dbg.mxu0DataBusy := mxu0.map(_.io.dataBusy).getOrElse(false.B)
-  io.dbg.mxu0CompBusy := mxu0.map(_.io.computeBusy).orElse(nv.map(_.io.busy)).getOrElse(false.B)
-  io.features := Cat(tp.hasNvfp4.B, true.B, tp.hasSystolicArray.B, true.B)
+  io.dbg.mxu0CompBusy := slot0Busy
+  io.features := Cat(tp.hasNvfp4.B, true.B, false.B, true.B)
 
   io.dbg.mxu1DataBusy := mxu1.io.dataBusy
   io.dbg.mxu1CompBusy := mxu1.io.computeBusy

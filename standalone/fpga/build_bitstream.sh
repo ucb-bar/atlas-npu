@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Emit AtlasCore without assertions and build the VCU118 bitstream.
 #   standalone/fpga/build_bitstream.sh [out_dir] [clk_mhz] [jobs] [config] [place_directive] [route_directive]
-# config: default, ipt or ipt-nvfp4 (atlas.common.AtlasConfigs). DRAM is 2 GiB of the board's DDR4.
+# config: default or ipt-nvfp4 (atlas.common.AtlasConfigs). DRAM is 2 GiB of the board's DDR4.
 # The bitstream is atlas_standalone_vcu118_<config>_ddr4_<clk>mhz.bit.
 # Needs `vivado` (2024.1 or later, with a VU9P license) on PATH and Java for mill.
 set -euo pipefail

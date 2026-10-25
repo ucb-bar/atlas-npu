@@ -208,7 +208,7 @@ module atlas_soc
     logic [31:0]   dma_a_mask;
     logic [255:0]  dma_a_data, dma_d_data;
 
-    logic          dbg_mxu0_data, dbg_mxu0_comp, dbg_mxu1_data, dbg_mxu1_comp, dbg_xlu, dbg_lsu;
+    logic          dbg_mxu0_comp, dbg_mxu1_data, dbg_mxu1_comp, dbg_xlu, dbg_lsu;
     logic [3:0]    features;
     logic [7:0]    dbg_dma;
 
@@ -327,7 +327,6 @@ module atlas_soc
 
         .io_halted                (halted),
         .io_features              (features),
-        .io_dbg_mxu0DataBusy      (dbg_mxu0_data),
         .io_dbg_mxu0CompBusy      (dbg_mxu0_comp),
         .io_dbg_mxu1DataBusy      (dbg_mxu1_data),
         .io_dbg_mxu1CompBusy      (dbg_mxu1_comp),
@@ -364,7 +363,7 @@ module atlas_soc
         .d_valid(n_d_valid[SYS]), .d_ready(n_d_ready[SYS]), .d(n_d[SYS]),
         .dropped, .bad_cmd, .denied, .features, .dram_ready(EXT_DRAM ? ext_dram_ready : 1'b1),
         .atlas_status({dbg_dma, 1'b0, dbg_lsu, dbg_xlu, dbg_mxu1_comp, dbg_mxu1_data,
-                       dbg_mxu0_comp, dbg_mxu0_data, halted}),
+                       dbg_mxu0_comp, 1'b0, halted}),
         .user_leds,
         .eth_pcs_status, .eth_phy_ready, .eth_phy_id_ok, .eth_gmii_alive, .eth_synced,
         .eth_n_exec, .eth_n_dup, .eth_n_drop, .eth_rx_dropped, .eth_rx_bad, .eth_rx_frames,

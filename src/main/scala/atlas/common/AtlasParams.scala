@@ -16,33 +16,27 @@ case class Nvfp4MxuParams(
   val accBits:    Int = 32                 // FP32 accumulators
 }
 
-/** Atlas configuration. The MXU slot 0 holds the systolic array (default) or, with
-  * `nvfp4`, the NVFP4 MXU; slot 1 is always the inner-product-tree MXU.
+/** Atlas configuration. MXU slot 1 is the inner-product-tree MXU; with `nvfp4`, slot 0 is
+  * the NVFP4 MXU, else slot 0 is empty.
   */
 case class AtlasParams(
-  ipt:              InnerProductTreeParams  = InnerProductTreeParams(),
-  sa:               SystolicArrayParams     = SystolicArrayParams(),
-  vpu:              VpuParams               = VpuParams(),
-  dma:              DmaParams               = DmaParams(),
-  mreg:             MregParams              = MregParams(),
-  vmem:             VmemParams              = VmemParams(),
-  hasSystolicArray: Boolean                 = true,
-  nvfp4:            Option[Nvfp4MxuParams]  = None
+  ipt:   InnerProductTreeParams  = InnerProductTreeParams(),
+  vpu:   VpuParams               = VpuParams(),
+  dma:   DmaParams               = DmaParams(),
+  mreg:  MregParams              = MregParams(),
+  vmem:  VmemParams              = VmemParams(),
+  nvfp4: Option[Nvfp4MxuParams]  = None
 ) {
-  require(!(hasSystolicArray && nvfp4.nonEmpty),
-    "the NVFP4 MXU takes the systolic array's MREG ports: configure one or the other")
   def hasNvfp4: Boolean = nvfp4.nonEmpty
 }
 
 /** Named configurations. */
 object AtlasConfigs {
-  /** Systolic array (MXU0) + inner-product trees (MXU1): the original Atlas. */
-  val default = AtlasParams()
   /** Inner-product-tree MXU only. */
-  val iptOnly = AtlasParams(hasSystolicArray = false)
+  val default = AtlasParams()
   /** Inner-product-tree MXU + the NVFP4 MXU. */
-  val iptNvfp4 = AtlasParams(hasSystolicArray = false, nvfp4 = Some(Nvfp4MxuParams()))
+  val iptNvfp4 = AtlasParams(nvfp4 = Some(Nvfp4MxuParams()))
 
   val byName: Map[String, AtlasParams] =
-    Map("default" -> default, "ipt" -> iptOnly, "ipt-nvfp4" -> iptNvfp4)
+    Map("default" -> default, "ipt-nvfp4" -> iptNvfp4)
 }

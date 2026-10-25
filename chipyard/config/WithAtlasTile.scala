@@ -30,10 +30,5 @@ class WithAtlasTile(
     up(SubsystemInjectorKey) + AtlasTileInjector
 })
 
-/** Atlas with the inner-product-tree MXU only: the systolic array (MXU0) is removed and
-  * its instructions are illegal. */
-class WithAtlasTileIptOnly extends WithAtlasTile(atlasParams = AtlasConfigs.iptOnly)
-
-/** Atlas with the inner-product-tree MXU and the NVFP4 MXU (docs/nvfp4-mxu.md), which takes
-  * the systolic array's MREG ports. */
+/** Atlas with the inner-product-tree MXU and the NVFP4 MXU (docs/nvfp4-mxu.md). */
 class WithAtlasTileNvfp4 extends WithAtlasTile(atlasParams = AtlasConfigs.iptNvfp4)

@@ -728,8 +728,10 @@ class InnerProductTreesSequencer(
   io.feeding     := p0IsCompute
 
   // ── Active mreg bank reports ──
-  // A port is reported while it will still access its bank after this cycle
-  // (see SystolicArraySequencer).
+  // A port is reported while it will still access its bank after this cycle.
+  // On a boundary cycle the last row has already been requested (read) or is
+  // written this cycle (pop), so a command issued now cannot collide with it;
+  // reporting it would cost back-to-back commands on one register a cycle.
   io.activeReads(0).valid := p0CmdValid && !p0Boundary
   io.activeReads(0).bits  := p0Cmd.mregId
   io.activeReads(1).valid := p1CmdValid && !p1Boundary

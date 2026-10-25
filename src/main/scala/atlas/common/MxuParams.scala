@@ -1,12 +1,12 @@
 /*
-MxuParams.scala — Shared architectural parameters for both MXU datapaths.
+MxuParams.scala — Architectural parameters of the FP8 MXU datapath.
 
 Naming follows the frozen system-parameter spec:
   MXU_ARRAY_ROWS, MXU_ARRAY_COLS, WEIGHT_SLOTS_PER_MXU,
   ACCUM_BUFFER_ROWS, ACCUM_BUFFER_COLS_BF16, etc.
 
-Both InnerProductTreeParams (mxu1) and SystolicArrayParams (mxu0) compose
-this case class and add design-specific fields on top.
+InnerProductTreeParams (mxu1) composes this case class and adds
+design-specific fields on top.
 */
 
 package atlas.mxu

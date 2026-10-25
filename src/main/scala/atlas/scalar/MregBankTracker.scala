@@ -2,7 +2,7 @@
 MregBankTracker.scala
 Purely combinational aggregator for MREG bank activity across all engines.
 
-Collects per-bank read/write reports from MXU0, MXU1, XLU, VPU, LSU, and
+Collects per-bank read/write reports from MXU slot 0 (the NVFP4 MXU), MXU1, XLU, VPU, LSU, and
 any pending (not-yet-accepted) commands, then produces two bitvectors:
   - readBusy:  OR of all banks currently being read by any engine.
   - writeBusy: OR of all banks currently being written (or pending write)

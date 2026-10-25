@@ -1,9 +1,8 @@
 // ============================================================================
-// MxuBundles.scala — Shared hardware interface bundles for both MXU datapaths.
+// MxuBundles.scala — Hardware interface bundles of the FP8 MXU datapath (mxu1).
 //
-// All MXU-facing bundle types live here so that mxu0 (systolic array) and
-// mxu1 (inner-product tree) share identical types for commands, compute
-// requests, weight writes, and accumulation-buffer operations.
+// The MXU-facing bundle types live here: commands, compute requests, weight
+// writes, and accumulation-buffer operations.
 //
 // Parameterized by MxuParams (no dependency on atlas.common).  The MxuCmd
 // takes an Int for the mreg index width to avoid importing MregParams.
@@ -18,7 +17,7 @@ import chisel3.util._
 // Command opcode & sequencer command
 // ============================================================================
 
-/** MXU command opcodes — shared by both mxu0 and mxu1 sequencers.
+/** MXU command opcodes of the mxu1 sequencer.
   *
   * Push/Pop move data between the matrix register file (mreg) and the MXU's
   * internal weight slots or accumulation buffers.  Matmul launches a
@@ -51,7 +50,7 @@ class MxuCmd(mregIdBits: Int) extends Bundle {
 // Compute request
 // ============================================================================
 
-/** Compute (matmul) request — shared by both MXU cores.
+/** Compute (matmul) request of the MXU core.
   *
   * The sequencer reads the accumulation buffer externally and passes
   * partial-sum data here, so the core never touches the buffer directly.

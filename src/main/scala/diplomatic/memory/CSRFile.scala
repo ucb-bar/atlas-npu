@@ -51,8 +51,8 @@ object PerfCounters {
     "stall_data",   // S1 holds an instruction: MREG / VMEM / scalar-load / scale data hazard
     "stall_dma",    // dma.wait on a busy channel
     "stall_delay",  // a delay instruction counts down
-    "mxu0_busy",    // MXU slot 0 (systolic array or NVFP4 MXU): any engine active
-    "mxu0_feed",    // MXU slot 0: a matmul feeds one row of A (full MAC-array use)
+    "mxu0_busy",    // MXU slot 0 (the NVFP4 MXU; 0 without it): any engine active
+    "mxu0_feed",    // MXU slot 0: a matmul feeds one row of A
     "mxu1_busy",    // MXU1: any engine active
     "mxu1_feed",    // MXU1: a matmul feeds one row of A
     "vpu_busy",     // the VPU has an instruction in either slot

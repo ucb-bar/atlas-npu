@@ -17,8 +17,7 @@
 //   • Read ports — both tiles are continuously exposed as combinational
 //     outputs for the datapath to consume.
 //
-// Parameterized by MxuParams so both mxu0 (SA) and mxu1 (IPT) share the
-// same module.
+// Parameterized by MxuParams.
 // ============================================================================
 
 package atlas.mxu

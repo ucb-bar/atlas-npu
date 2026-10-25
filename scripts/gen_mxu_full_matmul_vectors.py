@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
 gen_mxu_full_matmul_vectors.py: generate full-matmul MXU test vectors using
-the SA (systolic array) and IPT functional models.
+the IPT functional model.
 
-Both models compute F.linear: y = x @ w^T
-Both accept full matrices and handle tiling internally.
+The model computes F.linear: y = x @ w^T
+It accepts full matrices and handles tiling internally.
 Test data is generated using the model's own E4M3 LUT to ensure
 the float→byte round-trip is consistent.
 
-Produces two files:
-  1. sa_<base>.txt   – expected values from SARTLLinearFunction
-  2. ipt_<base>.txt  – expected values from IPTLinearRTLFunction
+Produces one file:
+  ipt_<base>.txt  – expected values from IPTLinearRTLFunction
 
 Usage:
     python3 scripts/gen_mxu_full_matmul_vectors.py
@@ -22,7 +21,6 @@ from numpy.random import default_rng
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baremetal", "generators"))
-from software_models.mxu0_sa.systolic_array_rtl_linear import SARTLLinearFunction
 from software_models.mxu1_ipt.ipt_rtl_linear import (
     IPTLinearRTLFunction,
     _E4M3_FLOAT_LUT,
@@ -63,7 +61,7 @@ def compute_expected(model, ta_f32, tw_f32, args):
     Build full [num_rows, inner_dim] and [num_lanes, inner_dim] matrices
     from per-tile float tensors, pass to model which handles tiling internally.
 
-    Both models compute F.linear: y = x @ w^T
+    The model computes F.linear: y = x @ w^T
       x = A_full:  [num_rows, inner_dim]
       w = W_full:  [num_lanes, inner_dim]
       y:           [num_rows, num_lanes]
@@ -82,7 +80,7 @@ def compute_expected(model, ta_f32, tw_f32, args):
         k0 = t * args.vec_len
         a_full[:, k0:k0 + args.vec_len] = ta_f32[t]
 
-    # Both models: y = x @ w^T, same call convention
+    # y = x @ w^T
     # Invalidate model weight cache to prevent stale data — the model
     # caches E4M3-encoded weights keyed by (data_ptr, shape, _version),
     # which can collide when PyTorch reuses memory addresses.
@@ -140,18 +138,12 @@ def main():
     print(f"Generating {args.num} cases: [{args.num_rows}x{args.inner_dim}] x "
           f"[{args.inner_dim}x{args.num_lanes}], {nt} tiles")
 
-    # SA model — matches doc 21: rows=32, cols=32
-    sa_model = SARTLLinearFunction(
-        rows=32, cols=32,
-        out_fmt_sel=OutputFmtSel.OutBF16,
-    )
     # IPT model — matches doc 20
     ipt_model = IPTLinearRTLFunction(
         vec_len=32, num_lanes=32, pipeline_depth=1,
         out_fmt_sel=OutputFmtSel.OutBF16,
     )
 
-    sa_cases = []
     ipt_cases = []
 
     for cid in range(args.num):
@@ -179,11 +171,8 @@ def main():
             ta_hex.append(tile_act_hex)
             ta_f32.append(torch.stack(tile_act_f32, dim=0))
 
-        exp_sa = compute_expected(sa_model, ta_f32, tw_f32, args)
         exp_ipt = compute_expected(ipt_model, ta_f32, tw_f32, args)
 
-        sa_cases.append({"cid": cid, "num_rows": args.num_rows, "num_tiles": nt,
-                         "tw_hex": tw_hex, "ta_hex": ta_hex, "exp": exp_sa})
         ipt_cases.append({"cid": cid, "num_rows": args.num_rows, "num_tiles": nt,
                           "tw_hex": tw_hex, "ta_hex": ta_hex, "exp": exp_ipt})
 
@@ -197,7 +186,6 @@ def main():
     def outpath(name):
         return os.path.join(outdir, name) if outdir else name
 
-    write_vectors(outpath(f"sa_{base}.txt"), sa_cases)
     write_vectors(outpath(f"ipt_{base}.txt"), ipt_cases)
 
 if __name__ == "__main__":

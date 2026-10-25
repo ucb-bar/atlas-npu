@@ -3,9 +3,8 @@
 //
 //   ./mill standalone.runMain atlas.standalone.EmitAtlasCore <dir> [--assertions] [--config=NAME]
 //
-// NAME is one of atlas.common.AtlasConfigs.byName: default (systolic array +
-// inner-product trees), ipt (inner-product trees only), ipt-nvfp4 (inner-product
-// trees + the NVFP4 MXU).
+// NAME is one of atlas.common.AtlasConfigs.byName: default (inner-product trees)
+// or ipt-nvfp4 (inner-product trees + the NVFP4 MXU).
 //
 // The standalone SoC (standalone/rtl) talks to these ports directly:
 //   imemTL, csrTL  32-bit data, 32-bit address        (managers)

@@ -7,8 +7,7 @@
 //   ACCUM_BUFFER_BYTES     = 2048 bytes  (32 × 32 × 2)
 //
 // Two identically-sized buffers are selected by the `accSel` bit in each
-// bundle.  The module is parameterized by MxuParams so both mxu0 (systolic
-// array) and mxu1 (inner-product tree) share the same implementation.
+// bundle.  The module is parameterized by MxuParams.
 //
 // Three independent access paths:
 //

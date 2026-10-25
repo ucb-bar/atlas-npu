@@ -57,10 +57,9 @@ object AtlasMemMap {
   val DRAM_BASE      = 0x8000_0000L
 }
 
-/** @param hasMxu0   the systolic-array MXU is present (mxu0 instructions are legal)
-  * @param hasNvfp4  the NVFP4 MXU and scale sidecar are present (.nv and *.scale legal)
+/** @param hasNvfp4  the NVFP4 MXU and scale sidecar are present (.nv and *.scale legal)
   */
-class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = false) extends Module {
+class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val io = IO(new ScalarCoreIO(spP))
 
   val pc_ctrl    = Module(new PcControl(0))
@@ -245,11 +244,9 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   // ==============================================================
 
   // Instructions of a unit this configuration does not have are illegal.
-  val isNvCmd    = dec.mxu_cmd >= MXU_NV_PUSH_WEIGHT
+  val isNvCmd    = dec.mxu_cmd =/= MXU_NONE && dec.mxu_sel === MXUSEL_0
   val isScaleLsu = dec.is_lsu && (dec.lsu_cmd === LSU_VLOAD_SCALE || dec.lsu_cmd === LSU_VSTORE_SCALE)
-  val unitAbsent =
-    (!hasMxu0.B && dec.mxu_cmd =/= MXU_NONE && !isNvCmd && dec.mxu_sel === MXUSEL_0) ||
-    (!hasNvfp4.B && (isNvCmd || isScaleLsu))
+  val unitAbsent = !hasNvfp4.B && (isNvCmd || isScaleLsu)
   // A two-source VPU instruction streams both source pairs in the same cycles. Two different
   // pairs in one physical bank (m_i and m_i+32 share bank i) can never be read together, so
   // the instruction is illegal; the same pair twice is fine (one read serves both).
@@ -316,8 +313,7 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   val isVstore  = dec.is_lsu && (dec.lsu_cmd === LSU_VSTORE || dec.lsu_cmd === LSU_VSTORE_SCALE)
   val isDmaXfer = dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST
 
-  val mxuNotReady = dec.mxu_cmd =/= MXU_NONE &&
-    Mux(isNvCmd, !io.nvReady, Mux(dec.mxu_sel === MXUSEL_0, !io.mxu0Ready, !io.mxu1Ready))
+  val mxuNotReady = dec.mxu_cmd =/= MXU_NONE && Mux(isNvCmd, !io.nvReady, !io.mxu1Ready)
   val vpuNotReady = dec.vpu_cmd =/= VPU_NONE && vpuIssueBusy(dec.vpu_cmd)
   val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
   val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
@@ -447,9 +443,8 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   io.perf.stallUnit  := interlockStall && unitStall
   io.perf.stallData  := interlockStall && !unitStall
   // The causes of the stallUnit and stallData cycles: every cause that holds counts.
-  val mxuSlot0 = isNvCmd || dec.mxu_sel === MXUSEL_0
-  io.perf.stallUnitMxu0    := interlockStall && mxuNotReady && mxuSlot0
-  io.perf.stallUnitMxu1    := interlockStall && mxuNotReady && !mxuSlot0
+  io.perf.stallUnitMxu0    := interlockStall && mxuNotReady && isNvCmd
+  io.perf.stallUnitMxu1    := interlockStall && mxuNotReady && !isNvCmd
   io.perf.stallUnitVpu     := interlockStall && vpuNotReady
   io.perf.stallUnitXlu     := interlockStall && xluNotReady
   io.perf.stallUnitLsu     := interlockStall && lsuNotReady
@@ -672,8 +667,7 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
 
   val is_dma_launch  = s1_fire && (dec.dma_cmd === DMA_LD || dec.dma_cmd === DMA_ST)
   val is_dma_config  = s1_fire && (dec.dma_cmd === DMA_CONFIG)
-  val is_mxu0_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && !isNvCmd && (dec.mxu_sel === MXUSEL_0)
-  val is_mxu1_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && !isNvCmd && (dec.mxu_sel === MXUSEL_1)
+  val is_mxu1_launch = s1_fire && (dec.mxu_cmd =/= MXU_NONE) && (dec.mxu_sel === MXUSEL_1)
   val is_nv_launch   = s1_fire && isNvCmd
   val is_vpu_launch  = s1_fire && (dec.vpu_cmd =/= VPU_NONE)
   val is_xlu_launch  = s1_fire && (dec.xlu_cmd =/= XLU_NONE)
@@ -693,8 +687,6 @@ class ScalarCore(spP: VmemParams, hasMxu0: Boolean = true, hasNvfp4: Boolean = f
   io.dmaCmd.bits.size     := rs2_data
   io.dmaCmd.bits.channel  := dec.funct3
 
-  io.mxu0Cmd.valid := is_mxu0_launch
-  io.mxu0Cmd.bits  := buildMxuCmd(dec)
   io.mxu1Cmd.valid := is_mxu1_launch
   io.mxu1Cmd.bits  := buildMxuCmd(dec)
   io.nvCmd.valid   := is_nv_launch
