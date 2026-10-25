@@ -72,7 +72,7 @@ class SqrtTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekP
   }
   //----------- CI/CD INCLUDE --------------
 
-  it should "Print values of SqrtLUT ranging from 0.5 to 1.0" in {
+  it should "give sqrt(x) for x in [0, 10000)" in {
     PersistentVcsSqrtSimulator.simulate(new Sqrt(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped
       dut.reset.poke(true.B)
@@ -83,6 +83,7 @@ class SqrtTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekP
       dut.io.req.bits.roundingMode.poke(0.U)
       dut.io.req.bits.laneMask.poke("hFFFF".U) // enable all lanes
       
+      var checked = 0
       for (i <- 0 until 100) {
         // Randonmize input data and compute expected output
         val inputData = randomBF16Vec(16, 10000, 0)
@@ -102,10 +103,12 @@ class SqrtTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekP
 
           printBF16Array(bf16Shorts, false)
           printBF16Array(expectedOutput, true)
-          checkVectorTolerance(bf16Shorts, expectedOutput, true)
+          checkVectorTolerance(bf16Shorts, expectedOutput, true) shouldBe true
+          checked += 1
           println("")
         }
       }
+      checked shouldBe 100
     }.result
   }
 }

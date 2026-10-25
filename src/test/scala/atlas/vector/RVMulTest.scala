@@ -132,6 +132,7 @@ class RVMulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.io.req.bits.wRow.poke(3.U)
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
             dataB_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.bVec(i).poke(BigInt(bits & 0xFFFF)) }
+            var checked = 0
             for (i <- 0 to 2) {
                 val iv = dut.io.req.valid.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
@@ -152,6 +153,7 @@ class RVMulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         println(f"lane=$i%2d  act=0x$act%04x ($actF%f)  exp=0x$exp%04x ($expF%f)")
                         act shouldBe exp
                     }
+                    checked += 1
                 }
                 // Step to next cycle and turn off input validity
                 dut.clock.step(1)
@@ -160,6 +162,7 @@ class RVMulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.bits.whichBank.poke(0.U)
                 dut.io.req.bits.wRow.poke(0.U)
             }
+            checked shouldBe 1
         }.result
     }
 }

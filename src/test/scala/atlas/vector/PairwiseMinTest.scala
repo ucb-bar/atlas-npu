@@ -80,6 +80,7 @@ class PairwiseMinTest extends AnyFlatSpec with HasSinCosParams with Matchers wit
       dut.clock.step(1)
       
       println("The following are PairwiseMin")
+      var checked = 0
       for (i <- 0 until 10) {
         // Randonmize input data and compute expected output
         val inputData1 = randomBF16Vec(16, 100, -100)
@@ -108,10 +109,12 @@ class PairwiseMinTest extends AnyFlatSpec with HasSinCosParams with Matchers wit
           println("Output")
           printBF16Array(bf16Shorts, false)
           printBF16Array(expectedOutput, true)
-          checkVectorTolerance(bf16Shorts, expectedOutput, true)
+          checkVectorTolerance(bf16Shorts, expectedOutput, true) shouldBe true
+          checked += 1
           println("")
         }
       }
+      checked shouldBe 10
     }.result
   }
 }

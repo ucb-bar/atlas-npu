@@ -71,7 +71,7 @@ class RcpTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPo
   }
   //----------- CI/CD INCLUDE --------------
 
-  it should "Print values of RcpLUT ranging from 0.5 to 1.0" in {
+  it should "give 1/x for x in [-100, 100)" in {
     PersistentVcsRcpSimulator.simulate(new Rcp(AtlasFPType.BF16)) { module =>
       val dut = module.wrapped
       dut.reset.poke(true.B)
@@ -82,6 +82,7 @@ class RcpTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPo
       dut.io.req.bits.roundingMode.poke(0.U)
       dut.io.req.bits.laneMask.poke("hFFFF".U) // enable all lanes
       
+      var checked = 0
       for (i <- 0 until 100) {
         // Randonmize input data and compute expected output
         val inputData = randomBF16Vec(16, 100, -100)
@@ -102,10 +103,12 @@ class RcpTest extends AnyFlatSpec with HasSinCosParams with Matchers with PeekPo
           printBF16Array(inputData, false)
           printBF16Array(bf16Shorts, false)
           printBF16Array(expectedOutput, true)
-          checkVectorTolerance(bf16Shorts, expectedOutput, true)
+          checkVectorTolerance(bf16Shorts, expectedOutput, true) shouldBe true
+          checked += 1
           println("")
         }
       }
+      checked shouldBe 100
     }.result
   }
 }

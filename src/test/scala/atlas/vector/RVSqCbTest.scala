@@ -96,6 +96,7 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.io.req.bits.roundingMode.poke(0.U) 
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
+            var checked = 0
             for (i <- 0 to 5) {
                 if (i == 1) {
                     dut.io.req.valid.poke(true.B)
@@ -120,17 +121,20 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         printBF16Array(actual, false)
                         printBF16Array(expectedSquare1, true)
                         actual shouldBe expectedSquare1
+                        checked += 1
                     } else if (i == 2) {
                         printBF16Array(dataB, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedSquare2, true)
                         actual shouldBe expectedSquare2
+                        checked += 1
                     }
                 }
                 // Step to next cycle and turn off input validity
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
+            checked shouldBe 2
         }.result
     }
 
@@ -153,6 +157,7 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.io.req.bits.roundingMode.poke(0.U) 
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
+            var checked = 0
             for (i <- 0 to 5) {
                 if (i == 1) {
                     dut.io.req.valid.poke(true.B)
@@ -181,22 +186,26 @@ class RVSqCbTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube1, true)
                         actual shouldBe expectedCube1
+                        checked += 1
                     } else if (i == 2) {
                         printBF16Array(dataB, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube2, true)
                         actual shouldBe expectedCube2
+                        checked += 1
                     } else if (i == 3) {
                         printBF16Array(dataC, false)
                         printBF16Array(actual, false)
                         printBF16Array(expectedCube3, true)
                         actual shouldBe expectedCube3
+                        checked += 1
                     }
                 }
                 // Step to next cycle and turn off input validity
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
+            checked shouldBe 3
         }.result
     }
 }

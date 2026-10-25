@@ -139,7 +139,8 @@ println(s"\n>>> STIMULATING TANH PIPELINE")
           println(f"\n>>> RESPONSE RECEIVED AT CYCLE $cycles")
           println(f"Tag: 0x$tag%X | LaneMask: 0x$mask%X")
 
-          val currentInputs = if (tag == 0xAA) inputs1 else inputs2
+          tag shouldBe requests(resultsFound)._1
+          val currentInputs = requests(resultsFound)._2
           
           for (i <- 0 until numLanes) {
             val bitsOut = dut.io.resp.bits.result(i).peek().litValue.toInt
@@ -147,6 +148,7 @@ println(s"\n>>> STIMULATING TANH PIPELINE")
             val expected = math.tanh(currentInputs(i))
             val error = math.abs(actual - expected)
             println(f"  Lane $i: Out=$actual%8.4f (Exp=$expected%8.4f) | Err=$error%.4f")
+            error should be < 0.01
           }
           resultsFound += 1
         }

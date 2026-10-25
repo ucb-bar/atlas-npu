@@ -95,6 +95,7 @@ class RVExpTest extends AnyFlatSpec with HasSinCosParams with Matchers with Peek
       dut.clock.step(1)
 
       dut.io.req.bits.laneMask.poke("hFFFF".U) // enable all lanes
+      var checked = 0
       for (i <- 0 until inputSize) {
         dut.io.req.valid.poke(true.B)
         dut.io.req.bits.isBase2.poke(false.B) // Test natural exponent first
@@ -109,10 +110,12 @@ class RVExpTest extends AnyFlatSpec with HasSinCosParams with Matchers with Peek
 
           printBF16Array(bf16Shorts, false)
           printBF16Array(expectedOutputArray(i), true)
-          checkVectorTolerance(bf16Shorts, expectedOutputArray(i), true, false)
+          checkVectorTolerance(bf16Shorts, expectedOutputArray(i), true, false) shouldBe true
+          checked += 1
           println("")
         }
       }
+      checked shouldBe inputSize
     }.result
   }
 }

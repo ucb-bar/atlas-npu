@@ -101,6 +101,8 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             val expectedSqrt = goldenRcpSqrtVector(sqrtData, true)
             val expectedRcp = goldenRcpSqrtVector(rcpData, false)
 
+            var checked = 0
+
             // Poke inputs for sqrt
             dut.io.req.valid.poke(true.B)
             dut.io.req.bits.tag.poke(0.U)
@@ -118,7 +120,8 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     printBF16Array(sqrtData, false)
                     printBF16Array(bf16Shorts, false)
                     printBF16Array(expectedSqrt, true)
-                    checkVectorTolerance(bf16Shorts, expectedSqrt, true)
+                    checkVectorTolerance(bf16Shorts, expectedSqrt, true) shouldBe true
+                    checked += 1
                     println("")
                 }
                 dut.clock.step(1)
@@ -150,11 +153,13 @@ class RVDivSqrtTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     printBF16Array(bf16Shorts, false)
                     printBF16Array(expectedRcp, true)
                     checkVectorTolerance(bf16Shorts, expectedRcp, true) shouldBe true
+                    checked += 1
                     println("")
                 }
                 dut.clock.step(1)
                 dut.io.req.valid.poke(false.B)
             }
+            checked shouldBe 2
         }.result
     }
 }

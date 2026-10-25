@@ -186,6 +186,7 @@ class ReduSumBlockTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
         dut.clock.step(1)
         cycles += 1
       }
+      resultsFound shouldBe allTests.length
       println("=========================================================================================\n")
     }.result
   }

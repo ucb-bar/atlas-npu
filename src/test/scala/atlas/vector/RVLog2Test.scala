@@ -123,6 +123,7 @@ class RVLog2Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.io.req.bits.laneMask.poke(0xFFFF.U) 
             dataA_bf16.zipWithIndex.foreach { case (bits, i) => dut.io.req.bits.aVec(i).poke(BigInt(bits & 0xFFFF)) }
             var failed = 0
+            var checked = 0
             for (i <- 0 to 2) {
                 val iv = dut.io.req.valid.peek().litValue
                 val ov = dut.io.resp.valid.peek().litValue
@@ -135,6 +136,7 @@ class RVLog2Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
                     val actual_arr = Array.tabulate(16) { k => dut.io.resp.bits.result(k).peek().litValue.toShort}
                     val expected_arr: Array[Short] = expected.map(_.toShort).toArray
                     if(!checkVectorTolerance(actual_arr, expected_arr, false)) failed += 1
+                    checked += 1
                     val actual: Seq[Int] = (0 until 16).map { i => dut.io.resp.bits.result(i).peek().litValue.toShort & 0xFFFF}
                     actual.zip(expected).zipWithIndex.foreach { case ((act, exp), i) =>
                         val actF = bfTofp(act)
@@ -147,6 +149,7 @@ class RVLog2Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.io.req.valid.poke(false.B)
             }
             failed shouldBe 0
+            checked shouldBe 1
         }.result
        
     }
