@@ -103,6 +103,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   val isVliOne1  = (fsm.io.out.inst1 === VPUOp.vliOne  )
   val isVli1 = isVliAll1 || isVliRow1 || isVliCol1 || isVliOne1
   val isMov1 = (fsm.io.out.inst1 === VPUOp.mov)
+  val isGelu1 = (fsm.io.out.inst1 === VPUOp.gelu)
 
   val isAdd2     = (fsm.io.out.inst2 === VPUOp.add     )
   val isSub2     = (fsm.io.out.inst2 === VPUOp.sub     )
@@ -130,6 +131,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   val isVliCol2  = (fsm.io.out.inst2 === VPUOp.vliCol  )
   val isVliOne2  = (fsm.io.out.inst2 === VPUOp.vliOne  )
   val isMov2 = (fsm.io.out.inst2 === VPUOp.mov)
+  val isGelu2 = (fsm.io.out.inst2 === VPUOp.gelu)
 
   val isAddValid     = (isAdd1     && io.data1.valid) || (isAdd2     && io.data2.valid)
   val isSubValid     = (isSub1     && io.data1.valid) || (isSub2     && io.data2.valid)
@@ -152,6 +154,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   val isSquareValid  = (isSquare1  && io.data1.valid) || (isSquare2  && io.data2.valid)
   val isCubeValid    = (isCube1    && io.data1.valid) || (isCube2    && io.data2.valid)
   val isReluValid    = (isRelu1    && io.data1.valid) || (isRelu2    && io.data2.valid)
+  val isGeluValid    = (isGelu1    && io.data1.valid) || (isGelu2    && io.data2.valid)
   val isVli2 = isVliAll2 || isVliRow2 || isVliCol2 || isVliOne2
   val isVliValid = isVli1 || isVli2
   val isMovValid = isMov1 || isMov2
@@ -257,6 +260,10 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   fp8unpack.io.req.valid      := isFp8unpackValid
   fp8unpack.io.req.bits.xVec  := Mux(isFp8unpack1, vector1, vector2)
   fp8unpack.io.req.bits.scale := Mux(isFp8unpack1, fsm.io.out.unpackScale1, fsm.io.out.unpackScale2)
+
+  val gelu = Module(new GeluVec(p.BF16))
+  gelu.io.req.valid     := isGeluValid
+  gelu.io.req.bits.aVec := Mux(isGelu1, vector1, vector2)
 
   val relu = Module(new Relu(p.BF16))
   relu.io.req.valid         := isReluValid
@@ -377,6 +384,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     (isFp8pack1                              && io.data1.valid) -> fp8pack.io.req.valid,
     (isFp8unpack1                            && io.data1.valid) -> fp8unpack.io.req.valid,
     (isRelu1                                 && io.data1.valid) -> relu.io.req.valid,
+    (isGelu1                                 && io.data1.valid) -> gelu.io.req.valid,
     (isVli1                                  && io.data1.valid) -> vli.io.req.valid,
     (isMov1                                  && io.data1.valid) -> mov.io.req.valid,
     (isCSum1                                 && io.data1.valid) -> csum.io.req.valid
@@ -400,6 +408,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     (isFp8pack2                              && io.data2.valid) -> fp8pack.io.req.valid,
     (isFp8unpack2                            && io.data2.valid) -> fp8unpack.io.req.valid,
     (isRelu2                                 && io.data2.valid) -> relu.io.req.valid,
+    (isGelu2                                 && io.data2.valid) -> gelu.io.req.valid,
     (isVli2                                  && io.data2.valid) -> vli.io.req.valid,
     (isMov2                                  && io.data2.valid) -> mov.io.req.valid,
     (isCSum2                                 && io.data2.valid) -> csum.io.req.valid
@@ -423,6 +432,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isFp8pack1                    -> fp8pack.io.resp.valid,
     isFp8unpack1                  -> fp8unpack.io.resp.valid,
     isRelu1                       -> relu.io.resp.valid,
+    isGelu1                       -> gelu.io.resp.valid,
     isVli1                        -> vli.io.resp.valid,
     isMov1                        -> mov.io.resp.valid,
     isCSum1                       -> csum.io.resp.valid
@@ -444,6 +454,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isFp8pack2             -> fp8pack.io.resp.valid,
     isFp8unpack2           -> fp8unpack.io.resp.valid,
     isRelu2                -> relu.io.resp.valid,
+    isGelu2                -> gelu.io.resp.valid,
     isVli2                 -> vli.io.resp.valid,
     isMov2                 -> mov.io.resp.valid,
     isCSum2                -> csum.io.resp.valid,
@@ -470,6 +481,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isFp8pack1                    -> fp8pack.io.resp.bits.result.asUInt,
     isFp8unpack1                  -> fp8unpack.io.resp.bits.result.asUInt,
     isRelu1                       -> relu.io.resp.bits.result.asUInt,
+    isGelu1                       -> gelu.io.resp.bits.result.asUInt,
     isVli1                        -> vli.io.resp.bits.result.asUInt,
     isMov1                        -> mov.io.resp.bits.result.asUInt,
     isCSum1                       -> finalResultBF16.asUInt
@@ -492,6 +504,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     isFp8pack2                    -> fp8pack.io.resp.bits.result.asUInt,
     isFp8unpack2                  -> fp8unpack.io.resp.bits.result.asUInt,
     isRelu2                       -> relu.io.resp.bits.result.asUInt,
+    isGelu2                       -> gelu.io.resp.bits.result.asUInt,
     isVli2                        -> vli.io.resp.bits.result.asUInt,
     isMov2                        -> mov.io.resp.bits.result.asUInt,
     isCSum2                       -> finalResultBF16.asUInt,

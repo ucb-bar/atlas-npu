@@ -161,6 +161,7 @@ object IDecode {
     VTANH_BF16       -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_TANH,      XLU_X, MEM_X, LSU_X, SC_X, XR_N, VSRC_X),
     VLOG2_BF16       -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_LOG,       XLU_X, MEM_X, LSU_X, SC_X, XR_N, VSRC_X),
     VSQRT_BF16       -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_SQRT,      XLU_X, MEM_X, LSU_X, SC_X, XR_N, VSRC_X),
+    VGELU_BF16       -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_GELU,      XLU_X, MEM_X, LSU_X, SC_X, XR_N, VSRC_X),
 
     // ── VLI ─────────────────────────────────────────────────────────
     VLI_ALL -> List(Y, ALU_X, BR_X, OP1_X, OP2_X, IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_LI_ALL, XLU_X, MEM_X, LSU_X, SC_X, XR_N, VSRC_X),

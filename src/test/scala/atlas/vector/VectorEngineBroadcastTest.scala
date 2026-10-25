@@ -17,7 +17,7 @@ class VpuBroadcastHarness extends Module {
     val readData  = Input(Vec(2, UInt(256.W)))
     val reads     = Vec(2, Valid(new MregReadReq(p)))
     val writes    = Vec(2, Valid(new MregWriteReq(p)))
-    val issueBusy = Output(Vec(3, UInt(31.W)))
+    val issueBusy = Output(Vec(3, UInt((VPUOp.all.size + 1).W)))
     val busy      = Output(Bool())
   })
   val vpu = Module(new VectorEngineTop(VpuParams(), p))

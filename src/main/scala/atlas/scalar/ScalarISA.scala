@@ -141,8 +141,9 @@ object ScalarISA {
   val VPU_LI_COL     = 28.U(5.W)  // VPUOp.vliCol     = 28
   val VPU_LI_ROW     = 29.U(5.W)  // VPUOp.vliRow     = 29
   val VPU_LI_ALL     = 30.U(5.W)  // VPUOp.vliAll     = 30
+  val VPU_GELU       = 31.U(5.W)  // VPUOp.gelu       = 31
   val VPU_X          =  0.U(5.W)  // don't-care
-  val NUM_VPU_STATUS_OPS = 31     // status bit i matches VPU_* encoding i; bit 0 = VPU_NONE
+  val NUM_VPU_STATUS_OPS = 32     // status bit i matches VPU_* encoding i; bit 0 = VPU_NONE
 
   // ── VPU second operand (2-bit): the .bf16, .vx and .vr forms of a two-input op ──
   val VSRC_PAIR = 0.U(2.W)   // T(vs2)

@@ -21,7 +21,7 @@ object VPUOp extends ChiselEnum {
   val add, sub, mul, rcp, sqrt, sin, cos, tanh, log, exp, exp2,
       square, cube, rsum, csum, fp8, fp8pack, fp8unpack, relu,
       rmax, rmin, cmax, cmin, pairmax, pairmin, mov,
-      vliOne, vliCol, vliRow, vliAll = Value
+      vliOne, vliCol, vliRow, vliAll, gelu = Value
 }
 
 /** Top-level vector-engine input bundle.
