@@ -16,11 +16,15 @@ The dependencies come from OPS, which gives the operands of every instruction di
   DMA.WAIT of its channel. A DMA.WAIT for transfers from an earlier block may touch any address.
   The instructions of one channel keep their order.
 Labels, branches, CSR accesses, ECALL and instructions that OPS does not list stay in place and
-end a block.
+end a block. vsetm is one of them: no instruction moves across it. An instruction costs what it
+costs at the row count M of the last vsetm before it in the text (32 before the first).
 """
 from bisect import insort
 from collections import defaultdict
 from dataclasses import dataclass, field
+
+from npu_model.hardware.mxu import mxu_latency
+from npu_model.hardware.vpu import vpu_latency
 
 GRANULE = 1024                  # VMEM dependency granule: the tile of one vload or vstore
 BANK = 256 * 1024               # VMEM bank (the LSU's vector paths may not share one)
@@ -36,9 +40,9 @@ WINDOW = 48                     # ready instructions considered at each step, in
 class Op:
     unit: str
     roles: str
-    lat: int = 1                # cycles from issue to the last write, inclusive
+    lat: int = 1                # cycles from issue to the last write, inclusive, at 32 rows
     cls: str = ""               # VPU lane box: two ops of one class never share the VPU
-    reads: int = 0              # VPU: cycles from issue until the sources are free, if not lat - 1
+    reads: int = 0              # VPU: cycles from issue until the sources are free (2M + 1), if not lat - 1
 
 
 def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False, reads: int = 0) -> Op:
@@ -108,6 +112,17 @@ class Ins:
     acc: int = 0
     slot: int = 0
     beats: int = 0
+    rows: int = 32                                   # the row count M
+
+
+def latency(ins: Ins) -> int:
+    """Cycles from issue to the last write, inclusive, at the instruction's row count."""
+    u = ins.op.unit
+    if u in ("vpu", "vpu2"):
+        return vpu_latency(ins.name, ins.rows)
+    if u in ("mm", "push", "pushacc", "pop"):
+        return mxu_latency(ins.name, ins.rows)
+    return ins.rows + 3 if u in ("vload", "vstore") else ins.op.lat
 
 
 def _num(s: str) -> int:
@@ -152,7 +167,7 @@ class Block:
 
     def _effects(self, ins: Ins) -> None:
         op = ins.op
-        ins.lat = op.lat
+        ins.lat = latency(ins)
         if ins.name == "LI":
             ins.words = li_words(int(ins.args[1], 0))
         for role, s in zip(op.roles.split(), ins.args):
@@ -217,9 +232,9 @@ class Block:
 
     def _reserve(self, ins: Ins) -> None:
         """m-register reservations: (register, cycles from issue until it is free). The VPU holds
-        both registers of a pair until it has read, or written, all 64 rows. An mxu1 FP32 transfer
-        streams m, m+1 in T+1 .. T+32 and m+2, m+3 in T+33 .. T+64."""
-        op = ins.op
+        both registers of a pair until it has read, or written, all 2M rows. An mxu1 FP32 transfer
+        streams m, m+1 in T+1 .. T+M and m+2, m+3 in T+M+1 .. T+2M; a weight push all 32 rows."""
+        op, m = ins.op, ins.rows
         for role, s in zip(op.roles.split(), ins.args):
             if role[0] not in "mMRQ":
                 continue
@@ -230,13 +245,13 @@ class Block:
                 c = 33 if read else op.lat
             elif op.unit in ("vpu", "vpu2") and read:
                 # a row reduction reads both halves at once
-                c = 33 if op.lat < 65 else op.reads or op.lat - 1
+                c = m + 1 if op.lat < 65 else 2 * m + 1 if op.reads else ins.lat - 1
             elif op.unit in ("vpu", "vpu2", "vload", "vstore"):
-                c = op.lat
-            else:                                        # mxu1 streams rows T+1 .. T+32
-                c = 32
+                c = ins.lat
+            else:                                        # mxu1 streams rows T+1 .. T+M
+                c = 32 if op.unit == "push" else m
             if role[0] == "Q":
-                regs = [(n + i, 32 * (1 + i // 2)) for i in range(4)]
+                regs = [(n + i, m * (1 + i // 2)) for i in range(4)]
             else:
                 regs = [(r, c) for r in ([n, n + 1] if role[0] in "MR" else [n])]
             (ins.rr if read else ins.rw).extend(regs)
@@ -405,21 +420,23 @@ class Machine:
         elif u == "xlu":
             f["xlu"] = T + ins.lat
         elif u == "mm":
-            f["P0"], f["row0", b], f["mm", b], f["wread", ins.slot] = T + 32, T + 3, T + 35, T + 31
+            m = ins.rows
+            f["P0"], f["row0", b], f["mm", b], f["wread", ins.slot] = T + m, T + 3, T + ins.lat, T + m - 1
             if ins.name == "vmatmul.acc.mxu1":
-                f["psum", b] = T + 32
+                f["psum", b] = T + m
         elif u == "push":
             f["P1" if f["P1"] <= T else "P0"] = T + 32
             f["wpath"], f["wpush", ins.slot] = T + 32, T + 31
-        elif u == "pushacc":                             # rows land at T+1 .. T+32 (FP32: twice)
+        elif u == "pushacc":                             # rows land at T+1 .. T+M (FP32: twice)
             f["P0"] = f["P1"] = f["accpath"] = f["pushacc", b] = T + ins.lat - 1
-            f["pushrow0", b] = T + ins.lat - 31          # after the last write of row 0
+            # after the last write of row 0
+            f["pushrow0", b] = T + (ins.rows + 2 if "fp32" in ins.name else 2)
         elif u == "pop":
             f["W0"] = f["pop", b] = T + ins.lat - 1
             if ins.op.roles[0] in "MQ":
                 f["W1"] = T + ins.lat - 1
-            if ins.op.roles[0] == "Q":                   # rows are read again in T+33 .. T+64
-                f["popfirst", b] = T + 33
+            if ins.op.roles[0] == "Q":                   # rows are read again in T+M+1 .. T+2M
+                f["popfirst", b] = T + ins.rows + 1
         elif u == "dma":
             start = max(T + 1, self.dma)
             self.dma = start + ins.beats * DMA_BEAT
@@ -477,7 +494,7 @@ def schedule(source: str, window: int = WINDOW) -> str:
     lines = source.splitlines()
     consts = _constants(lines)
     out, code, notes = [], [], []
-    first = True
+    first, rows = True, 32
 
     def flush():
         nonlocal code, first
@@ -495,13 +512,15 @@ def schedule(source: str, window: int = WINDOW) -> str:
             continue
         name, args = parse(s)
         if s and not s.endswith(":") and name in OPS:
-            code.append(Ins(line, name, args, OPS[name], notes))
+            code.append(Ins(line, name, args, OPS[name], notes, rows=rows))
             notes = []
             continue
         flush()
         out.extend(notes)
         notes = []
         out.append(line)
+        if name == "vsetm":
+            rows = int(args[0], 0)
     flush()
     out.extend(notes)
     return "\n".join(out) + "\n"

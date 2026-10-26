@@ -254,9 +254,9 @@ def test_loop_kernels():
     check(kr.source, kr.b.dram.blobs, [(addr, t.nbytes) for t, addr in kr.outputs.values()])
 
 
-def issue_cycles(lines):
-    """The cycle in which Machine issues each instruction of one block, in program order."""
-    code = [S.Ins(line, *S.parse(line), S.OPS[S.parse(line)[0]]) for line in lines]
+def issue_cycles(lines, rows=32):
+    """The cycle in which Machine issues each instruction of one block of M = rows, in program order."""
+    code = [S.Ins(line, *S.parse(line), S.OPS[S.parse(line)[0]], rows=rows) for line in lines]
     m, t, out = S.Machine(), 0, []
     for ins in S.Block(code, {}).code:
         t = m.earliest(ins, t)
@@ -279,6 +279,21 @@ def test_machine_models_the_mxu1_fp32_transfers_and_scaled_pop():
     assert issue_cycles([pop, "vmatpop.fp8.acc.mxu1 m12, acc1, e0"]) == [0, 64]  # both write ports
     assert issue_cycles(["seli e1, 3", "vmatpop.bf16.scaled.acc.mxu1 m8, acc0, e1",
                          "vmatpop.fp8.acc.mxu1 m12, acc1, e0"]) == [0, 1, 33]
+
+
+def test_vsetm_ends_a_block_and_sets_the_costs_after_it():
+    """No instruction moves across vsetm; the instructions after it cost what they cost at its M."""
+    pop, exp, vsetm = "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n", "    vsetm 3\n"
+    assert S.schedule(pop + vsetm + exp) == pop + vsetm + exp
+    assert S.schedule(vsetm + pop + exp) == vsetm + exp + pop
+    vpu = ["vadd.bf16 m4, m0, m2", "vexp.bf16 m6, m4"]
+    assert issue_cycles(vpu) == [0, 66] and issue_cycles(vpu, rows=3) == [0, 8]          # 2M + 2
+    mm = ["vmatmul.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m1, w0"]
+    assert issue_cycles(mm) == [0, 32, 64] and issue_cycles(mm, rows=2) == [0, 3, 5]
+    lsu = ["vload m4, 0(x20)", "vexp.bf16 m6, m4"]
+    assert issue_cycles(lsu) == [0, 35] and issue_cycles(lsu, rows=5) == [0, 8]          # M + 3
+    fp32 = ["vmatpush.acc.fp32.mxu1 acc0, m4", "vmatpop.bf16.acc.mxu1 m12, acc0"]
+    assert issue_cycles(fp32, rows=3) == [0, 5]                                          # M + 2
 
 
 def test_fp32_spill_and_scaled_pop_schedule():

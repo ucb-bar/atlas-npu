@@ -3,7 +3,8 @@
 Each program is a random stream of dependent tensor instructions with no DELAY: vload, vstore,
 VPU operations (with the .vx and .vr forms, and vgelu), MXU push / matmul / pop, and XLU
 transposes, over 20 registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a bank) and a few
-VMEM tiles.
+VMEM tiles. vsetm sets the row count M now and then, to 1, 2, 3, values near the matmul spacing of
+mxu1 (4) and of the NVFP4 MXU (8), 31 or 32, and the instructions that follow use rows 0..M-1.
 Instructions are biased to read or overwrite what the previous ones touch, so RAW, WAR and WAW
 hazards on MREG registers, weight slots, accumulators and VMEM tiles are frequent. A .vx often
 reads x4 right after a scalar load writes it. The program ends by storing every register and the
@@ -18,6 +19,9 @@ model's arithmetic, not at the interlock.
 Values stay finite: the generator tracks each register's type (FP8, BF16, FP32) and a bound on
 its magnitude, and only emits operations whose inputs have the right type and whose result
 stays far below the BF16 range. FP8 data never uses the NaN codes; NVFP4 scales stay small.
+An instruction of M < 32 rows keeps rows M.. of its destination, so it writes only a destination
+of its result's type (the bound becomes the larger one); an accumulator counts the rows 0..k-1
+that hold data, and a matmul.acc or pop of M rows needs k >= M.
 
     python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1          # default
     python -m ditflow.hazfuzz OUT --count 64 --length 400 --units mxu1,nv       # ipt-nvfp4
@@ -49,6 +53,7 @@ NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
 VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vminimum.bf16", "vmaximum.bf16")
 SCALARS = (0.5, -1.25, 3.0, 0.0078125)                        # .vx operands, |s| < 2^2
 VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16", "vgelu.bf16")
+ROW_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 31, 32)
 
 
 def fp8_codes(n: int, gen: torch.Generator) -> torch.Tensor:
@@ -80,9 +85,12 @@ class Gen:
         self.rbound: dict[int, float] = {}     # and a log2 magnitude bound
         self.ttype: dict[int, str] = {}        # VMEM tiles
         self.tbound: dict[int, float] = {}
-        # Per MXU: accumulator bounds (None: undefined) and weight slots written.
+        # Per MXU: accumulator bounds (None: undefined), the rows 0..k-1 that hold data, and weight
+        # slots written.
         self.acc = {u: {0: None, 1: None} for u in self.fp8_units + (["nv"] if self.nv else [])}
+        self.arows = {u: {0: 0, 1: 0} for u in self.acc}
         self.wslot = {u: {0: False, 1: False} for u in self.acc}
+        self.m = 32                            # the row count M
         self.recent: list[int] = []            # registers the last instructions touched
         self.stats = {"ops": 0}
 
@@ -111,6 +119,26 @@ class Gen:
     def set_regs(self, r, n, t, bound):
         for i in range(n):
             self.rtype[r + i], self.rbound[r + i] = t, bound
+
+    def dests(self, regs, t, n=1):
+        """The destinations of n registers for a result of type t: at M < 32 only those of type t."""
+        return regs if self.m == 32 else [r for r in regs if all(self.rtype.get(r + i) == t for i in range(n))]
+
+    def write_regs(self, r, n, t, bound):
+        """Rows 0..M-1 of r .. r+n-1 get type t and values below 2^bound."""
+        if self.m < 32:
+            bound = max([bound] + [self.rbound[r + i] for i in range(n)])
+        self.set_regs(r, n, t, bound)
+
+    def acc_ready(self, u, a):
+        """Rows 0..M-1 of the accumulator hold data."""
+        return self.acc[u][a] is not None and self.arows[u][a] >= self.m
+
+    def write_acc(self, u, a, bound):
+        """Rows 0..M-1 of the accumulator get values below 2^bound."""
+        if self.m < self.arows[u][a]:
+            bound = max(bound, self.acc[u][a])
+        self.acc[u][a], self.arows[u][a] = bound, max(self.arows[u][a], self.m)
 
     def count(self, key):
         self.stats[key] = self.stats.get(key, 0) + 1
@@ -157,6 +185,11 @@ class Gen:
 
     # -- one random instruction -----------------------------------------------------------------
     def step(self):
+        if self.rng.random() < 0.05:
+            self.m = self.rng.choice(ROW_COUNTS)
+            self.b.op(f"vsetm {self.m}")
+            self.count("vsetm")
+            return True
         r = self.rng.random()
         if r < 0.17:
             return self.op_vload()
@@ -171,22 +204,28 @@ class Gen:
         return self.op_xlu()
 
     def op_vload(self):
-        dst = self.pick(REGS)
         t = self.rng.choice(DATA_TILES)
+        dst = self.pick(self.dests(REGS, self.ttype[t]))
+        if dst is None:
+            return False
         self.b.vload(dst, t)
         self.count("vload")
         self.spacer()
-        self.set_regs(dst, 1, self.ttype[t], self.tbound[t])
+        self.write_regs(dst, 1, self.ttype[t], self.tbound[t])
         self.touch(dst)
         return True
 
     def op_vstore(self):
         src = self.pick(REGS)
-        t = self.rng.choice(DATA_TILES)
+        tiles = [t for t in DATA_TILES if self.m == 32 or self.ttype[t] == self.rtype[src]]
+        if not tiles:
+            return False
+        t = self.rng.choice(tiles)
         self.b.vstore(src, t)
         self.count("vstore")
         self.spacer()
-        self.ttype[t], self.tbound[t] = self.rtype[src], self.rbound[src]
+        self.ttype[t] = self.rtype[src]
+        self.tbound[t] = self.rbound[src] if self.m == 32 else max(self.tbound[t], self.rbound[src])
         self.touch(src)
         return True
 
@@ -194,12 +233,14 @@ class Gen:
         rng = self.rng
         kind = rng.random()
         if kind < 0.1:
-            dst = self.pick(PAIRS)
+            dst = self.pick(self.dests(PAIRS, "bf16", 2))
+            if dst is None:
+                return False
             val = rng.choice((0.5, -1.25, 3.0, 0.0078125))
             self.b.vli(dst, L.bf16_bits(val))
             self.count("vli.all")
             self.spacer()
-            self.set_regs(dst, 2, "bf16", 2)
+            self.write_regs(dst, 2, "bf16", 2)
             self.touch(dst, dst + 1)
             return True
         if kind < 0.65:
@@ -220,9 +261,11 @@ class Gen:
                     self.b.op("SW x4, 0(x19)")
                     self.b.li(4, 0)
                     self.b.op("LW x4, 0(x19)")
-            dst = self.pick(PAIRS)
+            dst = self.pick(self.dests(PAIRS, "bf16", 2))
+            if dst is None:
+                return False
             self.emit(op + form, f"m{dst}", f"m{a}", "x4" if form == ".vx" else f"m{c}")
-            self.set_regs(dst, 2, "bf16", bound)
+            self.write_regs(dst, 2, "bf16", bound)
             self.touch(dst, dst + 1, a, a + 1, *(() if form == ".vx" else (c, c + 1)))
             return True
         op = rng.choice(VPU_UNARY)
@@ -234,9 +277,11 @@ class Gen:
                  "vgelu.bf16": ba}[op]
         if bound > MAX_BOUND:
             return False
-        dst = self.pick(PAIRS)
+        dst = self.pick(self.dests(PAIRS, "bf16", 2))
+        if dst is None:
+            return False
         self.emit(op, f"m{dst}", f"m{a}")
-        self.set_regs(dst, 2, "bf16", max(bound, 1))
+        self.write_regs(dst, 2, "bf16", max(bound, 1))
         self.touch(dst, dst + 1, a, a + 1)
         return True
 
@@ -259,12 +304,12 @@ class Gen:
             if src is None or not ws[w]:
                 return False
             new = 2 * FP8_BOUND + 5
-            if rng.random() < 0.5 and acc[a] is not None and acc[a] < MAX_BOUND - 1:
+            if rng.random() < 0.5 and self.acc_ready(u, a) and acc[a] < MAX_BOUND - 1:
                 self.emit(f"vmatmul.acc.{u}", f"acc{a}", f"m{src}", f"w{w}")
                 acc[a] = max(acc[a], new) + 1
             else:
                 self.emit(f"vmatmul.{u}", f"acc{a}", f"m{src}", f"w{w}")
-                acc[a] = new
+                self.write_acc(u, a, new)
             self.touch(src)
             return True
         if kind < 0.7:                                           # accumulator push: BF16 pair or FP32 quad
@@ -274,47 +319,54 @@ class Gen:
                 if src is None:
                     return False
                 self.emit(f"vmatpush.acc.bf16.{u}", f"acc{a}", f"m{src}")
-                acc[a] = self.rbound[src]
+                self.write_acc(u, a, self.rbound[src])
                 self.touch(src, src + 1)
             else:
                 src = self.pick(self.typed(QUADS, "fp32", 4))
                 if src is None:
                     return False
                 self.emit(f"vmatpush.acc.fp32.{u}", f"acc{a}", f"m{src}")
-                acc[a] = self.rbound[src]
+                self.write_acc(u, a, self.rbound[src])
                 self.touch(*range(src, src + 4))
             return True
         a = rng.randrange(2)                                     # pops
-        if acc[a] is None:
+        if not self.acc_ready(u, a):
             return False
         r = rng.random()
         if r < 0.5:
-            self.pop_bf16(u, a, scaled=r >= 0.3)
-        elif r < 0.75:
-            dst = self.pick(REGS)
+            return self.pop_bf16(u, a, scaled=r >= 0.3)
+        if r < 0.75:
+            dst = self.pick(self.dests(REGS, "fp8"))
+            if dst is None:
+                return False
             self.emit(f"vmatpop.fp8.acc.{u}", f"m{dst}", f"acc{a}", f"e{rng.randrange(4)}")
-            self.set_regs(dst, 1, "fp8", FP8_BOUND)
+            self.write_regs(dst, 1, "fp8", FP8_BOUND)
             self.touch(dst)
-        else:
-            self.pop_fp32(u, a)
-        return True
+            return True
+        return self.pop_fp32(u, a)
 
     def pop_bf16(self, u, a, scaled):
         """vmatpop.bf16.acc, or vmatpop.bf16.scaled.acc with e0-e3 (2^-6 .. 2^2)."""
-        dst = self.pick(PAIRS)
+        dst = self.pick(self.dests(PAIRS, "bf16", 2))
+        if dst is None:
+            return False
         bound = max(self.acc[u][a] + 2 * scaled, 1)
         if scaled:
             self.emit(f"vmatpop.bf16.scaled.acc.{u}", f"m{dst}", f"acc{a}", f"e{self.rng.randrange(4)}")
         else:
             self.emit(f"vmatpop.bf16.acc.{u}", f"m{dst}", f"acc{a}")
-        self.set_regs(dst, 2, "bf16", bound)
+        self.write_regs(dst, 2, "bf16", bound)
         self.touch(dst, dst + 1)
+        return True
 
     def pop_fp32(self, u, a):
-        dst = self.pick(QUADS)
+        dst = self.pick(self.dests(QUADS, "fp32", 4))
+        if dst is None:
+            return False
         self.emit(f"vmatpop.fp32.acc.{u}", f"m{dst}", f"acc{a}")
-        self.set_regs(dst, 4, "fp32", max(self.acc[u][a], 1))
+        self.write_regs(dst, 4, "fp32", max(self.acc[u][a], 1))
         self.touch(*range(dst, dst + 4))
+        return True
 
     def op_nv(self):
         """NVFP4 MXU. Any register is valid E2M1 data, and every register's scales stay valid."""
@@ -341,12 +393,12 @@ class Gen:
             w, a = rng.randrange(2), rng.randrange(2)
             if not ws[w]:
                 return False
-            if rng.random() < 0.5 and acc[a] is not None and acc[a] < MAX_BOUND - 1:
+            if rng.random() < 0.5 and self.acc_ready("nv", a) and acc[a] < MAX_BOUND - 1:
                 self.emit("vmatmul.acc.nv", f"acc{a}", f"m{src}", f"w{w}")
                 acc[a] = max(acc[a], NV_BOUND) + 1
             else:
                 self.emit("vmatmul.nv", f"acc{a}", f"m{src}", f"w{w}")
-                acc[a] = NV_BOUND
+                self.write_acc("nv", a, NV_BOUND)
             self.touch(src)
             return True
         if kind < 0.75:                                          # accumulator push: BF16 pair or FP32 quad
@@ -356,25 +408,23 @@ class Gen:
                 if src is None:
                     return False
                 self.emit("vmatpush.acc.bf16.nv", f"acc{a}", f"m{src}")
-                acc[a] = self.rbound[src]
+                self.write_acc("nv", a, self.rbound[src])
                 self.touch(src, src + 1)
             else:
                 src = self.pick(self.typed(QUADS, "fp32", 4))
                 if src is None:
                     return False
                 self.emit("vmatpush.acc.fp32.nv", f"acc{a}", f"m{src}")
-                acc[a] = self.rbound[src]
+                self.write_acc("nv", a, self.rbound[src])
                 self.touch(*range(src, src + 4))
             return True
         a = rng.randrange(2)                                     # pops
-        if acc[a] is None:
+        if not self.acc_ready("nv", a):
             return False
         r = rng.random()
         if r < 0.5:
-            self.pop_bf16("nv", a, scaled=r >= 0.25)
-        else:
-            self.pop_fp32("nv", a)
-        return True
+            return self.pop_bf16("nv", a, scaled=r >= 0.25)
+        return self.pop_fp32("nv", a)
 
     def op_xlu(self):
         src = self.pick(self.fp8_regs())
@@ -394,13 +444,16 @@ class Gen:
             if self.step():
                 n += 1
         b = self.b
-        # Accumulators: pop each defined one into a pair, then store every register (and scales).
+        # Accumulators: pop the rows of each that hold data into a pair, then store every
+        # register (and scales) at 32 rows.
         pair = 0
         for u, accs in self.acc.items():
             for a, bound in accs.items():
                 if bound is not None:
+                    b.op(f"vsetm {self.arows[u][a]}")
                     self.emit(f"vmatpop.bf16.acc.{u}", f"m{PAIRS[pair]}", f"acc{a}")
                     pair += 1
+        b.op("vsetm 32")
         for j, r in enumerate(REGS):
             b.vstore(r, OUT_BASE + j * FP8_TILE)
         n_out = len(REGS) * FP8_TILE
@@ -473,6 +526,77 @@ def directed_vload_war() -> dict:
             "timeout": None, "source": source}
 
 
+def directed_rows(units=("mxu1",)) -> dict:
+    """Instructions of a few rows (vsetm) where the interlock must order them: matmul chains on one
+    accumulator with M below the matmul spacing of mxu1 (4) and of the NVFP4 MXU (8), on
+    alternating accumulators, pops right after them, VPU instructions that read the rows of an
+    M-row result, a 32-row reader of an M-row result, and vload and vstore of M lines next to VPU
+    reads of their register."""
+    from .flow import assemble, preload
+    b = Builder(schedule=False)
+    b.begin()
+    gen = torch.Generator().manual_seed(2)
+    # Tiles 0-3: FP8 (m0-m2 A, m3 weights); tiles 4-7: BF16 (m4-m7, and every other register the
+    # program writes, so that all their rows hold data).
+    nv = "nv" in units
+    out_regs = list(range(4, 32)) + ([32, 33, 34, 35] if nv else [])
+    for i in range(8):
+        data = (fp8_codes(1024, gen).numpy().tobytes() if i < 4
+                else (torch.randn(32, 16, generator=gen) * 2).to(torch.bfloat16).view(torch.int16).numpy().tobytes())
+        b.dma.load_now(i * FP8_TILE, b.dram.add(f"t{i}", data), FP8_TILE, block=f"t{i}")
+    for r in range(4):
+        b.vload(r, r * FP8_TILE)
+    for r in out_regs:
+        b.vload(r, (4 + r % 4) * FP8_TILE)
+    code = ["vmatpush.weight.mxu1 w0, m3", "vmatpush.acc.bf16.mxu1 acc0, m4", "vmatpush.acc.bf16.mxu1 acc1, m6",
+            "vsetm 1",
+            "vmatmul.acc.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc0, m2, w0",
+            "vmatpop.bf16.acc.mxu1 m8, acc0",
+            "vsetm 2",
+            "vmatmul.acc.mxu1 acc1, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m2, w0",
+            "vmatmul.acc.mxu1 acc0, m0, w0", "vmatpop.fp32.acc.mxu1 m12, acc1", "vmatmul.mxu1 acc1, m1, w0",
+            "vsetm 3",
+            "vmatpop.bf16.acc.mxu1 m10, acc0", "vadd.bf16 m16, m10, m4", "vmul.bf16 m18, m16, m16",
+            "vsetm 32",
+            "vmov m20, m18",
+            "vsetm 5",
+            "vredsum.bf16 m22, m4", f"vload m5, {b._vaddr(6 * FP8_TILE)}", f"vstore m18, {b._vaddr(7 * FP8_TILE)}",
+            "vsetm 7",
+            "vsquare.bf16 m24, m6", f"vload m7, {b._vaddr(4 * FP8_TILE)}", "vmatpop.bf16.acc.mxu1 m26, acc1"]
+    if nv:
+        scales = b.dram.add("scales", ue4m3_codes(4 * 128, gen).numpy().tobytes())
+        b.dma.load_now(SCALE_TILES[0], scales, 4 * 128, block="scales")
+        for r in range(4):
+            b.op(f"vload.scale m{r}, {b._vaddr(SCALE_TILES[r])}")
+        code += ["vsetm 32", "vmatpush.weight.nv w1, m3", "vmatpush.acc.bf16.nv acc0, m4",
+                 "vsetm 6",
+                 "vmatmul.acc.nv acc0, m0, w1", "vmatmul.acc.nv acc0, m1, w1", "vmatmul.nv acc1, m2, w1",
+                 "vmatmul.acc.nv acc0, m2, w1", "vmatpop.bf16.acc.nv m28, acc0",
+                 "vsetm 1",
+                 "vmatmul.acc.nv acc1, m0, w1", "vmatmul.acc.nv acc1, m1, w1", "vmatpop.fp32.acc.nv m32, acc1",
+                 "vsetm 7",
+                 "vmatmul.acc.nv acc0, m1, w1", "vmatmul.acc.nv acc0, m0, w1", "vmatpop.bf16.acc.nv m30, acc0"]
+    for line in code:
+        b.op(line)
+    b.op("vsetm 32")
+    for j, r in enumerate(out_regs):
+        b.vstore(r, OUT_BASE + j * FP8_TILE)
+    # The registers, and tile 7, which holds 5 rows of m18 (vstore at M = 5).
+    checks = []
+    for k, (vmem, n) in enumerate([(OUT_BASE, len(out_regs) * FP8_TILE), (7 * FP8_TILE, FP8_TILE)]):
+        dram = b.dram.reserve(f"out{k}", n)
+        b.dma.store_now(vmem, dram, n)
+        checks.append((dram, n))
+    source = b.finish()
+    sim = FuncSim(source, b.dram.blobs, b.dram.size)
+    sim.run()
+    check = [[dram, torch.frombuffer(bytearray(sim.read_dram(dram, n)), dtype=torch.int32).numpy().astype("uint32").tolist()]
+             for dram, n in checks]
+    return {"name": "hazard_rows" + ("_nv" if nv else ""), "isa": list(ISA_VERSION), "variant": "directed",
+            "program": assemble(source), "preload": preload(b.dram.blobs), "check": check, "perf": {},
+            "timeout": None, "source": source}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", type=Path)
@@ -488,9 +612,9 @@ def main(argv=None):
         ap.error(f"--units {a.units}: give mxu1 (default) or mxu1,nv (ipt-nvfp4)")
     a.out.mkdir(parents=True, exist_ok=True)
     if a.directed:
-        t = directed_vload_war()
-        (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
-        (a.out / f"{t['name']}.S").write_text(t["source"])
+        for t in (directed_vload_war(), directed_rows(units)):
+            (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
+            (a.out / f"{t['name']}.S").write_text(t["source"])
     total = {}
     for i in range(a.count):
         t = make(a.seed + i, a.length, units, a.spaced)
