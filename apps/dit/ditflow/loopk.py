@@ -106,7 +106,7 @@ class LoopKernels:
             while pending:
                 pending.pop(0)()
             if bias is not None:
-                b.vload2(bias, stage + KT * FP8_TILE)
+                b.vload2_row(bias, stage + KT * FP8_TILE)
             for r in range(R):
                 o = regs.pair()
                 b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
@@ -164,7 +164,7 @@ class LoopKernels:
         def f(o, r, ptrs):
             b = self.b
             g = b.regs.pair()
-            b.vload2(g, ptrs[scale])
+            b.vload2_row(g, ptrs[scale])
             b.v("vmul.bf16.vr", f"m{o}", f"m{o}", f"m{g}")
             b.vload2(g, ptrs[x])
             b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{g}")
@@ -255,7 +255,7 @@ class LoopKernels:
                     b.v("vmatmul.mxu1", "acc0", f"m{Q0}", "w0")
                     b.v("vmatmul.acc.mxu1", "acc0", f"m{Q1}", "w1")
                     b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{s}", "acc0", f"e{b.erf(127 + a_q + a_k)}")
-                    b.vload2(t, Ptr(pm, 0))
+                    b.vload2_row(t, Ptr(pm, 0))
                     b.v("vadd.bf16.vr", f"m{s}", f"m{s}", f"m{t}")
                     b.v("vredmax.row.bf16", f"m{t}", f"m{s}")
                     b.v("vmaximum.bf16", f"m{m}", f"m{m}", f"m{t}")

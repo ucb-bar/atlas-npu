@@ -119,7 +119,7 @@ class Kernels:
                     b.v("vmatmul.acc.mxu1" if k else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
                 b.dma.pump(per_k)
             if bias is not None:
-                b.vload2(bias, base + KT * FP8_TILE)
+                b.vload2_row(bias, base + KT * FP8_TILE)
             for r in range(RT):
                 o = regs.pair()
                 b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
@@ -159,7 +159,7 @@ class Kernels:
         def f(o, r, n):
             b = self.b
             g = b.regs.pair()
-            b.vload2(g, gate.tile(0, n))
+            b.vload2_row(g, gate.tile(0, n))
             b.v("vmul.bf16.vr", f"m{o}", f"m{o}", f"m{g}")
             b.vload2(g, x.tile(r, n))
             b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{g}")
@@ -227,9 +227,9 @@ class Kernels:
             b.vload2(xj, xa(j))
             b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
             b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{var}")
-            b.vload2(t, scale1.tile(0, j))
+            b.vload2_row(t, scale1.tile(0, j))
             b.v("vmul.bf16.vr", f"m{xj}", f"m{xj}", f"m{t}")
-            b.vload2(t, shift.tile(0, j))
+            b.vload2_row(t, shift.tile(0, j))
             b.v("vadd.bf16.vr", f"m{xj}", f"m{xj}", f"m{t}")
             self.quant_store(xj, j % 2, oa(j), 127 - a)
         regs.release(pairs=(mean, var, xj, t))
@@ -297,7 +297,7 @@ class Kernels:
             regs.release(*Q.values(), *K.values())
             masks = [regs.pair() for _ in range(RT)] if kmask is not None else []
             for rk, mask in enumerate(masks):
-                b.vload2(mask, kmask.tile(0, rk))
+                b.vload2_row(mask, kmask.tile(0, rk))
             for rq in range(RT):                                         # softmax over keys
                 m, t = regs.pair(), regs.pair()
                 for rk in range(RT):

@@ -376,6 +376,13 @@ class Builder:
         self.vload(m, addr)
         self.vload(m + 1, addr + FP8_TILE)
 
+    def vload2_row(self, m: int, addr) -> None:
+        """Row 0 of a BF16 tile, the operand of a .vr instruction: a 1-row vload of each half."""
+        rows = self.rows
+        self.vsetm(1)
+        self.vload2(m, addr)
+        self.vsetm(rows)
+
     def vstore2(self, m: int, addr: int) -> None:
         self.vstore(m, addr)
         self.vstore(m + 1, addr + FP8_TILE)
