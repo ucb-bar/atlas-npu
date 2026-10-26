@@ -72,7 +72,6 @@ class LoopKernels:
         for s in streams:
             if s.per_row:
                 self.ptr(srow[s.name], s.t.tile(0, 0))
-        deqt = k.const(pow2_bits(deq))
         wreg = [regs.one(), regs.one()]
         bias = regs.pair() if lin.has_bias else None
         xr = [regs.one() for _ in range(R * KT)] if resident else [regs.one() for _ in range(4)]
@@ -111,7 +110,7 @@ class LoopKernels:
             for r in range(R):
                 o = regs.pair()
                 b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
-                b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{deqt}")
+                b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(pow2_bits(deq)))
                 if bias is not None:
                     b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
                 ptrs = {s.name: Ptr(scol[s.name], (r * s.t.ct * s.t.tile_bytes if s.per_row else 0)
@@ -145,7 +144,7 @@ class LoopKernels:
                 nt_body(0, None)
             elif pairs > 1:
                 self._wait(chans[0])            # the last pass prefetched one block past the end
-        regs.release(*wreg, *xr, pairs=(deqt,) + ((bias,) if bias is not None else ()))
+        regs.release(*wreg, *xr, pairs=(bias,) if bias is not None else ())
         b.xrelease(xrow, xd, *srow.values(), *scol.values())
 
     # -- epilogues -------------------------------------------------------------------------
@@ -244,7 +243,6 @@ class LoopKernels:
                 m, l, t, s = regs.pair(), regs.pair(), regs.pair(), regs.pair()
                 b.vli(m, NEG_BIG)
                 b.vli(l, 0)
-                deq = k.const(pow2_bits(a_q + a_k))
                 pk, ps, pm = b.xreg(), b.xreg(), b.xreg()
                 self.ptr(pk, kbuf.tile(0, 0))
                 self.ptr(ps, sbuf.tile(0, 0))
@@ -258,13 +256,13 @@ class LoopKernels:
                     b.v("vmatmul.mxu1", "acc0", f"m{Q0}", "w0")
                     b.v("vmatmul.acc.mxu1", "acc0", f"m{Q1}", "w1")
                     b.v("vmatpop.bf16.acc.mxu1", f"m{s}", "acc0")
-                    b.v("vmul.bf16", f"m{s}", f"m{s}", f"m{deq}")
+                    b.v("vmul.bf16.vx", f"m{s}", f"m{s}", b.xconst(pow2_bits(a_q + a_k)))
                     b.vload2(t, Ptr(pm, 0))
                     b.v("vadd.bf16", f"m{s}", f"m{s}", f"m{t}")
                     b.v("vredmax.row.bf16", f"m{t}", f"m{s}")
                     b.v("vmaximum.bf16", f"m{m}", f"m{m}", f"m{t}")
                     b.vstore2(s, Ptr(ps, 0))
-                regs.release(K0, K1, Q0, Q1, pairs=(deq,))
+                regs.release(K0, K1, Q0, Q1)
                 self.ptr(ps, sbuf.tile(0, 0))
                 with b.loop(RK, steps=[(ps, TB // 4)]):                                     # exp, row sum
                     b.vload2(s, Ptr(ps, 0))

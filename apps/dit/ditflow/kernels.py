@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from .asm import SEGMENT, Builder, Tensor
 from .layout import FP8_TILE, bf16_bits, pow2_bits
 
-ONE, HALF, ZERO = bf16_bits(1.0), bf16_bits(0.5), 0
+ONE, HALF, MINUS_ONE = bf16_bits(1.0), bf16_bits(0.5), bf16_bits(-1.0)
 GELU_K1, GELU_K2 = bf16_bits(0.044715), bf16_bits(math.sqrt(2.0 / math.pi))
 NEG_BIG = bf16_bits(-30000.0)
 
@@ -61,11 +61,6 @@ class Kernels:
         b.regs.release(q)
         return -1
 
-    def const(self, bits: int) -> int:
-        p = self.b.regs.pair()
-        self.b.vli(p, bits)
-        return p
-
     def quantize(self, src: Tensor, dst: Tensor, a: int) -> None:
         """dst = FP8(src / 2**a), tile by tile."""
         b = self.b
@@ -97,7 +92,6 @@ class Kernels:
         else:
             stream = [regs.one() for _ in range(4)]
         wreg = [regs.one(), regs.one()]
-        deqt = self.const(pow2_bits(deq))
         bias = regs.pair() if lin.has_bias else None
 
         def queue(n):
@@ -133,7 +127,7 @@ class Kernels:
                 b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
                 if r in held:
                     self._store(*held.pop(r))
-                b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{deqt}")
+                b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(pow2_bits(deq)))
                 if bias is not None:
                     b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
                 store = epilogue(o, r, n)
@@ -143,7 +137,7 @@ class Kernels:
                     held[r] = (store, o)
         for store, o in held.values():
             self._store(store, o)
-        regs.release(*(xreg.values() if resident else stream), *wreg, pairs=(deqt,) + ((bias,) if bias is not None else ()))
+        regs.release(*(xreg.values() if resident else stream), *wreg, pairs=(bias,) if bias is not None else ())
 
     def _store(self, store, o: int) -> None:
         store()
@@ -190,36 +184,29 @@ class Kernels:
     def gelu2(self, o: int) -> None:
         """o = 2 * gelu_tanh(o) = o * (1 + tanh(sqrt(2/pi) * (o + 0.044715 o^3)))."""
         b = self.b
-        t, k = b.regs.pair(), b.regs.pair()
+        t = b.regs.pair()
         b.v("vcube.bf16", f"m{t}", f"m{o}")
-        b.vli(k, GELU_K1)
-        b.v("vmul.bf16", f"m{t}", f"m{t}", f"m{k}")
+        b.v("vmul.bf16.vx", f"m{t}", f"m{t}", b.xconst(GELU_K1))
         b.v("vadd.bf16", f"m{t}", f"m{t}", f"m{o}")
-        b.vli(k, GELU_K2)
-        b.v("vmul.bf16", f"m{t}", f"m{t}", f"m{k}")
+        b.v("vmul.bf16.vx", f"m{t}", f"m{t}", b.xconst(GELU_K2))
         b.v("vtanh.bf16", f"m{t}", f"m{t}")
-        b.vli(k, ONE)
-        b.v("vadd.bf16", f"m{t}", f"m{t}", f"m{k}")
+        b.v("vadd.bf16.vx", f"m{t}", f"m{t}", b.xconst(ONE))
         b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{t}")
-        b.regs.release(pairs=(t, k))
+        b.regs.release(pairs=(t,))
 
     def scale(self, o: int, bits: int) -> None:
-        k = self.const(bits)
-        self.b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{k}")
-        self.b.regs.release(pairs=(k,))
+        self.b.v("vmul.bf16.vx", f"m{o}", f"m{o}", self.b.xconst(bits))
 
     def silu(self, o: int) -> None:
         """o = o / (1 + exp(-o))."""
         b = self.b
-        t, k = b.regs.pair(), b.regs.pair()
-        b.vli(k, ZERO)
-        b.v("vsub.bf16", f"m{t}", f"m{k}", f"m{o}")
+        t = b.regs.pair()
+        b.v("vmul.bf16.vx", f"m{t}", f"m{o}", b.xconst(MINUS_ONE))
         b.v("vexp.bf16", f"m{t}", f"m{t}")
-        b.vli(k, ONE)
-        b.v("vadd.bf16", f"m{t}", f"m{t}", f"m{k}")
+        b.v("vadd.bf16.vx", f"m{t}", f"m{t}", b.xconst(ONE))
         b.v("vrecip.bf16", f"m{t}", f"m{t}")
         b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{t}")
-        b.regs.release(pairs=(t, k))
+        b.regs.release(pairs=(t,))
 
     # -- LayerNorm (no affine, eps 1e-6), adaLN modulation, FP8 out ----------------------------
     def ln_modulate_quant(self, x: Tensor, scale1: Tensor, shift: Tensor, out: Tensor, a: int) -> None:
@@ -239,8 +226,7 @@ class Kernels:
             b.v("vredsum.row.bf16", f"m{mean if j == 0 else t}", f"m{xj}")
             if j:
                 b.v("vadd.bf16", f"m{mean}", f"m{mean}", f"m{t}")
-        k = self.const(inv_n)
-        b.v("vmul.bf16", f"m{mean}", f"m{mean}", f"m{k}")
+        b.v("vmul.bf16.vx", f"m{mean}", f"m{mean}", b.xconst(inv_n))
         for j in range(HT):                                     # variance
             b.vload2(xj, xa(j))
             b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
@@ -248,9 +234,8 @@ class Kernels:
             b.v("vredsum.row.bf16", f"m{var if j == 0 else t}", f"m{xj}")
             if j:
                 b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{t}")
-        b.v("vmul.bf16", f"m{var}", f"m{var}", f"m{k}")
-        b.vli(k, bf16_bits(eps))
-        b.v("vadd.bf16", f"m{var}", f"m{var}", f"m{k}")
+        b.v("vmul.bf16.vx", f"m{var}", f"m{var}", b.xconst(inv_n))
+        b.v("vadd.bf16.vx", f"m{var}", f"m{var}", b.xconst(bf16_bits(eps)))
         b.v("vsqrt.bf16", f"m{var}", f"m{var}")
         b.v("vrecip.bf16", f"m{var}", f"m{var}")                # 1 / std
         for j in range(HT):                                     # normalize, modulate
@@ -262,7 +247,7 @@ class Kernels:
             b.vload2(t, shift.tile(0, j))
             b.v("vadd.bf16", f"m{xj}", f"m{xj}", f"m{t}")
             self.quant_store(xj, j % 2, oa(j), 127 - a)
-        regs.release(pairs=(mean, var, xj, t, k))
+        regs.release(pairs=(mean, var, xj, t))
 
     # -- RoPE self-attention, one head at a time -----------------------------------------------
     def attention(self, qkv: Tensor, rope_cos: Tensor, rope_sin: Tensor, kmask: Tensor | None,
@@ -314,7 +299,6 @@ class Kernels:
                     S[rq, rk] = regs.pair()
                     b.v("vmatpop.bf16.acc.mxu1", f"m{S[rq, rk]}", f"acc{rq}")
             regs.release(*Q.values(), *K.values())
-            deq = self.const(pow2_bits(a_q + a_k))
             mask = None
             if kmask is not None:
                 mask = regs.pair()
@@ -322,7 +306,7 @@ class Kernels:
             for rq in range(RT):                                         # softmax over keys
                 m, t = regs.pair(), regs.pair()
                 for rk in range(RT):
-                    b.v("vmul.bf16", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{deq}")
+                    b.v("vmul.bf16.vx", f"m{S[rq, rk]}", f"m{S[rq, rk]}", b.xconst(pow2_bits(a_q + a_k)))
                     if mask is not None and rk == RT - 1:
                         b.v("vadd.bf16", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{mask}")
                     b.v("vredmax.row.bf16", f"m{m if rk == 0 else t}", f"m{S[rq, rk]}")
@@ -341,7 +325,8 @@ class Kernels:
                     P[rq, rk] = self.quant_store(S[rq, rk], rk % 2, None, raw_p, keep=True)
                     regs.release(pairs=(S[rq, rk],))
                 regs.release(pairs=(m, t))
-            regs.release(pairs=(deq,) + ((mask,) if mask is not None else ()))
+            if mask is not None:
+                regs.release(pairs=(mask,))
             for dd in range(2):                                          # P @ V
                 for rk in range(RT):
                     b.v("vmatpush.weight.mxu1", f"w{rk}", f"m{VT[dd, rk]}")

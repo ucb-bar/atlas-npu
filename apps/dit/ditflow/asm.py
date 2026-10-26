@@ -15,8 +15,9 @@ Fixed scalar registers:
     x9            DRAM address of the current step's trace slot
     x10           CSR data
     x19           kernel scratch (constants for ADD)
-    x11-x18, x26-x31   loop counters and pointers (Builder.xreg)
+    x11-x18, x26-x29   loop counters and pointers (Builder.xreg)
     x20 - x25     word addresses of the six 256 KiB VMEM segments (vload/vstore bases)
+    x30, x31      BF16 constants of .vx instructions (Builder.xconst)
 """
 from collections import deque
 from contextlib import contextmanager
@@ -36,7 +37,8 @@ DMA_LOAD_CHANNELS = 7          # ch0-ch6 load weights and constants; ch7 stores 
 STORE_CHANNEL = 7
 CSR_DBG0, CSR_DBG1 = 0x800, 0x801
 SCRATCH = 19
-LOOP_REGS = [11, 12, 13, 14, 15, 16, 17, 18, 26, 27, 28, 29, 30, 31]
+LOOP_REGS = [11, 12, 13, 14, 15, 16, 17, 18, 26, 27, 28, 29]
+CONST_REGS = (30, 31)
 RESIDENT_ERF = 28              # e0-e27 are set once in the header; e28-e31 are set at their use
 TWO_SOURCE = {"vadd.bf16", "vsub.bf16", "vmul.bf16", "vmaximum.bf16", "vminimum.bf16"}
 BRANCH_REACH = 1024            # instructions a branch can jump back over (4 KiB)
@@ -209,7 +211,8 @@ class Builder:
         self._erf: dict[int, int] = {}
         self._next_dynamic_erf = RESIDENT_ERF
         self._header = None
-        self.xval: dict[int, int | None] = {}      # known values of x1-x3
+        self.xval: dict[int, int | None] = {}      # known values of x1-x3 and the constant registers
+        self.const_use = dict.fromkeys(CONST_REGS, 0)
         self.xfree = list(LOOP_REGS)
         self.rows = 32                              # the row count M (vsetm)
 
@@ -244,6 +247,18 @@ class Builder:
         if rows != self.rows:
             self.op(f"vsetm {rows}")
             self.rows = rows
+
+    def xconst(self, bits: int) -> str:
+        """An x-register with the BF16 bits in x[31:16], the scalar operand of a .vx instruction: a
+        constant register that holds them already, else the one used longest ago, set by LI."""
+        value = (bits & 0xFFFF) << 16
+        held = [r for r in CONST_REGS if self.xval.get(r) == value]
+        r = held[0] if held else min(CONST_REGS, key=self.const_use.get)
+        if not held:
+            self.li(r, value)
+            self.xval[r] = value
+        self.const_use[r] = max(self.const_use.values()) + 1
+        return f"x{r}"
 
     def li(self, r: int, value: int) -> None:
         self.op(f"LI x{r}, {value:#x}")

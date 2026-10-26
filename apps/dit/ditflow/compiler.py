@@ -338,10 +338,8 @@ class DiTProgram:
         b, k, vm = self.b, self.k, self.vm
         b.vstore2(o, vm["vbuf"].tile(r, 0))
         dd, kk, t = b.regs.pair(), b.regs.pair(), b.regs.pair()
-        b.vli(kk, self.dt_hi)
-        b.v("vmul.bf16", f"m{dd}", f"m{o}", f"m{kk}")
-        b.vli(kk, self.dt_lo)
-        b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{kk}")
+        b.v("vmul.bf16.vx", f"m{dd}", f"m{o}", b.xconst(self.dt_hi))
+        b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(self.dt_lo))
         b.v("vadd.bf16", f"m{dd}", f"m{dd}", f"m{o}")             # d = dt * v
         b.vload2(kk, vm["rowmask"].tile(r, 0))
         b.v("vmul.bf16", f"m{dd}", f"m{dd}", f"m{kk}")
