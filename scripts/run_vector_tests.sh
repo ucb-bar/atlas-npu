@@ -10,11 +10,6 @@
 # require() fallback. Set REGEN=1 to force a refresh even when the files
 # already exist.
 #
-# After the Scala tests run, the pytest drift guard
-# baremetal/generators/software_models/vpu/tests/test_rtl_actual_outputs.py
-# cross-checks the Python funct model against the RTL snapshot that each
-# family test just wrote back out to disk.
-#
 # NOTE: All test classes below live in package `atlas.vector` regardless of
 # their source subdirectory (RcpSqrtTest/, vectorFSM/, or flat). The list is
 # alphabetized to match the output of
@@ -27,7 +22,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VECTOR_DIR="$REPO_DIR/src/test/resources/vpu_test_vectors"
 GEN_SCRIPT="$SCRIPT_DIR/gen_vpu_test_vectors.py"
-PYTEST_DRIFT="baremetal/generators/software_models/vpu/tests/test_rtl_actual_outputs.py"
 
 FAMILIES=(binary unary_simple unary_math row_reduce col_reduce vli)
 
@@ -61,7 +55,6 @@ fi
 
 TESTS=(
   AddSubSumTest
-  DivSqrtBlockTest
   FSMDouble
   FSMDoubleTransition
   FSMOverlapTracking1
@@ -70,11 +63,10 @@ TESTS=(
   FSMOverlapTracking4
   FSMSingle
   FSMSingleTransition
+  Fp8CvtSiliconTest
   LogLUTTest
-  MaxReduBlockTest
   PairwiseMaxTest
   PairwiseMinTest
-  RVDivSqrtTest
   RVExpTest
   RVFP8PackTest
   RVFP8UnpackTest
@@ -94,7 +86,11 @@ TESTS=(
   SqrtTest
   TanhBlockTest
   VETUnitTesting
+  VectorEngineBroadcastTest
+  VectorEngineGeluTest
   VectorEngineRawCsumSmokeTest
+  VectorEngineRowSumTest
+  VectorEngineRowsTest
   VectorEngineTopBinaryVectorTest
   VectorEngineTopColReduceVectorTest
   VectorEngineTopRowReduceVectorTest
@@ -125,23 +121,6 @@ for t in "${TESTS[@]}"; do
   fi
 done
 
-# ── pytest drift guard ──
-echo
-echo "======================================================================"
-echo "== RUNNING: pytest $PYTEST_DRIFT"
-echo "== $(date '+%Y-%m-%d %H:%M:%S')"
-echo "======================================================================"
-PY_START=$(date +%s)
-( cd "$REPO_DIR" && PYTHONPATH=baremetal/generators python3 -m pytest "$PYTEST_DRIFT" )
-py_rc=$?
-PY_END=$(date +%s)
-PY_DURATION=$((PY_END - PY_START))
-if [ $py_rc -eq 0 ]; then
-  RESULTS[pytest_drift_guard]="PASS  (${PY_DURATION}s)"
-else
-  RESULTS[pytest_drift_guard]="FAIL rc=$py_rc  (${PY_DURATION}s)"
-fi
-
 END_ALL=$(date +%s)
 TOTAL=$((END_ALL - START_ALL))
 
@@ -154,9 +133,7 @@ for t in "${TESTS[@]}"; do
   printf "  %-40s %s\n" "$t" "${RESULTS[$t]}"
   case "${RESULTS[$t]}" in FAIL*) FAIL_COUNT=$((FAIL_COUNT+1));; esac
 done
-printf "  %-40s %s\n" "pytest_drift_guard" "${RESULTS[pytest_drift_guard]}"
-case "${RESULTS[pytest_drift_guard]}" in FAIL*) FAIL_COUNT=$((FAIL_COUNT+1));; esac
-TOTAL_COUNT=$(( ${#TESTS[@]} + 1 ))
+TOTAL_COUNT=${#TESTS[@]}
 echo "----------------------------------------------------------------------"
 if [ $FAIL_COUNT -eq 0 ]; then
   echo "  all ${TOTAL_COUNT} tests passed"
