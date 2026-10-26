@@ -176,32 +176,32 @@ class FSMSingleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 if (i == 0) {
                     dut.io.in.instFire.poke(true.B)
                     dut.io.in.instType.poke(VPUOp.exp)
-                    dut.io.in.instReadBank1.poke(1.U)
-                    dut.io.in.instReadBank2.poke(2.U)
-                    dut.io.in.instWriteBank.poke(3.U)
+                    dut.io.in.instReadBank1.poke(2.U)
+                    dut.io.in.instReadBank2.poke(4.U)
+                    dut.io.in.instWriteBank.poke(6.U)
                     dut.io.out.VEReady.expect(true.B)
                 // Input fires at the 65th cycle again which is when the first instruction is done
                 } else if (i == 1) {
                     dut.io.in.instFire.poke(true.B)
                     dut.io.in.instType.poke(VPUOp.tanh)
-                    dut.io.in.instReadBank1.poke(4.U)
-                    dut.io.in.instReadBank2.poke(5.U)
-                    dut.io.in.instWriteBank.poke(6.U)
+                    dut.io.in.instReadBank1.poke(8.U)
+                    dut.io.in.instReadBank2.poke(10.U)
+                    dut.io.in.instWriteBank.poke(12.U)
                     dut.io.out.VEReady.expect(true.B)
                 } else if (i == 66) {
                     dut.io.in.instFire.poke(true.B)
                     dut.io.in.instType.poke(VPUOp.mul)
-                    dut.io.in.instReadBank1.poke(11.U)
-                    dut.io.in.instReadBank2.poke(12.U)
-                    dut.io.in.instWriteBank.poke(13.U)
+                    dut.io.in.instReadBank1.poke(22.U)
+                    dut.io.in.instReadBank2.poke(24.U)
+                    dut.io.in.instWriteBank.poke(26.U)
                     dut.io.out.VEReady.expect(true.B)
                 }
                 else {
                     dut.io.in.instFire.poke(false.B)
                     dut.io.in.instType.poke(VPUOp.sub)
-                    dut.io.in.instReadBank1.poke(7.U)
-                    dut.io.in.instReadBank2.poke(8.U)
-                    dut.io.in.instWriteBank.poke(9.U)
+                    dut.io.in.instReadBank1.poke(14.U)
+                    dut.io.in.instReadBank2.poke(16.U)
+                    dut.io.in.instWriteBank.poke(18.U)
                 }
 
                 // Cycle 1 to 64 should be when input handshake of compute units happens
@@ -262,8 +262,8 @@ class FSMSingleTransition extends AnyFlatSpec with Matchers with PeekPokeAPI {
                 dut.clock.step(1)
             }
             log.ports shouldBe Seq(
-                pairRows(1) ++ pairRows(11), pairRows(4) ++ pairRows(12),
-                pairRows(3) ++ pairRows(13), pairRows(6)
+                pairRows(2) ++ pairRows(22), pairRows(8) ++ pairRows(24),
+                pairRows(6) ++ pairRows(26), pairRows(12)
             )
             dut.io.out.state.expect(0.U)
         }.result
