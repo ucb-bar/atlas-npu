@@ -8,7 +8,7 @@
 //        (pushed from an m-register and its scales)
 // Each of the 32 lanes is an fp4_fedp (ucb-bar/nvfp4@0c611e1:fpga/pe; NVIDIA
 // tensor-core arithmetic): lane j computes d = C + A_r . W_j for one activation
-// row r per cycle, so a matmul feeds 32 rows in 32 cycles and a K chain of
+// row r per cycle, so a matmul feeds M rows in M cycles and a K chain of
 // vmatmul.acc equals a chain of NVIDIA m16n8k64 MMAs bit for bit, except for the
 // known gap in docs/nvfp4-mxu.md (an all-zero 16-element block can set the
 // alignment).
@@ -17,8 +17,10 @@
 //   E0  mreg read port 0: matmul feed, weight push (if E1 is busy), acc push
 //   E1  mreg read port 1: weight push (preferred), acc push (with E0)
 //   W   mreg write ports 0+1: pops
-// FP32 transfers move 4 m-registers in 64 steps: step s is phase s/32, row
-// s%32; register q of {m[r], m[r+1], m[r+2], m[r+3]} holds columns 8q..8q+7.
+// A command moves rows 0..M-1, M its row count (a weight push: all 32 rows).
+// FP32 transfers move 4 m-registers in 2M steps: phase h moves columns
+// 16h..16h+15; a step holds the phase in bit 5 and the row in bits 4:0.
+// Register q of {m[r], m[r+1], m[r+2], m[r+3]} holds columns 8q..8q+7.
 //
 // cmdReady reports whether the command on io.cmd.bits would be accepted this
 // cycle (the scalar core's interlock); io.cmd.valid is only raised then.
@@ -69,6 +71,7 @@ class NvCmd(mregIdBits: Int) extends Bundle {
   val accSel     = Bool()
   val weightSlot = Bool()
   val scaleE8M0  = UInt(8.W)           // PopBF16Scaled: the pop multiplies by 2^(scaleE8M0 - 127)
+  val rows       = UInt(5.W)           // row count M, 0 for 32: rows 0..M-1 (PushWeight: all)
 }
 
 object Nvfp4 {
@@ -110,18 +113,21 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   // Engine state
   // ==========================================================================
 
-  private def steps(op: NvOp.Type): UInt =
-    Mux(op === PushAccFP32 || op === PopFP32, (2 * R).U(SW.W), R.U(SW.W))
   private def row(s: UInt): UInt   = s(log2Ceil(R) - 1, 0)
   private def phase(s: UInt): UInt = s(log2Ceil(R))
+  private def lastRow(c: NvCmd): UInt  = Mux(c.op === PushWeight, (R - 1).U, c.rows - 1.U)
+  private def lastStep(c: NvCmd): UInt = Cat(c.op === PushAccFP32 || c.op === PopFP32, lastRow(c))
+  /** The step after s: from phase 0's last row to row 0 of phase 1. */
+  private def nextStep(c: NvCmd, s: UInt): UInt =
+    Mux(row(s) === lastRow(c), Cat(s(SW - 1, log2Ceil(R)) + 1.U, 0.U(log2Ceil(R).W)), s + 1.U)
 
   val e0v = RegInit(false.B); val e0 = Reg(new NvCmd(mregP.mregIdBits)); val e0n = Reg(UInt(SW.W))
   val e1v = RegInit(false.B); val e1 = Reg(new NvCmd(mregP.mregIdBits)); val e1n = Reg(UInt(SW.W))
   val wv  = RegInit(false.B); val w  = Reg(new NvCmd(mregP.mregIdBits)); val wn  = Reg(UInt(SW.W))
 
-  val e0Boundary = !e0v || (e0n +& 1.U) >= steps(e0.op)
-  val e1Boundary = !e1v || (e1n +& 1.U) >= steps(e1.op)
-  val wBoundary  = !wv  || (wn  +& 1.U) >= steps(w.op)
+  val e0Boundary = !e0v || e0n === lastStep(e0)
+  val e1Boundary = !e1v || e1n === lastStep(e1)
+  val wBoundary  = !wv  || wn === lastStep(w)
 
   val e0Matmul  = e0v && (e0.op === Matmul || e0.op === MatmulAcc)
   val e0PushW   = e0v && e0.op === PushWeight
@@ -188,10 +194,13 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   val tagAcc = ShiftRegister(laneTag.acc, p.laneLatency)
   val tagRow = ShiftRegister(laneTag.row, p.laneLatency)
   // Valid bits of every stage, for the "matmul writes still pending" hazard.
-  val tagPipeV   = RegInit(VecInit(Seq.fill(p.laneLatency)(false.B)))
-  val tagPipeAcc = Reg(Vec(p.laneLatency, Bool()))
-  tagPipeV(0) := laneVld; tagPipeAcc(0) := laneTag.acc
-  for (i <- 1 until p.laneLatency) { tagPipeV(i) := tagPipeV(i - 1); tagPipeAcc(i) := tagPipeAcc(i - 1) }
+  val tagPipeV    = RegInit(VecInit(Seq.fill(p.laneLatency)(false.B)))
+  val tagPipeAcc  = Reg(Vec(p.laneLatency, Bool()))
+  val tagPipeRow0 = Reg(Vec(p.laneLatency, Bool()))
+  tagPipeV(0) := laneVld; tagPipeAcc(0) := laneTag.acc; tagPipeRow0(0) := laneTag.row === 0.U
+  for (i <- 1 until p.laneLatency) {
+    tagPipeV(i) := tagPipeV(i - 1); tagPipeAcc(i) := tagPipeAcc(i - 1); tagPipeRow0(i) := tagPipeRow0(i - 1)
+  }
   assert(!tagV || lanes(0).io.out_vld, "NV: lane output valid does not line up with its writeback tag")
 
   when(tagV) { accWrite(tagAcc, tagRow, laneD, Seq.fill(L)(true.B)) }
@@ -210,6 +219,10 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   private def computePending(b: Bool): Bool =
     (e0Matmul && e0.accSel === b) || laneVld && laneTag.acc === b ||
       (0 until p.laneLatency).map(i => tagPipeV(i) && tagPipeAcc(i) === b).reduce(_ || _)
+  /** The row-0 writeback of a matmul on accumulator b has not landed (it lands in the last stage). */
+  private def row0Pending(b: Bool): Bool =
+    (e0Matmul && e0.accSel === b && e0n === 0.U) || laneVld && laneTag.acc === b && laneTag.row === 0.U ||
+      (0 until p.laneLatency).map(i => tagPipeV(i) && tagPipeAcc(i) === b && tagPipeRow0(i)).reduce(_ || _)
   /** A weight push to slot s will still write after this cycle. */
   private def pushWActive(s: Bool): Bool =
     (e0PushW && e0.weightSlot === s && !e0Boundary) || (e1PushW && e1.weightSlot === s && !e1Boundary)
@@ -222,9 +235,10 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   private def popReading(b: Bool): Bool = wv && w.accSel === b && !wBoundary
 
   // Matmul: E0 free; its slot fully pushed; no acc push still writing the buffer (write port);
-  // no pop still reading it (read port, and a pop must read the old rows).
+  // no pop still reading it (read port, and a pop must read the old rows); the previous matmul on
+  // the buffer wrote row 0 (a matmul of M < 8 rows would read rows before they land).
   val canMat     = isMat && e0Boundary && !pushWActive(cmd.weightSlot) &&
-                   !pushAccWriting(cmd.accSel) && !popReading(cmd.accSel)
+                   !pushAccWriting(cmd.accSel) && !popReading(cmd.accSel) && !row0Pending(cmd.accSel)
   // Weight push: one write path; the slot must not be read by the matmul feeding now.
   val pushWOk    = isPushW && !pushWWriting && !matmulReadingSlot(cmd.weightSlot)
   val canPushWE1 = pushWOk && e1Boundary
@@ -306,8 +320,8 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
                (0 until L).map(j => (j / 16 == 1).B === ph.asBool))
     }
     when(!e0Boundary) {
-      issueE0(e0, e0n + 1.U)
-      e0n := e0n + 1.U
+      issueE0(e0, nextStep(e0, e0n))
+      e0n := nextStep(e0, e0n)
     }
   }
 
@@ -329,8 +343,8 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
       wScale(e1.weightSlot)(row(e1n)) := io.scaleReadResp(1)
     }
     when(!e1Boundary) {
-      issueE1(e1, e1n + 1.U)
-      e1n := e1n + 1.U
+      issueE1(e1, nextStep(e1, e1n))
+      e1n := nextStep(e1, e1n)
     }
   }
   when(e1Boundary) {
@@ -370,8 +384,8 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
       io.mregWriteReq1.bits.data := Cat(half.drop(8).reverse)
     }
     when(!wBoundary) {
-      accRead(w.accSel, row(wn + 1.U))
-      wn := wn + 1.U
+      accRead(w.accSel, row(nextStep(w, wn)))
+      wn := nextStep(w, wn)
     }
   }
   when(wBoundary) {
@@ -399,9 +413,9 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   io.busy := e0v || e1v || wv || laneVld || tagPipeV.asUInt.orR
   io.feeding := e0Matmul
 
-  val e0Next = e0n + 1.U
-  val e1Next = e1n + 1.U
-  val wNext  = wn + 1.U
+  val e0Next = nextStep(e0, e0n)
+  val e1Next = nextStep(e1, e1n)
+  val wNext  = nextStep(w, wn)
   io.activeReads(0).valid := e0v && !e0Boundary
   io.activeReads(0).bits  := e0Reg(e0, e0Next)
   io.activeReads(1).valid := e1v && !e1Boundary

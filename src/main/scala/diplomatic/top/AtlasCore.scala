@@ -206,6 +206,7 @@ class AtlasCore(
   nvCmdWire.accSel     := scn.accSel
   nvCmdWire.weightSlot := scn.weightSlot
   nvCmdWire.scaleE8M0  := scn.scaleE8M0
+  nvCmdWire.rows       := scn.rows
   nv.foreach { n =>
     n.io.cmd.valid := scalar.io.nvCmd.valid
     n.io.cmd.bits  := nvCmdWire
