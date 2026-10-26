@@ -218,6 +218,7 @@ class AtlasCore(
   mxu1CmdWire.accSel     := sc1.accSel
   mxu1CmdWire.weightSlot := sc1.weightSlot
   mxu1CmdWire.scaleE8M0  := sc1.scaleE8M0
+  mxu1CmdWire.rows       := sc1.rows
   mxu1.io.cmd.valid := scalar.io.mxu1Cmd.valid
   mxu1.io.cmd.bits  := mxu1CmdWire
 

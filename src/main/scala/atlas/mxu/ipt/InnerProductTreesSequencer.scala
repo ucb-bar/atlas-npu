@@ -7,16 +7,17 @@
 //   WriteP0 (mreg write port 0): pop FP8, pop BF16 lo half, pop FP32 even register
 //   WriteP1 (mreg write port 1): pop BF16 hi half, pop FP32 odd register
 //
-// The FP32 push and pop move an accumulator through m[r..r+3], register q holding columns
-// 8q..8q+7, in 2 x tileRows steps: step s is phase s / tileRows, row s % tileRows, and phase h
-// moves columns 16h..16h+15 through m[r+2h] and m[r+2h+1], as the NVFP4 MXU does
-// (docs/nvfp4-mxu.md). Both ports of a side run in lockstep, as for BF16.
+// A command moves rows 0..M-1, M its row count (a weight push: all rows of the slot). The FP32
+// push and pop move an accumulator through m[r..r+3], register q holding columns 8q..8q+7, in
+// 2M steps: phase h moves columns 16h..16h+15 of rows 0..M-1 through m[r+2h] and m[r+2h+1], as
+// the NVFP4 MXU does (docs/nvfp4-mxu.md). A step counter holds the phase in bit tileRowBits and
+// the row below it. Both ports of a side run in lockstep, as for BF16.
 //
 // Each port-engine is a tiny "cmd register + row counter + boundary" instead
 // of an explicit FSM enum. The state of a port at any cycle is just
 // `(cmdValid, cmd, row)`; the boundary predicate
 //
-//   <port>Boundary = !<port>CmdValid || ((<port>Row + 1.U) >= rowLimit(op))
+//   <port>Boundary = !<port>CmdValid || <port>Row === lastStep(cmd)
 //
 // captures both "fully idle" and "on the last useful cycle of the current op"
 // in a single signal. Every accept gate uses `<port>Boundary`, which means a
@@ -24,8 +25,8 @@
 // is wrapping up — no idle bubble between back-to-back same-port cmds. This
 // applies uniformly to compute→compute, push→push, and pop→pop chains.
 //
-// Plus an in-flight FIFO of {accSel, rowsWritten} entries: the head advances
-// on every coreOut.valid; the entry pops when all `tileRows` writebacks have
+// Plus an in-flight FIFO of {accSel, last, rowsWritten} entries: the head advances
+// on every coreOut.valid; the entry pops when all M writebacks have
 // landed. This same FIFO drives writeback routing (which buffer/row receives
 // the row emerging this cycle?) and the per-buffer hazard signal
 // `accBufRow0Ready` (any in-flight entry with `rowsWritten === 0` blocks new
@@ -59,9 +60,6 @@ class InnerProductTreesSequencer(
 
   require(p.vecLen * p.inputFmt.ieeeWidth == mregP.mregRowBits)
   require(p.tileRows <= mregP.mregRows)
-  require(p.numPipeCuts + 1 < p.tileRows,
-    s"IPT: pipeline latency (${p.numPipeCuts + 1}) must be < tileRows (${p.tileRows}) " +
-    s"for inflightDepth=2 to suffice")
 
   val io = IO(new Bundle {
     // ── Command input (fire-and-forget, no backpressure) ──
@@ -183,11 +181,10 @@ class InnerProductTreesSequencer(
   // ==========================================================================
   // Per-port engines — (cmdValid, cmd, row) replaces the old state enum.
   //
-  //   The "row" register iterates from 0 up to the per-op row limit
-  //   (numLanes for PushWeight, 2 x tileRows for the FP32 push and pop,
-  //   tileRows for everything else). When `row + 1`
-  //   reaches the limit, the port is at its boundary — either a new cmd is
-  //   latched (back-to-back) or `cmdValid` deasserts.
+  //   The "row" register steps from 0 to the op's last step (numLanes
+  //   rows for PushWeight, 2M for the FP32 push and pop, M for everything
+  //   else). On the last step the port is at its boundary — either a new
+  //   cmd is latched (back-to-back) or `cmdValid` deasserts.
   // ==========================================================================
 
   // ReadP0 — mreg read port 0
@@ -210,19 +207,22 @@ class InnerProductTreesSequencer(
   val w1Cmd      = Reg(new MxuCmd(mregP.mregIdBits))
   val w1Row      = Reg(UInt(rowCountW.W))
 
-  // Per-port row limit. PushWeight pushes one wbuf column per cycle for
-  // numLanes cycles; an FP32 transfer takes two phases; everything else
-  // iterates over tileRows.
-  private def rowLimitFor(op: MxuOp.Type): UInt =
-    Mux(op === MxuOp.PushWeight, p.numLanes.U, Mux(isFP32(op), (2 * tileRows).U, tileRows.U))
+  // The last row of a command: M - 1. PushWeight pushes one wbuf column per
+  // cycle for numLanes cycles.
+  private def lastRow(cmd: MxuCmd): UInt = Mux(cmd.op === MxuOp.PushWeight, (p.numLanes - 1).U, cmd.rows - 1.U)
+  // The last step: an FP32 transfer takes two phases.
+  private def lastStep(cmd: MxuCmd): UInt = Cat(isFP32(cmd.op), lastRow(cmd))
+  // The step after step s: from phase 0's last row to row 0 of phase 1.
+  private def nextStep(cmd: MxuCmd, s: UInt): UInt =
+    Mux(s(rowBits - 1, 0) === lastRow(cmd), Cat(s(rowCountW - 1, rowBits) + 1.U, 0.U(rowBits.W)), s + 1.U)
 
   // Boundary predicate — true on cycles where the port can accept a new cmd:
   // either it's idle (!cmdValid) or this is the last useful cycle of the
-  // currently-running op (row + 1 has reached the row limit).
-  val p0Boundary = !p0CmdValid || ((p0Row + 1.U) >= rowLimitFor(p0Cmd.op))
-  val p1Boundary = !p1CmdValid || ((p1Row + 1.U) >= rowLimitFor(p1Cmd.op))
-  val w0Boundary = !w0CmdValid || ((w0Row + 1.U) >= rowLimitFor(w0Cmd.op))
-  val w1Boundary = !w1CmdValid || ((w1Row + 1.U) >= rowLimitFor(w1Cmd.op))
+  // currently-running op (its last step).
+  val p0Boundary = !p0CmdValid || p0Row === lastStep(p0Cmd)
+  val p1Boundary = !p1CmdValid || p1Row === lastStep(p1Cmd)
+  val w0Boundary = !w0CmdValid || w0Row === lastStep(w0Cmd)
+  val w1Boundary = !w1CmdValid || w1Row === lastStep(w1Cmd)
 
   // Op classifiers — valid only when <port>CmdValid; replace state-enum reads.
   val p0IsCompute = p0CmdValid && ((p0Cmd.op === MxuOp.Matmul) || (p0Cmd.op === MxuOp.MatmulAcc))
@@ -234,21 +234,23 @@ class InnerProductTreesSequencer(
   val p1IsDual    = p1CmdValid && (p1Cmd.op === MxuOp.PushAccBF16 || p1Cmd.op === MxuOp.PushAccFP32)
 
   // ==========================================================================
-  // In-flight FIFO — {accSel, rowsWritten} per in-flight matmul
+  // In-flight FIFO — {accSel, last, rowsWritten} per in-flight matmul
   //
-  //   Entries are added on compute accept and removed when all `tileRows`
-  //   row-writebacks have landed. The head is the oldest entry (the matmul
-  //   currently being written back). Depth = 2: with back-to-back issue, the
-  //   maximum simultaneous in-flight is `ceil(latency / tileRows) + 1` = 2 at
-  //   the default config (latency = 2, tileRows = 32). The require above
-  //   guards against future configs that would push this past 2.
+  //   Entries are added on compute accept and removed when all M row
+  //   writebacks have landed. The head is the oldest entry (the matmul
+  //   currently being written back). A matmul is in flight for M + latency + 1
+  //   cycles; matmuls start at most every M cycles, and on one accumulator
+  //   only after the row-0 writeback of the previous one (accReuseHazard). So
+  //   latency + 1 entries let matmuls of a few rows on alternating
+  //   accumulators issue back to back; compute waits while the FIFO is full.
   // ==========================================================================
 
-  private val inflightDepth = 2
+  private val inflightDepth = p.latency + 1
   private val inflightPtrW  = log2Ceil(inflightDepth)
 
   class InFlightEntry extends Bundle {
     val accSel      = Bool()
+    val last        = UInt(rowBits.W)   // M - 1
     val rowsWritten = UInt((rowBits + 1).W)
   }
 
@@ -281,26 +283,26 @@ class InnerProductTreesSequencer(
 
   // Strictly necessary: a matmul "is reading" wslot w only on cycles where it
   // will *continue* to read wslot w next cycle. On the matmul's last feed
-  // cycle (row + 1 >= tileRows), the lane has already sampled the final wbuf
+  // cycle (its boundary), the lane has already sampled the final wbuf
   // row this cycle; a PUSH dispatched on that same cycle does not drive
   // weightWriteReq until the next cycle (when p1 enters its push), and the
   // first wbuf register write commits at posedge cycle+2. By then the matmul
   // has exited its compute phase and stopped reading. So we can let PUSH fire
   // on the last cycle without corrupting the matmul's reads.
   val wslotComputeReading = VecInit.tabulate(2) { w =>
-    p0IsCompute && (p0Cmd.weightSlot === w.U) && ((p0Row + 1.U) < tileRows.U)
+    p0IsCompute && (p0Cmd.weightSlot === w.U) && !p0Boundary
   }
   // Strictly necessary (symmetric to wslotComputeReading above): a PUSH
   // "is writing" wslot w only on cycles where it will continue to drive a
-  // new wbuf column next cycle. On the push's last cycle (row + 1 ==
-  // numLanes), the last column has been driven and will be latched at the
+  // new wbuf column next cycle. On the push's last cycle (its boundary),
+  // the last column has been driven and will be latched at the
   // next clock edge. A MATMUL on wslot w dispatched this same cycle has
   // its first feed beat next cycle, by which time wbuf is fully coherent.
   // So we let MATMUL fire on the push's last cycle without reading stale
   // wbuf state.
   val pushWActive = VecInit.tabulate(2) { w =>
-    (p0IsPushW && (p0Cmd.weightSlot === w.U) && ((p0Row + 1.U) < p.numLanes.U)) ||
-    (p1IsPushW && (p1Cmd.weightSlot === w.U) && ((p1Row + 1.U) < p.numLanes.U))
+    (p0IsPushW && (p0Cmd.weightSlot === w.U) && !p0Boundary) ||
+    (p1IsPushW && (p1Cmd.weightSlot === w.U) && !p1Boundary)
   }
   val pushAccActive = VecInit.tabulate(2) { buf =>
     (p0IsPushAcc && (p0Cmd.accSel === buf.U)) ||
@@ -339,11 +341,11 @@ class InnerProductTreesSequencer(
   val pushWWriting   = (p0IsPushW && !p0Boundary) || (p1IsPushW && !p1Boundary)
   val pushAccWriting = ((p0IsPushAcc || p0IsDual) && !p0Boundary) || (p1IsPushAcc && !p1Boundary)
   // A push writes row r at T+1+r (an FP32 push writes columns 16-31 of row r
-  // at T+33+r): until its last write of row 0, a read of row 0 would return
-  // an old value.
+  // at T+M+1+r): until its last write of row 0 (step 0, or step 0 of phase 1),
+  // a read of row 0 would return an old value.
   val pushAccRow0 = VecInit.tabulate(2) { b =>
     ((p0IsPushAcc || p0IsDual) && p0Cmd.accSel === (b == 1).B &&
-      p0Row <= Mux(p0Cmd.op === MxuOp.PushAccFP32, tileRows.U, 0.U)) ||
+      p0Row <= Mux(p0Cmd.op === MxuOp.PushAccFP32, (1 << rowBits).U, 0.U)) ||
     (p1IsPushAcc && p1Cmd.accSel === (b == 1).B && p1Row === 0.U)
   }
   // An FP32 pop reads every row again in its second phase: nothing writes its
@@ -550,11 +552,12 @@ class InnerProductTreesSequencer(
     // If we're not at the boundary, issue the next row's mreg read (and
     // accbuf read for compute).
     when(!p0Boundary) {
-      issueP0Read(reg0(p0Cmd, p0Row + 1.U), p0Row + 1.U)
+      val next = nextStep(p0Cmd, p0Row)
+      issueP0Read(reg0(p0Cmd, next), next)
       when(p0Cmd.op === MxuOp.Matmul || p0Cmd.op === MxuOp.MatmulAcc) {
-        driveP0AccRead(p0Cmd, p0Row + 1.U)
+        driveP0AccRead(p0Cmd, next)
       }
-      p0Row := p0Row + 1.U
+      p0Row := next
     }
   }
 
@@ -597,8 +600,9 @@ class InnerProductTreesSequencer(
     // BF16 and FP32: no body output here — p0 drives the combined accLoadReq.
 
     when(!p1Boundary) {
-      issueP1Read(reg1(p1Cmd, p1Row + 1.U), p1Row + 1.U)
-      p1Row := p1Row + 1.U
+      val next = nextStep(p1Cmd, p1Row)
+      issueP1Read(reg1(p1Cmd, next), next)
+      p1Row := next
     }
   }
 
@@ -645,8 +649,9 @@ class InnerProductTreesSequencer(
     }
 
     when(!w0Boundary) {
-      issueAccStoreRead(w0Cmd, w0Row + 1.U)
-      w0Row := w0Row + 1.U
+      val next = nextStep(w0Cmd, w0Row)
+      issueAccStoreRead(w0Cmd, next)
+      w0Row := next
     }
   }
 
@@ -681,7 +686,7 @@ class InnerProductTreesSequencer(
                                         bf16Row(io.accStoreData.drop(16), w1Cmd))
 
     when(!w1Boundary) {
-      w1Row := w1Row + 1.U
+      w1Row := nextStep(w1Cmd, w1Row)
     }
   }
 
@@ -721,7 +726,7 @@ class InnerProductTreesSequencer(
   val popThisCycle =
     io.coreOut.valid &&
       inflightValid(ifHead) &&
-      (inflight(ifHead).rowsWritten === (tileRows - 1).U)
+      (inflight(ifHead).rowsWritten === inflight(ifHead).last)
 
   // Writeback for the head's current row.
   when(io.coreOut.valid && inflightValid(ifHead)) {
@@ -737,8 +742,8 @@ class InnerProductTreesSequencer(
     }
   }
 
-  // Pointer advance — depth 2 is a power of two; the explicit wrap keeps
-  // other depths correct.
+  // Pointer advance — the explicit wrap keeps depths that are not a power
+  // of two correct.
   when(popThisCycle) {
     ifHead := Mux(ifHead === (inflightDepth - 1).U, 0.U, ifHead + 1.U)
   }
@@ -747,6 +752,7 @@ class InnerProductTreesSequencer(
   // accepts on the last feed cycle of the previous compute).
   when(acceptCompute) {
     inflight(ifTail).accSel      := io.cmd.bits.accSel
+    inflight(ifTail).last        := io.cmd.bits.rows - 1.U
     inflight(ifTail).rowsWritten := 0.U
     inflightValid(ifTail)        := true.B
     ifTail                       := Mux(ifTail === (inflightDepth - 1).U, 0.U, ifTail + 1.U)
@@ -770,19 +776,21 @@ class InnerProductTreesSequencer(
   // reporting it would cost back-to-back commands on one register a cycle.
   // In its first phase, an FP32 transfer also reports m[r+2] and m[r+3].
   io.activeReads(0).valid := p0CmdValid && !p0Boundary
-  io.activeReads(0).bits  := reg0(p0Cmd, p0Row + 1.U)
+  io.activeReads(0).bits  := reg0(p0Cmd, nextStep(p0Cmd, p0Row))
   io.activeReads(1).valid := p1CmdValid && !p1Boundary
-  io.activeReads(1).bits  := reg1(p1Cmd, p1Row + 1.U)
-  io.activeReads(2).valid := io.activeReads(0).valid && p0Cmd.op === MxuOp.PushAccFP32 && !phase(p0Row + 1.U).asBool
+  io.activeReads(1).bits  := reg1(p1Cmd, nextStep(p1Cmd, p1Row))
+  io.activeReads(2).valid := io.activeReads(0).valid && p0Cmd.op === MxuOp.PushAccFP32 &&
+                             !phase(nextStep(p0Cmd, p0Row)).asBool
   io.activeReads(2).bits  := p0Cmd.mregId + 2.U
   io.activeReads(3).valid := io.activeReads(2).valid
   io.activeReads(3).bits  := p0Cmd.mregId + 3.U
 
   io.activeWrites(0).valid := w0CmdValid && !w0Boundary
-  io.activeWrites(0).bits  := reg0(w0Cmd, w0Row + 1.U)
+  io.activeWrites(0).bits  := reg0(w0Cmd, nextStep(w0Cmd, w0Row))
   io.activeWrites(1).valid := w1CmdValid && !w1Boundary
-  io.activeWrites(1).bits  := reg1(w1Cmd, w1Row + 1.U)
-  io.activeWrites(2).valid := io.activeWrites(0).valid && w0Cmd.op === MxuOp.PopAccFP32 && !phase(w0Row + 1.U).asBool
+  io.activeWrites(1).bits  := reg1(w1Cmd, nextStep(w1Cmd, w1Row))
+  io.activeWrites(2).valid := io.activeWrites(0).valid && w0Cmd.op === MxuOp.PopAccFP32 &&
+                              !phase(nextStep(w0Cmd, w0Row)).asBool
   io.activeWrites(2).bits  := w0Cmd.mregId + 2.U
   io.activeWrites(3).valid := io.activeWrites(2).valid
   io.activeWrites(3).bits  := w0Cmd.mregId + 3.U

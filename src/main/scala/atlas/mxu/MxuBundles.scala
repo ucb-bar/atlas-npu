@@ -47,6 +47,7 @@ class MxuCmd(mregIdBits: Int) extends Bundle {
   val accSel     = Bool()               // Which accumulation buffer (0 or 1).
   val weightSlot = Bool()               // Which weight slot (0 or 1).
   val scaleE8M0  = UInt(8.W)            // E8M0 block-scaling factor (PopAccFP8, PopAccBF16Scaled).
+  val rows       = UInt(5.W)            // Row count M, 0 for 32: rows 0..M-1 (PushWeight: all).
 }
 
 // ============================================================================
