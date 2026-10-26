@@ -26,7 +26,7 @@ Interlocked hazard model:
 
 Scalar stores are pipelined masked writes (no RMW).
 Scalar loads have fixed 3-cycle latency.
-VLOAD/VSTORE have fixed mregRows+2 cycle latency.
+VLOAD/VSTORE have fixed M+2 cycle latency (M: the row count that vsetm sets).
 Scalar, VLOAD, and VSTORE LSU paths operate concurrently; the interlock keeps
 them off each other's VMEM banks (asserted in Vmem).
 */
@@ -90,6 +90,10 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   val scalarMemCmdValid  = RegInit(false.B)
 
   val delayCounter = RegInit(0.U(12.W))
+
+  // M, the row count of the tensor instructions: vsetm sets it; it is 32 (held as 0) after reset
+  // and at every start. Each unit takes it from the command at issue, so vsetm adds no hazard.
+  val rows = RegInit(0.U(5.W))
 
   // ==============================================================
   // Helper functions
@@ -191,6 +195,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
     cmd.accSel     := Mux(pop, d.vs2(0), d.vd(0))
     cmd.weightSlot := Mux(mxuOp(d, MXU_MATMUL, MXU_MATMUL_ACC), d.vs2(0), d.vd(0))
     cmd.scaleE8M0  := Mux(mxuOp(d, MXU_POP_FP8, MXU_POP_BF16_SCALED), scaleRF.io.regs(d.vs1(4, 0)), 0.U)
+    cmd.rows       := rows
     cmd
   }
 
@@ -360,8 +365,8 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // ── VMEM banks ──
   // The LSU scalar and vector paths must never use one VMEM bank in the
   // same cycle (Vmem asserts). Scalar accesses reach VMEM the cycle after
-  // issue; vloadBusy / vstoreBusy cover the VLOAD reads (T+1..T+32) and
-  // VSTORE writes (T+3..T+34).
+  // issue; vloadBusy / vstoreBusy cover the VLOAD reads (T+1..T+M) and
+  // VSTORE writes (T+3..T+M+2).
   private val vecWordOffBits = log2Ceil(spP.wordsPerLine)
   private def bankIn(p: Valid[UInt], b: UInt): Bool = p.valid && p.bits === b
   val vlBank = io.lsu_vload_vmem_bank
@@ -486,7 +491,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   // are asserted in Vmem.
 
   // ==============================================================
-  // Delay counter
+  // Delay counter and row count
   // ==============================================================
 
   when(reset.asBool || halt_now || hostStart) {
@@ -496,6 +501,9 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   }.elsewhen(delayCounter =/= 0.U) {
     delayCounter := delayCounter - 1.U
   }
+
+  // vsetm: imm16[4:0] holds M - 1.
+  when(s1_fire && dec.is_vsetm) { rows := dec.vi_imm(4, 0) + 1.U }
 
   // ==============================================================
   // Instruction hold across frontend stalls
@@ -693,6 +701,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   io.vpuCmd.bits.vs1        := dec.vs1
   io.vpuCmd.bits.vs2        := dec.vs2
   io.vpuCmd.bits.imm        := Mux(dec.vpu_src === VSRC_XREG, rs2_data(31, 16), dec.vi_imm)
+  io.vpuCmd.bits.rows       := rows
 
   io.xluCmd.valid        := is_xlu_launch
   io.xluCmd.bits.op      := dec.xlu_cmd
@@ -704,6 +713,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   io.lsuCmd.bits.op           := dec.lsu_cmd
   io.lsuCmd.bits.mregBank     := dec.vd
   io.lsuCmd.bits.vmemLineAddr := alu_result(spP.lineAddrBits + lineOffBits - 1, lineOffBits)
+  io.lsuCmd.bits.rows         := rows
 
   io.scaleRegs := scaleRF.io.regs
   io.halted    := halt_now
@@ -711,6 +721,7 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
   when(hostStart) {
     halted          := false.B
     dmaBaseReg      := 0.U
+    rows            := 0.U
     s1_hold_active  := false.B
     s1_instr_hold   := 0.U
     memLoadPending  := false.B

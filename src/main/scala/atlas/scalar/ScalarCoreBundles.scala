@@ -59,6 +59,7 @@ class MxuCmd extends Bundle {
   val accSel     = Bool()
   val weightSlot = Bool()
   val scaleE8M0  = UInt(8.W)
+  val rows       = UInt(5.W)    // the row count M, 0 for 32
 }
 
 class VpuCmd extends Bundle {
@@ -69,6 +70,7 @@ class VpuCmd extends Bundle {
   val vs2       = UInt(6.W)
   val imm       = UInt(16.W)   // vli.*: the immediate; .vx: the BF16 bits x[rs2][31:16]
   val scaleE8M0 = UInt(8.W)
+  val rows      = UInt(5.W)    // the row count M, 0 for 32
 }
 
 class XluCmd extends Bundle {
@@ -81,6 +83,7 @@ class LsuCmd(vmemP: VmemParams) extends Bundle {
   val op           = UInt(3.W)
   val mregBank     = UInt(6.W)
   val vmemLineAddr = UInt(vmemP.lineAddrBits.W)
+  val rows         = UInt(5.W)    // the row count M, 0 for 32
 }
 
 class ScalarCoreIO(spP: VmemParams) extends Bundle {

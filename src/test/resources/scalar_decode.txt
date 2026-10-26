@@ -53,6 +53,7 @@ SW op2=IMM imm=S mem=SW rs1_ren rs2_ren
 SELD op2=ZERO mem=SELD rs1_ren
 SELI sc=SELI
 DELAY sc=DELAY
+VSETM sc=VSETM
 VLOAD op2=IMM imm=VLS lsu=VLOAD rs1_ren
 VSTORE op2=IMM imm=VLS lsu=VSTORE rs1_ren
 VLOAD_SCALE op2=IMM imm=VLS lsu=VLOAD_SCALE rs1_ren

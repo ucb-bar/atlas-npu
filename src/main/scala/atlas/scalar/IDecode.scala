@@ -58,6 +58,7 @@ object IDecode {
     JAL   -> List(Y, ALU_ADD,    BR_X, OP1_PC,  OP2_IMM, IMM_J, Y, Y, N, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_X, XR_D, VSRC_X),
     JALR  -> List(Y, ALU_ADD,    BR_X, OP1_RS1, OP2_IMM, IMM_I, Y, N, Y, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_X, XR_D1, VSRC_X),
     DELAY -> List(Y, ALU_X,      BR_X, OP1_X,   OP2_X,   IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_DELAY, XR_N, VSRC_X),
+    VSETM -> List(Y, ALU_X,      BR_X, OP1_X,   OP2_X,   IMM_X, N, N, N, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_VSETM, XR_N, VSRC_X),
     LUI   -> List(Y, ALU_PASS_B, BR_X, OP1_X,   OP2_IMM, IMM_U, Y, N, N, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_X, XR_D, VSRC_X),
     AUIPC -> List(Y, ALU_ADD,    BR_X, OP1_PC,  OP2_IMM, IMM_U, Y, N, N, CSR_X, DMA_X, N, VPU_X, XLU_X, MEM_X, LSU_X, SC_X, XR_D, VSRC_X),
 

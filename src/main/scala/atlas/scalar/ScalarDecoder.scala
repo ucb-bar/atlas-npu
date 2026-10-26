@@ -60,6 +60,7 @@ class DecodedInstr extends Bundle {
   val is_ecall     = Bool()   // environment call (halt)
   val is_ebreak    = Bool()   // breakpoint (halt)
   val is_delay     = Bool()   // frontend delay (stall for imm cycles)
+  val is_vsetm     = Bool()   // sets the row count M
 }
 
 /** Combinational decoder for the scalar ISA plus Atlas custom extensions. */
@@ -167,6 +168,7 @@ class ScalarDecoder extends Module {
   // ebreak: fixed encoding 0x00100073
   dec.is_ebreak := dec.legal && io.instr === "h00100073".U
   dec.is_delay  := cs(16) === SC_DELAY
+  dec.is_vsetm  := cs(16) === SC_VSETM
 
   io.decoded := dec
 }

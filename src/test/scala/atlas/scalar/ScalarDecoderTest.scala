@@ -83,7 +83,8 @@ class ScalarDecoderTest extends AnyFlatSpec {
       val cmd = d.mxu_cmd.peek().litValue
       s"${if (d.mxu_sel.peek().litValue == 1) "mxu1" else "nv"}=${mxuNames.getOrElse(cmd, cmd.toString)}"
     }
-    val sc = Seq("sc=SELI" -> d.is_seli, "sc=DELAY" -> d.is_delay).collect { case (f, b) if set(b) => f }
+    val sc = Seq("sc=SELI" -> d.is_seli, "sc=DELAY" -> d.is_delay, "sc=VSETM" -> d.is_vsetm)
+      .collect { case (f, b) if set(b) => f }
     (values ++ flags ++ mxu ++ sc).mkString(" ")
   }
 

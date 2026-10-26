@@ -155,6 +155,7 @@ object ScalarISA {
   val SC_NONE  = 0.U(2.W)
   val SC_SELI  = 1.U(2.W)
   val SC_DELAY = 2.U(2.W)
+  val SC_VSETM = 3.U(2.W)
   val SC_X     = 0.U(2.W)
 
   // ── x-register fields (3-bit): bit 2 rd, bit 1 rs2, bit 0 rs1 ───────
