@@ -773,8 +773,11 @@ class InnerProductTreesSequencer(
   // ── Active mreg bank reports ──
   // A port is reported while it will still access its bank after this cycle.
   // On a boundary cycle the last row has already been requested (read) or is
-  // written this cycle (pop), so a command issued now cannot collide with it;
-  // reporting it would cost back-to-back commands on one register a cycle.
+  // written this cycle (pop); a command issued now reads only row 0 in this
+  // cycle, so it cannot collide with it, and reporting it would cost
+  // back-to-back commands on one register a cycle. A pop of one row (M = 1)
+  // writes row 0 in each step: it reports the registers of its current step
+  // instead, also on its last step, so that no read of row 0 meets the write.
   // In its first phase, an FP32 transfer also reports m[r+2] and m[r+3].
   io.activeReads(0).valid := p0CmdValid && !p0Boundary
   io.activeReads(0).bits  := reg0(p0Cmd, nextStep(p0Cmd, p0Row))
@@ -786,12 +789,15 @@ class InnerProductTreesSequencer(
   io.activeReads(3).valid := io.activeReads(2).valid
   io.activeReads(3).bits  := p0Cmd.mregId + 3.U
 
-  io.activeWrites(0).valid := w0CmdValid && !w0Boundary
-  io.activeWrites(0).bits  := reg0(w0Cmd, nextStep(w0Cmd, w0Row))
-  io.activeWrites(1).valid := w1CmdValid && !w1Boundary
-  io.activeWrites(1).bits  := reg1(w1Cmd, nextStep(w1Cmd, w1Row))
+  val w0OneRow = w0Cmd.rows === 1.U
+  val w1OneRow = w1Cmd.rows === 1.U
+  val w0Step   = Mux(w0OneRow, w0Row, nextStep(w0Cmd, w0Row))
+  io.activeWrites(0).valid := w0CmdValid && (!w0Boundary || w0OneRow)
+  io.activeWrites(0).bits  := reg0(w0Cmd, w0Step)
+  io.activeWrites(1).valid := w1CmdValid && (!w1Boundary || w1OneRow)
+  io.activeWrites(1).bits  := reg1(w1Cmd, Mux(w1OneRow, w1Row, nextStep(w1Cmd, w1Row)))
   io.activeWrites(2).valid := io.activeWrites(0).valid && w0Cmd.op === MxuOp.PopAccFP32 &&
-                              !phase(nextStep(w0Cmd, w0Row)).asBool
+                              !phase(w0Step).asBool
   io.activeWrites(2).bits  := w0Cmd.mregId + 2.U
   io.activeWrites(3).valid := io.activeWrites(2).valid
   io.activeWrites(3).bits  := w0Cmd.mregId + 3.U

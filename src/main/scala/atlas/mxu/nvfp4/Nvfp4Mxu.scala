@@ -425,13 +425,18 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   io.activeReads(3).valid := e1v && !e1Boundary && e1.op === PushAccFP32 && !phase(e1Next).asBool
   io.activeReads(3).bits  := e1.mregId + 3.U
 
-  val wPh = Mux(w.op === PopFP32, phase(wNext) << 1, 0.U)
-  io.activeWrites(0).valid := wv && !wBoundary
+  // A pop of one row writes row 0 in each step, which a reader issued in that cycle would read
+  // during the write: it reports the registers of its current step, also on its last step.
+  val wOneRow = w.rows === 1.U
+  val wStep   = Mux(wOneRow, wn, wNext)
+  val wActive = wv && (!wBoundary || wOneRow)
+  val wPh = Mux(w.op === PopFP32, phase(wStep) << 1, 0.U)
+  io.activeWrites(0).valid := wActive
   io.activeWrites(0).bits  := w.mregId + wPh
-  io.activeWrites(1).valid := wv && !wBoundary
+  io.activeWrites(1).valid := wActive
   io.activeWrites(1).bits  := w.mregId + wPh + 1.U
-  io.activeWrites(2).valid := wv && !wBoundary && w.op === PopFP32 && !phase(wNext).asBool
+  io.activeWrites(2).valid := wActive && w.op === PopFP32 && !phase(wStep).asBool
   io.activeWrites(2).bits  := w.mregId + 2.U
-  io.activeWrites(3).valid := wv && !wBoundary && w.op === PopFP32 && !phase(wNext).asBool
+  io.activeWrites(3).valid := wActive && w.op === PopFP32 && !phase(wStep).asBool
   io.activeWrites(3).bits  := w.mregId + 3.U
 }
