@@ -248,9 +248,12 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false, dmaP: DmaParams = D
   // stream one pair.
   val vpuSourceBankClash = vpuIsTwoInput(dec.vpu_cmd) && dec.vpu_src === VSRC_PAIR &&
     dec.vs1(4, 0) === dec.vs2(4, 0) && dec.vs1 =/= dec.vs2
+  // vpack.bf16.fp8 writes rows of m[vd] before it has read them as m[vs2+1]: vd = vs2 + 1 is illegal.
+  val vpackOverlap = dec.vpu_cmd === VPU_FP8PACK && dec.vd === dec.vs2 + 1.U
   // A CSR instruction is illegal on an unmapped CSR, or when it writes a read-only one.
   val csrIllegal = dec.is_csr && io.csrPort.illegal
-  val is_illegal = s1_valid && (dec.illegal || unitAbsent || vpuSourceBankClash || csrIllegal)
+  val is_illegal = s1_valid &&
+    (dec.illegal || unitAbsent || vpuSourceBankClash || vpackOverlap || csrIllegal)
 
   // ==============================================================
   // ALU + Branch
