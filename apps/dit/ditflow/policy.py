@@ -162,29 +162,34 @@ class EncoderEmitter:
             n = v.patches(size)
             rows = n + v.prefix
             rt = -(-rows // 64) * 2                        # even number of row tiles
-            patches = L.pad2(V.patchify(img, v.patch), rt * 32, 3 * v.patch * v.patch)
+            per = -(-rows // rt)                           # tokens per row tile: the view's row count M
+            spread = lambda t: L.pad2(L.spread(t, per), rt * 32, t.shape[1])
+            patches = spread(V.patchify(img, v.patch))
             cos, sin = V.rope_tables(v, size)
-            ctab, stab = torch.ones(rt * 32, 32), torch.zeros(rt * 32, 32)
-            ctab[:n], stab[:n] = cos, sin                  # prefix and padding rows: no rotation
-            self_mask = torch.zeros(32, rt * 32)
-            self_mask[:, rows:] = -30000.0                 # keys: patches and prefix tokens
-            pool_mask = torch.zeros(32, rt * 32)
-            pool_mask[:, n:] = -30000.0                    # keys: patch tokens only
-            pre_tile = n // 32
-            assert (n + v.prefix - 1) // 32 == pre_tile, "prefix tokens must share one row tile"
+            ctab = torch.cat([cos, torch.ones(v.prefix, 32)])      # prefix rows: no rotation;
+            stab = torch.cat([sin, torch.zeros(v.prefix, 32)])     # padding rows 0, so K = 0 there
+            keys = spread(torch.ones(rows, 1)).flatten()
+            mask = lambda valid: torch.where(valid > 0, 0.0, -30000.0).expand(32, -1)
+            self_mask = mask(keys)                         # keys: patches and prefix tokens
+            pool_mask = mask(spread(torch.ones(n, 1)).flatten())   # keys: patch tokens only
+            pre_tile = n // per
+            assert (n + v.prefix - 1) // per == pre_tile, "prefix tokens must share one row tile"
             corr = torch.zeros(32, h)                      # prefix rows: token - bias (their input is 0)
-            first = n - pre_tile * 32
+            first = n - pre_tile * per
             corr[first] = p["cls"] - p["pe.b"]
             corr[first + 1:first + v.prefix] = p["reg"] - p["pe.b"]
             self.view_data.append({
-                "name": name, "n": n, "rt": rt, "pre_tile": pre_tile,
+                "name": name, "n": n, "rt": rt, "per": per, "pre_tile": pre_tile,
                 "patches": b.dram.add(f"{name}.patches", L.bf16_bytes(patches)),
-                "cos": b.dram.add(f"{name}.cos", L.bf16_bytes(ctab)),
-                "sin": b.dram.add(f"{name}.sin", L.bf16_bytes(stab)),
+                "cos": b.dram.add(f"{name}.cos", L.bf16_bytes(spread(ctab))),
+                "sin": b.dram.add(f"{name}.sin", L.bf16_bytes(spread(stab))),
                 "self_mask": b.dram.add(f"{name}.self_mask", L.bf16_bytes(self_mask)),
                 "pool_mask": b.dram.add(f"{name}.pool_mask", L.bf16_bytes(pool_mask)),
                 "corr": b.dram.add(f"{name}.corr", L.bf16_bytes(corr)),
             })
+            if per < 32:                                   # pool K: 0 in padding rows
+                self.view_data[-1]["kpad"] = b.dram.add(f"{name}.kpad", L.bf16_bytes(
+                    keys[:, None].expand(-1, 32)))
         # ---- VMEM: outputs (kept for the DiT), then the working set ----
         self.outs = [b.vmem.tensor(f"{vd['name']}.pooled", 32, v.token_dim, "bf16") for vd in self.view_data]
         self.mark = b.vmem.mark()
@@ -207,6 +212,7 @@ class EncoderEmitter:
         self.self_mask = T("enc.self_mask", 32, RT * 32, "bf16")
         self.pool_mask = T("enc.pool_mask", 32, RT * 32, "bf16")
         self.corr = T("enc.corr", 32, h, "bf16")
+        self.kpad = T("enc.kpad", RT * 32, 32, "bf16")
         self.lp = {n: T(f"enc.{n}", 32, h, "bf16") for n in LAYER_P}
         assert self.lp["ls2"].tile(0, 0) == self.lp["ln1.w"].tile(0, 0) + self.p_bytes - HT * L.BF16_TILE
         self.st = {n: T(f"enc.{n}", 32, h, "bf16") for n in self.statics}
@@ -248,15 +254,18 @@ class EncoderEmitter:
         view = lambda t, r=rows: Tensor(t.name, t.addr, r, t.cols, t.kind)
         cview = lambda t, c=rows: Tensor(t.name, t.addr, t.rows, c, t.kind)
         x, xq, attnq = view(self.x), view(self.xq), view(self.attnq)
-        cos, sin = view(self.cos), view(self.sin)
+        cos, sin, kpad = view(self.cos), view(self.sin), view(self.kpad) if "kpad" in vd else None
         smask, pmask = cview(self.self_mask), cview(self.pool_mask)
         scratch = {"qbuf": view(self.scratch["qbuf"]), "kbuf": view(self.scratch["kbuf"]),
                    "vtbuf": cview(self.scratch["vtbuf"]), "pbuf": cview(self.scratch["pbuf"]),
                    "sbuf": cview(self.scratch["sbuf"])}
-        b.prog.comment(f"---- view {vd['name']}: {vd['n']} patches, {vd['rt']} row tiles ----")
-        for t, key in ((cos, "cos"), (sin, "sin"), (smask, "self_mask"), (pmask, "pool_mask"), (self.corr, "corr")):
-            b.dma.load(f"view{vi}", t.addr, vd[key], t.nbytes)
+        b.prog.comment(f"---- view {vd['name']}: {vd['n']} patches, {vd['rt']} row tiles of {vd['per']} ----")
+        for t, key in ((cos, "cos"), (sin, "sin"), (smask, "self_mask"), (pmask, "pool_mask"), (self.corr, "corr"),
+                       (kpad, "kpad")):
+            if key in vd:
+                b.dma.load(f"view{vi}", t.addr, vd[key], t.nbytes)
         b.dma.wait(f"view{vi}")
+        b.vsetm(vd["per"])
 
         # Patches: BF16 rows streamed from DRAM through the staging buffers, quantized to FP8.
         kp = 3 * v.patch * v.patch
@@ -334,7 +343,7 @@ class EncoderEmitter:
         lk.attention_rows(self.qp, 0, kv, 0, HT, v.heads, None, pmask, self.pattn,
                           a["pool.q"], a["pool.k"], a["pool.v"], a["pool.p"], a["pool.attn"],
                           {n: Tensor(t.name, t.addr, v.queries if n == "qbuf" else t.rows, t.cols, t.kind)
-                           for n, t in scratch.items()}, q_rows=v.queries)
+                           for n, t in scratch.items()}, q_rows=v.queries, kpad=kpad)
         b.vsetm(v.queries)
         lin = self.lin["pool.out"]
         lk.linear_rows(lin, lin.addr, self.pattn, a["pool.attn"] + lin.a_w, [Stream("pooled", self.pooled)],

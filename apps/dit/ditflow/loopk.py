@@ -214,13 +214,13 @@ class LoopKernels:
     def attention_rows(self, q: Tensor, q_ct0: int, kv: Tensor, k_ct0: int, v_ct0: int, heads: int,
                        rope: tuple[Tensor, Tensor] | None, masks: Tensor, out: Tensor,
                        a_q: int, a_k: int, a_v: int, a_p: int, a_out: int, scratch: dict,
-                       q_rows: int | None = None) -> None:
+                       q_rows: int | None = None, kpad: Tensor | None = None) -> None:
         """Multi-head attention with head_dim 64: out[:, 64h:64h+64] = FP8(softmax(q k^T / 8) v / 2**a_out).
         q rows and kv rows may differ (cross-attention): the query side runs at M = q_rows (default:
         the caller's M). K and V become a weight and V^T, which read 32 rows, so they are computed at
         32 rows: kv's padding rows must give finite K and V, and K = 0 under a padding key's mask
-        (rope's padding rows 0). rope (cos, sin per kv/q row, applied to q and k when q is kv) or
-        None. masks: one BF16 tile per key tile (row 0), added to
+        (rope's padding rows 0, or kpad: 1 per kv row, 0 in a padding row, multiplies K). rope
+        (cos, sin per kv/q row, applied to q and k when q is kv) or None. masks: one BF16 tile per key tile (row 0), added to
         the scores. scratch: FP8 tensors qbuf [q rows x 64], kbuf [kv rows x 64], vtbuf [64 x kv
         rows] (V^T), pbuf [32 x kv rows], and BF16 sbuf [32 x kv rows]."""
         b, k, regs = self.b, self.k, self.b.regs
@@ -234,7 +234,7 @@ class LoopKernels:
             b.prog.comment(f"attention_rows head {h}")
             # ---- K and V at 32 rows, then Q, for every row tile ----
             b.vsetm(32)
-            self._prep_rows(kv, k_ct0 + 2 * h, kbuf, raw_k, rope)
+            self._prep_rows(kv, k_ct0 + 2 * h, kbuf, raw_k, rope, kpad)
             self._prep_vt(kv, v_ct0 + 2 * h, vtbuf, raw_v)
             b.vsetm(q_rows or rows)
             self._prep_rows(q, q_ct0 + 2 * h, qbuf, raw_q, rope if q is kv else None)
@@ -306,26 +306,33 @@ class LoopKernels:
             b.xrelease(pq, po)
             b.vsetm(rows)
 
-    def _prep_rows(self, src: Tensor, ct0: int, dst: Tensor, raw: int, rope) -> None:
-        """dst row r = FP8 of src tiles (r, ct0), (r, ct0 + 1), rotated by rope when given."""
+    def _prep_rows(self, src: Tensor, ct0: int, dst: Tensor, raw: int, rope, pad: Tensor | None = None) -> None:
+        """dst row r = FP8 of src tiles (r, ct0), (r, ct0 + 1), rotated by rope or multiplied by pad
+        (1 or 0 per row), if one of them is given."""
         b, k, regs = self.b, self.k, self.b.regs
         p_src, p_dst = b.xreg(), b.xreg()
         self.ptr(p_src, src.tile(0, ct0))
         self.ptr(p_dst, dst.tile(0, 0))
         steps = [(p_src, src.ct * src.tile_bytes // 4), (p_dst, 2 * FP8_TILE // 4)]
-        if rope is not None:
-            p_c, p_s = b.xreg(), b.xreg()
-            self.ptr(p_c, rope[0].tile(0, 0))
-            self.ptr(p_s, rope[1].tile(0, 0))
-            steps += [(p_c, rope[0].tile_bytes // 4), (p_s, rope[1].tile_bytes // 4)]
+        tables = rope or ((pad,) if pad is not None else ())
+        p_t = [b.xreg() for _ in tables]
+        for p, t in zip(p_t, tables):
+            self.ptr(p, t.tile(0, 0))
+            steps.append((p, t.tile_bytes // 4))
         with b.loop(src.rt, steps=steps):
             a1, a2 = regs.pair(), regs.pair()
             b.vload2(a1, Ptr(p_src, 0))
             b.vload2(a2, Ptr(p_src, src.tile_bytes))
+            if pad is not None:
+                c = regs.pair()
+                b.vload2(c, Ptr(p_t[0], 0))
+                b.v("vmul.bf16", f"m{a1}", f"m{a1}", f"m{c}")
+                b.v("vmul.bf16", f"m{a2}", f"m{a2}", f"m{c}")
+                regs.release(pairs=(c,))
             if rope is not None:
                 c, s, t1, t2 = regs.pair(), regs.pair(), regs.pair(), regs.pair()
-                b.vload2(c, Ptr(p_c, 0))
-                b.vload2(s, Ptr(p_s, 0))
+                b.vload2(c, Ptr(p_t[0], 0))
+                b.vload2(s, Ptr(p_t[1], 0))
                 b.v("vmul.bf16", f"m{t1}", f"m{a1}", f"m{c}")
                 b.v("vmul.bf16", f"m{t2}", f"m{a2}", f"m{s}")
                 b.v("vsub.bf16", f"m{t1}", f"m{t1}", f"m{t2}")
@@ -339,7 +346,7 @@ class LoopKernels:
                 k.quant_store(a1, 0, Ptr(p_dst, 0), raw)
                 k.quant_store(a2, 1, Ptr(p_dst, FP8_TILE), raw)
             regs.release(pairs=(a1, a2))
-        b.xrelease(p_src, p_dst, *((p_c, p_s) if rope is not None else ()))
+        b.xrelease(p_src, p_dst, *p_t)
 
     def _prep_vt(self, src: Tensor, ct0: int, vtbuf: Tensor, raw: int) -> None:
         """vtbuf tile (dd, r) = transpose of FP8 src tile (r, ct0 + dd): rows head dims, columns keys."""
