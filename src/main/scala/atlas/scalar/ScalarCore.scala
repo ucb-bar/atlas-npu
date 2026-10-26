@@ -36,7 +36,7 @@ package atlas.scalar
 import chisel3._
 import chisel3.util._
 import ScalarISA._
-import atlas.common.VmemParams
+import atlas.common.{DmaParams, VmemParams}
 import atlas.lsu.LsuScalarCmd
 
 object AtlasMemMap {
@@ -58,8 +58,9 @@ object AtlasMemMap {
 }
 
 /** @param hasNvfp4  the NVFP4 MXU and scale sidecar are present (.nv and *.scale legal)
+  * @param dmaP      the DMA engine's transfer sizes (a DMA transfer of another size is illegal)
   */
-class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
+class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false, dmaP: DmaParams = DmaParams()) extends Module {
   val io = IO(new ScalarCoreIO(spP))
 
   val pc_ctrl    = Module(new PcControl(0))
@@ -419,8 +420,13 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false) extends Module {
 
   val stall   = delay_stall || dma_wait_stall || interlock
 
-  // A misaligned target is checked in the cycle the jump would issue, when its sources are current.
-  val illegal_detected = is_illegal || (redirect && !stall && target_bit1)
+  // A DMA transfer of x[rs2] bytes needs a multiple of beatBytes from beatBytes to maxTransferBytes.
+  val dmaSizeIllegal = isDmaXfer && (rs2_data === 0.U || rs2_data > dmaP.maxTransferBytes.U ||
+    rs2_data(log2Ceil(dmaP.beatBytes) - 1, 0) =/= 0.U)
+
+  // A misaligned target and a DMA size are checked in the cycle the instruction would issue, when
+  // its sources are current.
+  val illegal_detected = is_illegal || (s1_valid && !stall && ((redirect && target_bit1) || dmaSizeIllegal))
   val ecall_ebreak     = s1_valid && (dec.is_ecall || dec.is_ebreak)
   val hostStart        = io.execRunWrite && io.execRun
   val hostStop         = io.execRunWrite && !io.execRun

@@ -76,7 +76,7 @@ class AtlasCore(
   val imem    = Module(new InstrMem(imemBP))
   val csrfile = Module(new CSRFile(csrBP))
   val vmem    = Module(new Vmem(vmemP, vmemBP))
-  val scalar  = Module(new ScalarCore(vmemP, hasNvfp4 = tp.hasNvfp4))
+  val scalar  = Module(new ScalarCore(vmemP, hasNvfp4 = tp.hasNvfp4, dmaP = dmaP))
   val dma     = Module(new DmaEngine(tp, dmaBP))
   val lsu     = Module(new LSU(vmemP, mregP))
   // MXU slot 0: the NVFP4 MXU (on slot 0's MregFile ports), or nothing.

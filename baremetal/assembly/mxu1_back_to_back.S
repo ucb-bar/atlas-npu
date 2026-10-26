@@ -72,10 +72,15 @@
     vstore m20, 24(x10)
     vstore m21, 32(x10)
     vstore m22, 40(x10)
-    LI    x11, 0x90004000
-    LI    x3, 6144
+    LI    x11, 0x90004000               # a DMA transfer moves at most 4 KiB
+    LI    x3, 4096
     dma.store x11, x10, x3, ch4
+    LI    x11, 0x90005000
+    ADDI  x12, x10, 1024                # 4 KiB further in VMEM (word address)
+    LI    x3, 2048
+    dma.store x11, x12, x3, ch5
     dma.wait ch4
+    dma.wait ch5
 
 pass:
     ADDI  x1, x0, 1
