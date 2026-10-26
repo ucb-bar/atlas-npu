@@ -119,8 +119,9 @@ class ReduSumRec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 8) exte
             adder.io.b            := rightRaw
             adder.io.roundingMode := rmRegs(stageIdx - 1)
 
+            // Inf + -Inf is invalid: the rounder gives NaN (the raw sum is an infinity).
             val round = Module(new RoundRawFNToRecFN(BF16T.expWidth, intSigWidth, 0))
-            round.io.invalidExc   := false.B 
+            round.io.invalidExc   := adder.io.invalidExc
             round.io.infiniteExc  := false.B
             round.io.in           := adder.io.rawOut
             round.io.roundingMode := rmRegs(stageIdx - 1)
