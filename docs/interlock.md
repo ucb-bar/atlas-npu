@@ -17,8 +17,8 @@ instruction in S1 (`ScalarCore.scala`, section "Interlock"). They fall into two 
   reports whether it can accept the decoded command this cycle. A pipelined unit accepts a new
   instruction when the stage that instruction needs is free, not when the whole unit is idle.
   For example, MXU1 takes the next matmul on the last cycle of the previous activation feed,
-  with up to 2 in flight. Waiting for the unit to drain instead would cut it to one matmul per
-  35 cycles.
+  with up to 3 in flight. Waiting for the unit to drain instead would cut it to one matmul per
+  35 cycles at 32 rows.
 - **Data hazards.** Each MREG register is a resource with a read reservation and a write
   reservation. An instruction does not issue while a register it reads has a pending write
   (RAW), or while a register it writes has a pending read (WAR) or write (WAW). A reservation
@@ -55,10 +55,11 @@ The MXU sequencers' accept logic now also waits for these, which were only asser
 - a pop or `vmatmul.acc` of `accN` in the cycle a push writes row 0 of `accN`;
 - a pop of `accN` while a `vmatmul.acc` still reads its partial sums, and the reverse (one read
   port);
-- on mxu1, a pop of `accN` until an FP32 push has written row 0 in its second phase (T+34), and
-  a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase (T+33)
-  (docs/fp8-mxu.md). A matmul or `vmatmul.acc` of `accN` waits for the whole FP32 push (T+65),
-  because a matmul waits while a push to its accumulator is in flight.
+- on mxu1, a pop of `accN` until an FP32 push has written row 0 in its second phase (T+M+2), and
+  a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase (until T+M)
+  (docs/fp8-mxu.md). A matmul or `vmatmul.acc` of `accN` waits for the whole FP32 push (T+2M+1),
+  because a matmul waits while a push to its accumulator is in flight. M is the row count
+  (below); at 32 rows these are T+34, T+32 and T+65.
 
 To let back-to-back commands on one register keep their 32-cycle stride, the MXUs now report a
 port to the tracker only while it will still access its bank after the current cycle. The MXU
@@ -76,6 +77,27 @@ both operands.
 The `.vx` and `.vr` forms stream one pair, so this rule does not apply to them. A `.vr` reads row 0
 of T(vs2) on both VPU read ports in its issue cycle, before T(vs1) streams. So it waits until the
 other VPU slot has read its last row, and `issueBusy` has one vector for each `vpu_src`.
+
+### Row count M
+
+`vsetm` sets M, the number of rows that the tensor instructions after it use (npu_spec §3, Row
+Count). M is 32 after reset and at every start. The scalar core keeps M, and each unit takes it
+from the command at issue, so `vsetm` waits for nothing and adds no hazard. An instruction of M
+rows streams M rows of each register (2M of a BF16 tile) and reports each register only while it
+still accesses it, so it frees its registers earlier. There is no new reservation rule: a
+32-row reader of a register that an M-row instruction wrote still waits for that writer, a false
+dependency on rows M..31.
+
+One MXU rule depends on M. A matmul on an accumulator issues only after the previous matmul on
+it has written row 0; at 32 rows the 32-cycle stride gives this. With fewer rows, the next matmul
+on the accumulator issues max(M, L) cycles after the previous one: L = 4 on mxu1 (row 0 lands at
+T+3) and L = 8 on the NVFP4 MXU (row 0 lands at T+7, behind an input register and the lanes' 5
+cycles). Matmuls on alternating accumulators issue every M cycles, and on mxu1 the in-flight FIFO
+has 3 entries (the IPT latency + 1). An entry retires after M writebacks, and a matmul waits while
+the FIFO is full. `Mxu1RowsTest`, `Nvfp4RowsTest`, `VectorEngineRowsTest` and `LsuRowsTest` check
+each unit at M = 1, 2, 3, 6, 7, 31 and 32; the baremetal tests `vpu_rows`, `mxu1_rows`,
+`nvfp4_rows` and `lsu_rows` each instruction class at several M, with no `DELAY`; and
+`hazard_rows` and the random hazfuzz programs the interlock.
 
 ### Scalar registers
 
@@ -117,7 +139,8 @@ The results below date from 2026-10-21 to 2026-10-23 and name the configurations
 `apps/dit/ditflow/hazfuzz.py` generates random streams of dependent tensor instructions with no
 `DELAY`: `vload`, `vstore`, VPU arithmetic (with the `.vx` and `.vr` forms; a `.vx` often reads x4
 right after a scalar load writes it), `vgelu.bf16` and row reductions, MXU push, matmul and pop, XLU
-transposes, and the NVFP4 2- and 4-register transfers. They run over 20 registers, including
+transposes, and the NVFP4 2- and 4-register transfers, under row counts that `vsetm` sets (M = 1,
+2, 3, values near the matmul spacing of each MXU, 31 and 32). They run over 20 registers, including
 ones that share a physical bank. Each next instruction is biased to read or overwrite what the
 previous ones touched. The expected DRAM comes from the functional model, which runs in program
 order, the architectural meaning on an interlocked core. A `--spaced` copy of each program puts
@@ -143,6 +166,12 @@ so the model's arithmetic is off in these two corner cases. No program fails onl
 `DELAY`. With the ISA 2.0 numerics (VPU round to nearest even, FP32 `mxu1` accumulators), seeds
 1000 to 1063 on `default` give 65 / 65 (2026-10-25). So does `--seed 100 --count 8`, which
 failed the same way before (8 / 8, and 8 / 8 with `--spaced`).
+
+With the row count M (2026-10-25), the programs also run `vsetm`, and `--directed` adds
+`hazard_rows`. Each set of programs ran as `mxu1` programs on `default` and on `ipt-nvfp4`, and as
+`mxu1,nv` programs on `ipt-nvfp4`: the directed tests with 64 programs × 400 instructions (66 / 66
+in each run), 32 programs × 400 instructions of seed 7, and 24 programs × 500 instructions of each
+of seeds 1234 and 9001. All 438 pass.
 
 On the old RTL, the assertions came from three sources. Two-source VPU instructions named two
 pairs in one bank (now illegal). The MXU1 sequencer's push and pop checks counted an engine on

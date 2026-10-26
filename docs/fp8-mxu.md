@@ -188,21 +188,24 @@ column, with e = 127 for the plain pop. On all 2^32 FP32 inputs, e = 127 gives t
 one-adder form `(x + 0x7FFF + x[16]) >> 16` (NaN to `0x7FFF`) that the plain pop used before, and
 of `cvt.rn.bf16.f32`. No Vivado run checked the timing on the FPGA.
 
-The FP32 push and pop move an accumulator through Q in two phases of 32 steps, as the NVFP4
-MXU's FP32 transfers do (`docs/nvfp4-mxu.md`): phase h moves columns 16h..16h+15 through
-m[r+2h] (read or write port 0) and m[r+2h+1] (port 1). A push writes these columns with a
-column mask into the accumulator row. In phase 0 the unit also reports m[r+2] and m[r+3] to
-the interlock, as registers that it will still read or write.
+The FP32 push and pop move an accumulator through Q in two phases of M steps (M is the row
+count, 32 after a start), as the NVFP4 MXU's FP32 transfers do (`docs/nvfp4-mxu.md`): phase h
+moves columns 16h..16h+15 of rows 0..M-1 through m[r+2h] (read or write port 0) and m[r+2h+1]
+(port 1). A push writes these columns with a column mask into the accumulator row. In phase 0
+the unit also reports m[r+2] and m[r+3] to the interlock, as registers that it will still read or
+write.
 
 The unit accepts a command (`cmdReady`) under the v1 rules. For a matmul they are: the read port
-is free or on its last feed cycle, the in-flight FIFO (2 entries; an entry retires when the
-matmul's 32nd row lands) has room, no earlier matmul on the same accumulator still waits for its
-row 0 to land, no push writes its weight slot or accumulator, and no pop reads the accumulator
-for `vmatmul.acc`. With a latency of 2, the row-0 rule costs nothing at the 32-cycle stride:
-back-to-back `vmatmul.acc.mxu1` on one accumulator issue every 32 cycles, and row r of the next
-matmul reads C at T + 32 + r, after the previous matmul wrote it at T + 3 + r.
+is free or on its last feed cycle, the in-flight FIFO (3 entries, the latency + 1; an entry
+retires when the matmul's last row, row M - 1, lands) has room, no earlier matmul on the same
+accumulator still waits for its row 0 to land, no push writes its weight slot or accumulator, and
+no pop reads the accumulator for `vmatmul.acc`. With a latency of 2, row 0 lands at T + 3. At 32
+rows the row-0 rule costs nothing: back-to-back `vmatmul.acc.mxu1` on one accumulator issue every
+32 cycles, and row r of the next matmul reads C at T + 32 + r, after the previous matmul wrote it
+at T + 3 + r. With M rows they issue every max(M, 4) cycles, and row r of the next matmul reads C
+at T + max(M, 4) + r; matmuls on alternating accumulators issue every M cycles.
 
 Two rules come with the FP32 transfers. A pop or `vmatmul.acc` of an accumulator waits until an
-FP32 push has written row 0 in its second phase: for a push at T, from T + 34. A push or matmul
-to an accumulator waits while an FP32 pop of it is in its first phase, because the pop reads
-each row again in the second phase: for a pop at T, from T + 33.
+FP32 push has written row 0 in its second phase: for a push at T, from T + M + 2 (T + 34 at 32
+rows). A push or matmul to an accumulator waits while an FP32 pop of it is in its first phase,
+because the pop reads each row again in the second phase: for a pop at T, from T + M + 1.

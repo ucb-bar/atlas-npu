@@ -331,3 +331,9 @@ The other 125 tests keep their status, cycle count and performance counters on b
 configurations, with one exception: without `DELAY`, `mem_scalar` takes 105 cycles, not 107, and
 `scalar_vector_concurrent` counts 3 fewer x-register stall cycles. An instruction now waits for a
 pending scalar load only on the x-registers that it names (docs/interlock.md).
+
+Verilator, 2026-10-25, with the row count M (`vsetm`, docs/interlock.md): the suite has 137 tests.
+The 4 new tests are `vpu_rows`, `mxu1_rows`, `nvfp4_rows` and `lsu_rows`. With the original kernels
+and with every `DELAY` removed, `default` gives 137 / 137 as expected (117 pass, 20 illegal) and
+`ipt-nvfp4` 137 / 137 (126, 11). The other 133 tests do not set M: they keep their status, cycle
+count and performance counters on both configurations.

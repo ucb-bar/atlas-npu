@@ -199,22 +199,26 @@ row 6 cycles later (one input register plus the lanes' 5 cycles).
 
 | Operation | Ports | Steps | Next operation of the same kind |
 |---|---|---|---|
-| matmul | read 0 | 32 | issues on the last feed cycle: one matmul per 32 cycles |
+| matmul | read 0 | M | issues on the last feed cycle, on one accumulator 8 cycles or more after the previous one |
 | weight push | read 1 (or 0) | 32 | one weight push at a time |
-| acc push BF16 / FP32 | reads 0 + 1 | 32 / 64 | |
-| pop BF16 / FP32 | writes 0 + 1 | 32 / 64 | |
+| acc push BF16 / FP32 | reads 0 + 1 | M / 2M | |
+| pop BF16 / FP32 | writes 0 + 1 | M / 2M | |
 
-The unit accepts a command (`cmdReady`) when its engine is free and:
+M is the row count (32 after a start; `docs/interlock.md`): a command moves rows 0..M-1 of its
+accumulator and registers, and a weight push all 32 rows. The unit accepts a command (`cmdReady`)
+when its engine is free and:
 
-- matmul: no weight push still writes its slot, no acc push still writes its buffer, and no pop
-  still reads it;
+- matmul: no weight push still writes its slot, no acc push still writes its buffer, no pop still
+  reads it, and the previous matmul on the buffer has written row 0 (at T + 7, so that a matmul of
+  fewer than 8 rows does not read rows before they land);
 - weight push: no other weight push still writes (one write path), and the matmul feeding now does
   not read the slot;
 - acc push: no matmul feeds or writes back to the buffer, and no pop reads it;
 - pop: every matmul writeback to the buffer has landed, and no acc push still writes it.
 
 With these rules a weight push to one slot overlaps a matmul on the other, back-to-back
-`vmatmul.acc.nv` on one accumulator run at the 32-cycle stride, and the scalar core's interlock
+`vmatmul.acc.nv` on one accumulator run every max(M, 8) cycles (the 32-cycle stride at 32 rows),
+and the scalar core's interlock
 needs no `DELAY` (docs/interlock.md). The interlock also treats `vload.scale` / `vstore.scale`
 as VLOAD / VSTORE (same LSU path and VMEM bank), with no WAR exemption for `vload.scale`.
 
