@@ -113,8 +113,9 @@ class RVMulTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.clock.step(1)
 
             // Test data
-            val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 100)
-            val dataB = Seq.fill(16)(scala.util.Random.nextFloat() * 100)
+            val rng = new scala.util.Random(2)
+            val dataA = Seq.fill(16)(rng.nextFloat() * 100)
+            val dataB = Seq.fill(16)(rng.nextFloat() * 100)
 
             // Expected values from golden model
             val expected: Seq[Int] = goldenMul16(dataA, dataB)

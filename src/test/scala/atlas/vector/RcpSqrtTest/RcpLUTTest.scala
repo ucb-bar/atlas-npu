@@ -73,7 +73,7 @@ class RcpLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pee
   it should "give 1/x for x in (-4, -2]" in {
     val rawExp = 128
     val isOddExp = (((rawExp - 127) & 1) === 1)
-    PersistentVcsRcpLUTSimulator.simulate(new RcpLUT(16, 7, 9, 12)) { module =>
+    PersistentVcsRcpLUTSimulator.simulate(new RcpLUT(16, 7, AtlasFPType.BF16.lutValM, AtlasFPType.BF16.lutValN)) { module =>
       val dut = module.wrapped
       for (i <- 0 until 8) {
         for (k <- 0 until 16) {

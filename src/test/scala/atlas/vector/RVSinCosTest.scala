@@ -116,8 +116,8 @@ class RVSinCosTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             val pi_over_8 = (0.125 * Math.PI).toFloat
             val pi_over_6 = (Math.PI/ 6.0).toFloat
             val pi_over_12 = (Math.PI/ 12.0).toFloat
-            val dataA = Seq.fill(16)((scala.util.Random.nextFloat() * twoPi).toFloat)
-            // val dataA = Seq.fill(16)(scala.util.Random.nextInt(2).toFloat)
+            val rng = new scala.util.Random(1)
+            val dataA = Seq.fill(16)((rng.nextFloat() * twoPi).toFloat)
             // val dataA = Seq.fill(16)(pi_over_8)
 
             // Expected values from golden model

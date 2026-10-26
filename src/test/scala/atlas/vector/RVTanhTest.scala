@@ -115,8 +115,9 @@ class RVTanhTest extends AnyFlatSpec with Matchers with PeekPokeAPI {
             dut.clock.step(1)
 
             // Test data
-            val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 2)
-            val dataB = Seq.fill(16)(scala.util.Random.nextFloat() * 1000)
+            val rng = new scala.util.Random(3)
+            val dataA = Seq.fill(16)(rng.nextFloat() * 2)
+            val dataB = Seq.fill(16)(rng.nextFloat() * 1000)
 
             // Expected values from golden model
             val expected: Seq[Int] = goldenTanh16(dataA, dataB)

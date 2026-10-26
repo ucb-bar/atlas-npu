@@ -108,8 +108,9 @@ class RVLog2Test extends AnyFlatSpec with Matchers with PeekPokeAPI {
         PersistentVcsRVLog2Simulator.simulate(new Log(BF16)) { module =>
             val dut = module.wrapped
             // Test data
-            val dataA = Seq.fill(16)(scala.util.Random.nextFloat() * 1000)
-            val dataB = Seq.fill(16)(scala.util.Random.nextFloat() * 1000)
+            val rng = new scala.util.Random(4)
+            val dataA = Seq.fill(16)(rng.nextFloat() * 1000)
+            val dataB = Seq.fill(16)(rng.nextFloat() * 1000)
 
             // Expected values from golden model
             val expected: Seq[Int] = goldenLog16(dataA, dataB)

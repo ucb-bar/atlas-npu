@@ -73,7 +73,7 @@ class SqrtLUTTest extends AnyFlatSpec with HasSinCosParams with Matchers with Pe
   it should "give sqrt(x) for x in [2^13, 2^14)" in {
     val rawExp = 140
     val isOddExp = (((rawExp - 127) & 1) === 1)
-    PersistentVcsSqrtLUTSimulator.simulate(new SqrtLUT(16, 7, 9, 12)) { module =>
+    PersistentVcsSqrtLUTSimulator.simulate(new SqrtLUT(16, 7, AtlasFPType.BF16.lutValM, AtlasFPType.BF16.lutValN)) { module =>
       val dut = module.wrapped
       for (i <- 0 until 8) {
         for (k <- 0 until 16) {

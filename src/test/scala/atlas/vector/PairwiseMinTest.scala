@@ -109,7 +109,7 @@ class PairwiseMinTest extends AnyFlatSpec with HasSinCosParams with Matchers wit
           println("Output")
           printBF16Array(bf16Shorts, false)
           printBF16Array(expectedOutput, true)
-          checkVectorTolerance(bf16Shorts, expectedOutput, true) shouldBe true
+          bf16Shorts.toSeq shouldBe expectedOutput.toSeq
           checked += 1
           println("")
         }

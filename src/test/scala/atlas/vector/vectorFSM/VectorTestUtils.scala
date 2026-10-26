@@ -10,6 +10,8 @@ import scala.util.Random
 import scala.collection.mutable.ArrayBuffer
 
 object VectorTestUtils {
+    private val rng = new Random(1)
+
     // Float -> BF16 as Short (16 bits)
     def fpToBf16(f: Float): Short = {
         val x = java.lang.Float.floatToRawIntBits(f)
@@ -38,7 +40,7 @@ object VectorTestUtils {
 
     // Generate an array of 16 BF16 as Short (16 bits) range in [min, max)
     def randomBF16Vec(n: Int = 16, max: Int = 10, min: Int = -10, useInt: Boolean = false): Array[Short] = {
-        Array.fill(n) {val f = if (useInt) {(min + Random.nextInt(max - min)).toFloat} else {min + Random.nextFloat() * (max - min)}
+        Array.fill(n) {val f = if (useInt) {(min + rng.nextInt(max - min)).toFloat} else {min + rng.nextFloat() * (max - min)}
             fpToBf16(f)
         }
     }
@@ -563,8 +565,8 @@ object VectorTestUtils {
     def checkTolerance(
         actual: Short,
         expected: Short,
-        absTolerance: Float = 0.01f,    // Default Tolerance for now, adjust later
-        relTolerance: Float = 0.01f     // Default Tolerance for now, adjust later
+        absTolerance: Float = 0.01f,
+        relTolerance: Float = 0.01f
     ): (Boolean, Float, Float) = {
         val aFloat = bf16ToFp(actual)
         val eFloat = bf16ToFp(expected)
@@ -585,7 +587,8 @@ object VectorTestUtils {
         (pass, absError, relError)
     }
 
-    /* Vector Tolerance Checker: 
+    /* Vector Tolerance Checker, for the lane boxes that approximate a function (LUTs, exp, log,
+     * sin, cos, tanh); a test of an exact operation compares the bits instead:
      *  1. Check the length of the actual and expcted arrays match
      *  2. Call checkTolerance for each pair of element in the arrays
      *  3. Print message of any of the pairs fail
@@ -598,8 +601,8 @@ object VectorTestUtils {
         printPass: Boolean = false,
         printPrecision: Boolean = false,
         label: String = "Vector",
-        absTolerance: Float = 0.01f,    // Default Tolerance for now, adjust later
-        relTolerance: Float = 0.01f     // Default Tolerance for now, adjust later
+        absTolerance: Float = 0.01f,
+        relTolerance: Float = 0.01f
     ): Boolean = {
         require(
             actual.length == expected.length,
