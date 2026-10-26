@@ -289,11 +289,29 @@ def test_vsetm_ends_a_block_and_sets_the_costs_after_it():
     vpu = ["vadd.bf16 m4, m0, m2", "vexp.bf16 m6, m4"]
     assert issue_cycles(vpu) == [0, 66] and issue_cycles(vpu, rows=3) == [0, 8]          # 2M + 2
     mm = ["vmatmul.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m1, w0"]
-    assert issue_cycles(mm) == [0, 32, 64] and issue_cycles(mm, rows=2) == [0, 3, 5]
+    assert issue_cycles(mm) == [0, 32, 64] and issue_cycles(mm, rows=2) == [0, 4, 6]
     lsu = ["vload m4, 0(x20)", "vexp.bf16 m6, m4"]
     assert issue_cycles(lsu) == [0, 35] and issue_cycles(lsu, rows=5) == [0, 8]          # M + 3
     fp32 = ["vmatpush.acc.fp32.mxu1 acc0, m4", "vmatpop.bf16.acc.mxu1 m12, acc0"]
     assert issue_cycles(fp32, rows=3) == [0, 5]                                          # M + 2
+
+
+def test_machine_follows_the_rtl():
+    """Issue gaps measured on the RTL (Verilator, 2026-10-25), at 32 and at 3 rows."""
+    def gap(a, b, rows=32):
+        return issue_cycles([a, b], rows)[1]
+    assert gap("lh x13, 0(x20)", "ADDI x14, x13, 0") == 4
+    for a, reg, at32, at3 in [("vexp.bf16 m20, m10", 11, 64, 6), ("vadd.bf16 m20, m10, m12", 13, 64, 6),
+                              ("vgelu.bf16 m20, m10", 11, 64, 6), ("vadd.bf16.vr m20, m10, m12", 11, 65, 7),
+                              ("vadd.bf16.vr m20, m10, m12", 12, 1, 1), ("vredsum.bf16 m20, m10", 11, 128, 12),
+                              ("vredsum.row.bf16 m20, m10", 11, 32, 3), ("vtrpose.xlu m20, m10", 10, 34, 34)]:
+        load = f"vload m{reg}, 0(x20)"                  # the source is free
+        assert (gap(a, load), gap(a, load, 3)) == (at32, at3), a
+    assert gap("vexp.bf16 m20, m10", "vadd.bf16.vr m22, m12, m14") == 64
+    mm, push = "vmatmul.mxu1 acc0, m4, w1", "vmatpush.weight.mxu1 w1, m6"
+    assert (gap(push, mm), gap(push, mm, 3), gap(mm, push), gap(mm, push, 3)) == (32, 32, 32, 3)
+    for push, at32, at3 in [("vmatpush.acc.fp32.mxu1 acc0, m12", 65, 7), ("vmatpush.acc.bf16.mxu1 acc0, m10", 33, 4)]:
+        assert (gap(push, "vmatmul.acc.mxu1 acc0, m4, w0"), gap(push, "vmatmul.mxu1 acc0, m4, w0", 3)) == (at32, at3)
 
 
 def test_fp32_spill_and_scaled_pop_schedule():

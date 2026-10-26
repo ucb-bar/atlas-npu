@@ -40,24 +40,24 @@ WINDOW = 48                     # ready instructions considered at each step, in
 class Op:
     unit: str
     roles: str
-    lat: int = 1                # cycles from issue to the last write, inclusive, at 32 rows
+    lat: int = 1                # cycles from issue to the last write, inclusive (else latency())
     cls: str = ""               # VPU lane box: two ops of one class never share the VPU
-    reads: int = 0              # VPU: cycles from issue until the sources are free (2M + 1), if not lat - 1
 
 
-def _vpu(roles: str, cls: str, lat: int = 66, both: bool = False, reads: int = 0) -> Op:
-    return Op("vpu2" if both else "vpu", roles, lat, cls, reads)
+def _vpu(roles: str, cls: str, both: bool = False) -> Op:
+    return Op("vpu2" if both else "vpu", roles, cls=cls)
 
 
 # Operand roles: x scalar register, e scale register, m m-register, M BF16 pair (m, m+1), R row 0
 # of a BF16 pair (read in the issue cycle only), Q FP32 quad (m .. m+3), a accumulator, w weight
 # slot, each followed by r (read), w (write) or rw; v VMEM tile and s scalar VMEM access, both
 # imm(x), followed by r or w; c DMA channel; i immediate.
-# Latencies: npu-model/docs/rtl-timing.md and npu_model/hardware (vpu.py, mxu.py).
+# Latencies: npu-model/docs/rtl-timing.md and npu_model/hardware (vpu.py, mxu.py). A reader of a
+# scalar load's register issues 4 cycles after the load.
 OPS = {
     "LI": Op("alu", "xw i"), "ADDI": Op("alu", "xw xr i"), "ADD": Op("alu", "xw xr xr"),
     "seli": Op("alu", "ew i"), "dma.config": Op("alu", "xr c"),
-    "lh": Op("alu", "xw sr", 3), "sh": Op("alu", "xr sw"),
+    "lh": Op("alu", "xw sr", 4), "sh": Op("alu", "xr sw"),
     "vload": Op("vload", "mw vr", 35), "vstore": Op("vstore", "mr vw", 35),
     "dma.load": Op("dma", "xr xr xr c"), "dma.store": Op("dma", "xr xr xr c"),
     "dma.wait": Op("wait", "c"),
@@ -69,18 +69,18 @@ OPS = {
     "vadd.bf16.vx": _vpu("Mw Mr xr", "addsub"), "vsub.bf16.vx": _vpu("Mw Mr xr", "addsub"),
     "vmul.bf16.vx": _vpu("Mw Mr xr", "mul"), "vminimum.bf16.vx": _vpu("Mw Mr xr", "min"),
     "vmaximum.bf16.vx": _vpu("Mw Mr xr", "max"),
-    "vadd.bf16.vr": _vpu("Mw Mr Rr", "addsub", 67), "vsub.bf16.vr": _vpu("Mw Mr Rr", "addsub", 67),
-    "vmul.bf16.vr": _vpu("Mw Mr Rr", "mul", 67), "vminimum.bf16.vr": _vpu("Mw Mr Rr", "min", 67),
-    "vmaximum.bf16.vr": _vpu("Mw Mr Rr", "max", 67),
-    "vredsum.row.bf16": _vpu("Mw Mr", "addsub", 39, both=True),
-    "vredmax.row.bf16": _vpu("Mw Mr", "max", 34, both=True),
-    "vredsum.bf16": _vpu("Mw Mr", "csum", 130),
+    "vadd.bf16.vr": _vpu("Mw Mr Rr", "addsub"), "vsub.bf16.vr": _vpu("Mw Mr Rr", "addsub"),
+    "vmul.bf16.vr": _vpu("Mw Mr Rr", "mul"), "vminimum.bf16.vr": _vpu("Mw Mr Rr", "min"),
+    "vmaximum.bf16.vr": _vpu("Mw Mr Rr", "max"),
+    "vredsum.row.bf16": _vpu("Mw Mr", "addsub", both=True),
+    "vredmax.row.bf16": _vpu("Mw Mr", "max", both=True),
+    "vredsum.bf16": _vpu("Mw Mr", "csum"),
     "vsquare.bf16": _vpu("Mw Mr", "sqcb"), "vcube.bf16": _vpu("Mw Mr", "sqcb"),
     "vexp.bf16": _vpu("Mw Mr", "exp"), "vtanh.bf16": _vpu("Mw Mr", "tanh"),
     "vsin.bf16": _vpu("Mw Mr", "sincos"), "vcos.bf16": _vpu("Mw Mr", "sincos"),
     "vrecip.bf16": _vpu("Mw Mr", "rcp"), "vsqrt.bf16": _vpu("Mw Mr", "sqrt"),
-    "vgelu.bf16": _vpu("Mw Mr", "gelu", 75, reads=65),
-    "vli.all": _vpu("Mw i", "vli", 65), "vli.col": _vpu("mw i", "vli", 33),
+    "vgelu.bf16": _vpu("Mw Mr", "gelu"),
+    "vli.all": _vpu("Mw i", "vli"), "vli.col": _vpu("mw i", "vli"),
     "vtrpose.xlu": Op("xlu", "mw mr", 66),
     "vmatpush.weight.mxu1": Op("push", "ww mr", 33),
     "vmatpush.acc.bf16.mxu1": Op("pushacc", "aw Mr", 33),
@@ -123,6 +123,17 @@ def latency(ins: Ins) -> int:
     if u in ("mm", "push", "pushacc", "pop"):
         return mxu_latency(ins.name, ins.rows)
     return ins.rows + 3 if u in ("vload", "vstore") else ins.op.lat
+
+
+def vpu_reads(name: str, rows: int) -> int:
+    """Cycles from issue until a VPU instruction has read its streamed source pair, as the RTL
+    releases it: a row reduction reads both halves at once, a column reduction reads the pair
+    twice, and a .vr reads row 0 of T(vs2) before T(vs1)."""
+    if ".row." in name:
+        return rows
+    if name.startswith("vred"):
+        return 4 * rows
+    return 2 * rows + 1 if name.endswith(".vr") else 2 * rows
 
 
 def _num(s: str) -> int:
@@ -232,8 +243,9 @@ class Block:
 
     def _reserve(self, ins: Ins) -> None:
         """m-register reservations: (register, cycles from issue until it is free). The VPU holds
-        both registers of a pair until it has read, or written, all 2M rows. An mxu1 FP32 transfer
-        streams m, m+1 in T+1 .. T+M and m+2, m+3 in T+M+1 .. T+2M; a weight push all 32 rows."""
+        both registers of a pair until it has read (vpu_reads), or written, all 2M rows. An mxu1
+        FP32 transfer streams m, m+1 in T+1 .. T+M and m+2, m+3 in T+M+1 .. T+2M; a weight push
+        all 32 rows. The XLU reads its source until T+34."""
         op, m = ins.op, ins.rows
         for role, s in zip(op.roles.split(), ins.args):
             if role[0] not in "mMRQ":
@@ -242,10 +254,9 @@ class Block:
             if role[0] == "R":
                 c = 1
             elif op.unit == "xlu":
-                c = 33 if read else op.lat
+                c = 34 if read else op.lat
             elif op.unit in ("vpu", "vpu2") and read:
-                # a row reduction reads both halves at once
-                c = m + 1 if op.lat < 65 else 2 * m + 1 if op.reads else ins.lat - 1
+                c = vpu_reads(ins.name, m)
             elif op.unit in ("vpu", "vpu2", "vload", "vstore"):
                 c = ins.lat
             else:                                        # mxu1 streams rows T+1 .. T+M
@@ -421,14 +432,16 @@ class Machine:
             f["xlu"] = T + ins.lat
         elif u == "mm":
             m = ins.rows
-            f["P0"], f["row0", b], f["mm", b], f["wread", ins.slot] = T + m, T + 3, T + ins.lat, T + m - 1
+            # row 0 lands at T + 3; the next matmul or pop of the accumulator issues from T + 4
+            f["P0"], f["row0", b], f["mm", b], f["wread", ins.slot] = T + m, T + 4, T + ins.lat, T + m
             if ins.name == "vmatmul.acc.mxu1":
                 f["psum", b] = T + m
         elif u == "push":
             f["P1" if f["P1"] <= T else "P0"] = T + 32
-            f["wpath"], f["wpush", ins.slot] = T + 32, T + 31
+            f["wpath"], f["wpush", ins.slot] = T + 32, T + 32
         elif u == "pushacc":                             # rows land at T+1 .. T+M (FP32: twice)
-            f["P0"] = f["P1"] = f["accpath"] = f["pushacc", b] = T + ins.lat - 1
+            f["P0"] = f["P1"] = f["accpath"] = T + ins.lat - 1
+            f["pushacc", b] = T + ins.lat                # a matmul waits for the whole push
             # after the last write of row 0
             f["pushrow0", b] = T + (ins.rows + 2 if "fp32" in ins.name else 2)
         elif u == "pop":
