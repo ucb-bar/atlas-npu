@@ -91,8 +91,8 @@ def test_attention():
     qkv_t = kr.input_bf16("qkv", qkv)
     ct = kr.input_bf16("cos", cos)
     st = kr.input_bf16("sin", sin)
-    mask = torch.zeros(32, 32)
-    mask[:, T - 32:] = -30000.0
+    mask = torch.zeros(32, 64)                     # one tile per key tile: tokens 0-31, 32-49
+    mask[:, T:] = -30000.0
     mt = kr.input_bf16("mask", mask)
     out = kr.tensor("attn", T, H, "fp8")
     kr.k.attention(qkv_t, ct, st, mt, out, d.heads, a_q, a_k, a_v, a_p, a_o)

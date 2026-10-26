@@ -238,34 +238,42 @@ class Kernels:
     def attention(self, qkv: Tensor, rope_cos: Tensor, rope_sin: Tensor, kmask: Tensor | None,
                   out: Tensor, heads: int, a_q: int, a_k: int, a_v: int, a_p: int, a_out: int) -> None:
         """out = FP8(attention / 2**a_out). qkv holds q | k | v (each heads x 64 wide) per token row.
-        a_q is the exponent of q / sqrt(64). kmask (row 0 of a tile) masks the last key tile's padding."""
+        a_q is the exponent of q / sqrt(64). kmask (row 0 of tile rk) masks key tile rk's padding.
+        K and V become a weight and V^T, which read 32 rows: they are computed at 32 rows from qkv's
+        and RoPE's padding rows, which must be 0 (and so give K = 0) at M < 32."""
         b, regs = self.b, self.b.regs
         RT, HT = qkv.rt, qkv.ct // 3
         assert RT <= 2 and HT == 2 * heads, "head_dim must be 64 and the sequence at most 64"
         raw_q, raw_k, raw_v, raw_p = 127 - a_q - 3, 127 - a_k, 127 - a_v, 127 - a_p
         raw_o = 127 + a_p + a_v - a_out
+        rows = b.rows
+        b.vsetm(32)
         cos = [regs.pair() for _ in range(RT)]
         sin = [regs.pair() for _ in range(RT)]
         for r in range(RT):
             b.vload2(cos[r], rope_cos.tile(r, 0))
             b.vload2(sin[r], rope_sin.tile(r, 0))
+
+        def rope_fp8(dst, r, ct0, raw):
+            a1, a2, t1, t2 = regs.pair(), regs.pair(), regs.pair(), regs.pair()
+            b.vload2(a1, qkv.tile(r, ct0))
+            b.vload2(a2, qkv.tile(r, ct0 + 1))
+            b.v("vmul.bf16", f"m{t1}", f"m{a1}", f"m{cos[r]}")
+            b.v("vmul.bf16", f"m{t2}", f"m{a2}", f"m{sin[r]}")
+            b.v("vsub.bf16", f"m{t1}", f"m{t1}", f"m{t2}")     # x1 cos - x2 sin
+            b.v("vmul.bf16", f"m{t2}", f"m{a2}", f"m{cos[r]}")
+            b.v("vmul.bf16", f"m{a2}", f"m{a1}", f"m{sin[r]}")
+            b.v("vadd.bf16", f"m{t2}", f"m{t2}", f"m{a2}")     # x2 cos + x1 sin
+            dst[r, 0] = self.quant_store(t1, 0, None, raw, keep=True)
+            dst[r, 1] = self.quant_store(t2, 1, None, raw, keep=True)
+            regs.release(pairs=(a1, a2, t1, t2))
+
         for h in range(heads):
             b.prog.comment(f"attention head {h}")
             Q, K, VT, P = {}, {}, {}, {}
+            b.vsetm(32)
             for r in range(RT):
-                for dst, ct0, raw in ((Q, 0, raw_q), (K, HT, raw_k)):
-                    a1, a2, t1, t2 = regs.pair(), regs.pair(), regs.pair(), regs.pair()
-                    b.vload2(a1, qkv.tile(r, ct0 + 2 * h))
-                    b.vload2(a2, qkv.tile(r, ct0 + 2 * h + 1))
-                    b.v("vmul.bf16", f"m{t1}", f"m{a1}", f"m{cos[r]}")
-                    b.v("vmul.bf16", f"m{t2}", f"m{a2}", f"m{sin[r]}")
-                    b.v("vsub.bf16", f"m{t1}", f"m{t1}", f"m{t2}")     # x1 cos - x2 sin
-                    b.v("vmul.bf16", f"m{t2}", f"m{a2}", f"m{cos[r]}")
-                    b.v("vmul.bf16", f"m{a2}", f"m{a1}", f"m{sin[r]}")
-                    b.v("vadd.bf16", f"m{t2}", f"m{t2}", f"m{a2}")     # x2 cos + x1 sin
-                    dst[r, 0] = self.quant_store(t1, 0, None, raw, keep=True)
-                    dst[r, 1] = self.quant_store(t2, 1, None, raw, keep=True)
-                    regs.release(pairs=(a1, a2, t1, t2))
+                rope_fp8(K, r, HT + 2 * h, raw_k)
                 for dd in range(2):
                     a1 = regs.pair()
                     b.vload2(a1, qkv.tile(r, 2 * HT + 2 * h + dd))
@@ -273,6 +281,9 @@ class Kernels:
                     VT[dd, r] = regs.one()
                     b.v("vtrpose.xlu", f"m{VT[dd, r]}", f"m{vq}")       # rows: head dims, cols: keys
                     regs.release(vq, pairs=(a1,))
+            b.vsetm(rows)
+            for r in range(RT):
+                rope_fp8(Q, r, 2 * h, raw_q)
             S = {}
             for rk in range(RT):                                         # scores, one key tile at a time
                 b.v("vmatpush.weight.mxu1", "w0", f"m{K[rk, 0]}")
@@ -284,15 +295,14 @@ class Kernels:
                     S[rq, rk] = regs.pair()
                     b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{S[rq, rk]}", f"acc{rq}", f"e{b.erf(127 + a_q + a_k)}")
             regs.release(*Q.values(), *K.values())
-            mask = None
-            if kmask is not None:
-                mask = regs.pair()
-                b.vload2(mask, kmask.tile(0, 0))
+            masks = [regs.pair() for _ in range(RT)] if kmask is not None else []
+            for rk, mask in enumerate(masks):
+                b.vload2(mask, kmask.tile(0, rk))
             for rq in range(RT):                                         # softmax over keys
                 m, t = regs.pair(), regs.pair()
                 for rk in range(RT):
-                    if mask is not None and rk == RT - 1:
-                        b.v("vadd.bf16.vr", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{mask}")
+                    if masks:
+                        b.v("vadd.bf16.vr", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{masks[rk]}")
                     b.v("vredmax.row.bf16", f"m{m if rk == 0 else t}", f"m{S[rq, rk]}")
                     if rk:
                         b.v("vmaximum.bf16", f"m{m}", f"m{m}", f"m{t}")
@@ -309,8 +319,7 @@ class Kernels:
                     P[rq, rk] = self.quant_store(S[rq, rk], rk % 2, None, raw_p, keep=True)
                     regs.release(pairs=(S[rq, rk],))
                 regs.release(pairs=(m, t))
-            if mask is not None:
-                regs.release(pairs=(mask,))
+            regs.release(pairs=tuple(masks))
             for dd in range(2):                                          # P @ V
                 for rk in range(RT):
                     b.v("vmatpush.weight.mxu1", f"w{rk}", f"m{VT[dd, rk]}")
@@ -324,3 +333,4 @@ class Kernels:
                     regs.release(o)
             regs.release(*VT.values(), *P.values())
         regs.release(pairs=tuple(cos) + tuple(sin))
+        b.vsetm(rows)

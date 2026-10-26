@@ -17,6 +17,9 @@ Numbers on Atlas:
   .vr. A conditioning row q > 0 of the encoder's tiles moves to row 0 through the MXU (E @ Z^T,
   E the FP8 tile with ones in column q).
 - The time MLP's exact GELU is evaluated in its tanh form, the only one the VPU has.
+- The horizon's tokens spread evenly over their row tiles (50 = 2 x 25), and a step runs at
+  that row count M; padding rows are not computed. Attention computes K and V at 32 rows, as
+  they become a weight and V^T: qkv's and RoPE's padding rows are 0.
 - BF16 keeps 8 significant bits, so x is carried as hi + lo BF16 (a compensated sum) across the
   100 steps. VPU adds round to nearest even, so lo is the exact error of hi + d when |hi| >= |d|
   (Fast2Sum).
@@ -59,6 +62,7 @@ class DiTProgram:
         b = self.b
         self.T, self.H = d.horizon, d.hidden
         self.HT, self.RT = L.tiles(d.hidden), L.tiles(d.horizon)
+        self.M = L.tile_rows(d.horizon)                 # token rows per tile, the step's row count
         a = plan.act
         self.a = a
 
@@ -99,18 +103,12 @@ class DiTProgram:
         self.lin["out"] = Linear("out", addr, 1, self.HT, True, w["out.w"])
 
         # ---------------- DRAM image: constants and inputs -------------------------------
-        cos, sin = M.rope_tables(d)
+        cos, sin = (L.spread(t, self.M) for t in M.rope_tables(d))
         grid = M.time_grid(d)
         dt = (grid[1] - grid[0]).item()
         self.dt_hi = L.bf16_bits(dt)
         self.dt_lo = L.bf16_bits(dt - torch.tensor(dt).to(torch.bfloat16).float().item())
-        kmask = None
-        if self.T % 32:
-            km = torch.zeros(32, 32)
-            km[:, self.T % 32:] = -30000.0
-            kmask = km
-        rowmask = torch.zeros(self.RT * 32, 32)
-        rowmask[:self.T] = 1.0
+        keys = L.spread(torch.ones(self.T, 1), self.M).flatten()       # 0: a padding key
         tbits = grid[:self.steps].to(torch.bfloat16).view(torch.int16).to(torch.int32) << 16    # x[31:16]
         ttable = bytearray(tbits.numpy().tobytes())
         ttable += bytes(-len(ttable) % 32)
@@ -118,14 +116,16 @@ class DiTProgram:
         lo = (x0[0] - hi.float()).to(torch.bfloat16)
         consts = {
             "rope_cos": cos, "rope_sin": sin, "freq": M.sinusoidal_freqs(d).reshape(1, -1),
-            "rowmask": rowmask, "x_hi": hi, "x_lo": lo,
+            "x_hi": L.spread(hi, self.M), "x_lo": L.spread(lo, self.M),
         }
+        if self.RT * self.M > self.T:                     # padding rows among the M rows: held at 0
+            consts["rowmask"] = L.spread(torch.ones(self.T, 32), self.M)
         if cond_tiles is None:
             consts["cond"] = cond.reshape(1, -1)
         else:
             consts["state"] = state.reshape(1, -1)
-        if kmask is not None:
-            consts["kmask"] = kmask
+        if not keys.all():                                # one tile per key tile
+            consts["kmask"] = torch.where(keys > 0, 0.0, -30000.0).expand(32, -1)
         self.vm: dict[str, Tensor] = {}
         self._const_loads = []
         for name, m in consts.items():
@@ -188,6 +188,14 @@ class DiTProgram:
             b.dma.load("const", vaddr, daddr, n)
         b.dma.wait("const")
         self.prologue()
+        if self.M < 32:                                   # attention reads qkv's padding rows
+            z = b.regs.pair()
+            b.vli(z, 0)
+            for r in range(vm["qkv"].rt):
+                for c in range(vm["qkv"].ct):
+                    b.vstore2(z, vm["qkv"].tile(r, c))
+            b.regs.release(pairs=(z,))
+        b.vsetm(self.M)
         k.quantize(vm["x_hi"], vm["xin_q"], a["x"])
 
         b.li(5, 0)
@@ -299,7 +307,7 @@ class DiTProgram:
             self.lk.linear_rows(lin, lin.addr, vm["stq"], a["ada_t"] + lin.a_w,
                                 [Stream("cm", vm[f"{l}.condmod"], per_row=False), Stream("mod", vm[f"{l}.mod"], per_row=False)],
                                 self.epi_add_mod)
-        b.vsetm(32)
+        b.vsetm(self.M)
 
     def epi_add_mod(self, o: int, r: int, ptrs: dict) -> None:
         b = self.b
@@ -323,15 +331,16 @@ class DiTProgram:
         self.lin_call(f"{l}.down", vm["hq"], a[f"{l}.gelu"], k.epi_residual_gate(vm["x"], self.chunk(l, 5)))
 
     def epi_euler(self, o: int, r: int, n: int) -> None:
-        """v = o: trace it, then x += dt * v on the hi/lo pair (padding rows held at 0)."""
+        """v = o: trace it, then x += dt * v on the hi/lo pair."""
         b, k, vm = self.b, self.k, self.vm
         b.vstore2(o, vm["vbuf"].tile(r, 0))
         dd, kk, t = b.regs.pair(), b.regs.pair(), b.regs.pair()
         b.v("vmul.bf16.vx", f"m{dd}", f"m{o}", b.xconst(self.dt_hi))
         b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(self.dt_lo))
         b.v("vadd.bf16", f"m{dd}", f"m{dd}", f"m{o}")             # d = dt * v
-        b.vload2(kk, vm["rowmask"].tile(r, 0))
-        b.v("vmul.bf16", f"m{dd}", f"m{dd}", f"m{kk}")
+        if "rowmask" in vm:
+            b.vload2(kk, vm["rowmask"].tile(r, 0))
+            b.v("vmul.bf16", f"m{dd}", f"m{dd}", f"m{kk}")
         b.vload2(kk, vm["x_lo"].tile(r, 0))
         b.v("vadd.bf16", f"m{dd}", f"m{dd}", f"m{kk}")            # d += lo
         b.vload2(kk, vm["x_hi"].tile(r, 0))
@@ -352,12 +361,14 @@ def read_outputs(c: Compiled, read) -> dict:
     """x (FP32 hi + lo) and the per-step velocities from a reader read(addr, nbytes) -> bytes."""
     d, out = c.d, c.manifest["outputs"]
     n = out["x_bytes"]
-    hi = L.from_bf16_bytes(read(out["x_hi"], n), d.horizon, d.action_dim).float()
-    lo = L.from_bf16_bytes(read(out["x_lo"], n), d.horizon, d.action_dim).float()
+
+    def rows(data):
+        return L.gather(L.from_bf16_bytes(data, n // L.BF16_TILE * 32, d.action_dim), d.horizon,
+                        L.tile_rows(d.horizon)).float()
+    hi, lo = rows(read(out["x_hi"], n)), rows(read(out["x_lo"], n))
     res = {"x": (hi + lo)[None], "x_hi_bits": read(out["x_hi"], n), "x_lo_bits": read(out["x_lo"], n)}
     if out["trace"] is not None:
         raw = read(out["trace"], n * c.steps)
         res["trace_bits"] = raw
-        res["v"] = [L.from_bf16_bytes(raw[i * n:(i + 1) * n], d.horizon, d.action_dim).float()[None]
-                    for i in range(c.steps)]
+        res["v"] = [rows(raw[i * n:(i + 1) * n])[None] for i in range(c.steps)]
     return res

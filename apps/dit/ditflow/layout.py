@@ -22,6 +22,26 @@ def tiles(n: int) -> int:
     return -(-n // T)
 
 
+def tile_rows(n: int) -> int:
+    """Rows per tile when n rows spread evenly over tiles(n) tiles: the row count M of kernels on
+    them."""
+    return -(-n // tiles(n))
+
+
+def spread(m: torch.Tensor, per: int) -> torch.Tensor:
+    """m's rows, `per` to a tile: row i is row i % per of tile i // per. The other rows are 0."""
+    i = torch.arange(m.shape[0])
+    out = torch.zeros(-(-m.shape[0] // per) * T, m.shape[1], dtype=m.dtype)
+    out[i // per * T + i % per] = m
+    return out
+
+
+def gather(m: torch.Tensor, n: int, per: int) -> torch.Tensor:
+    """The n rows that spread(., per) placed in m."""
+    i = torch.arange(n)
+    return m[i // per * T + i % per]
+
+
 def pad2(x: torch.Tensor, rows: int, cols: int) -> torch.Tensor:
     out = torch.zeros(rows, cols, dtype=x.dtype)
     out[:x.shape[0], :x.shape[1]] = x
