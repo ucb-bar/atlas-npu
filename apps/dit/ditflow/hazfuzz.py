@@ -597,6 +597,74 @@ def directed_rows(units=("mxu1",)) -> dict:
             "timeout": None, "source": source}
 
 
+def fp32_scale_code(u: str, b: Builder, x: str) -> list:
+    """The directed instructions of one MXU u for directed_fp32. m0-m7 hold FP32 quads, m8-m11
+    BF16 data, m12 FP8 data; x holds the VMEM byte address of the scale bytes 200, 7, 255, 0."""
+    push, pop, scaled = f"vmatpush.acc.fp32.{u}", f"vmatpop.fp32.acc.{u}", f"vmatpop.bf16.scaled.acc.{u}"
+    tile = b._vaddr(8 * FP8_TILE)
+    return [
+        # The scale: seli and seld right before a scaled pop, seli right after one, seli after seld.
+        f"{push} acc0, m0",
+        "seli e5, 100", f"{scaled} m16, acc0, e5", "seli e5, 150", f"{scaled} m18, acc0, e5",
+        f"seld e7, {x}", f"{scaled} m20, acc0, e7",
+        f"ADDI {x}, {x}, 1", f"seld e7, {x}", f"{scaled} m22, acc0, e7", f"{scaled} m24, acc0, e7",
+        f"ADDI {x}, {x}, 1", f"seld e8, {x}", "seli e9, 77", f"{scaled} m26, acc0, e8",
+        f"{push} acc1, m4", f"ADDI {x}, {x}, 1", f"seld e10, {x}", f"{scaled} m28, acc1, e10",
+        f"ADDI {x}, {x}, -3",
+        # RAW: the VPU, vli, vload and the XLU write a register of the quad right before the push.
+        "vadd.bf16 m2, m8, m10", f"{push} acc0, m0", f"{pop} m32, acc0",
+        "vli.all m6, 0x3f80", f"{push} acc1, m4", f"{pop} m36, acc1",
+        f"vload m7, {tile}", f"{push} acc1, m4", f"{pop} m40, acc1",
+        "vtrpose.xlu m3, m12", f"{push} acc0, m0", f"{pop} m44, acc0",
+        # WAR: they overwrite a register of the quad right after the push.
+        f"{push} acc0, m0", "vli.all m2, 0x4000", f"{pop} m48, acc0",
+        f"{push} acc1, m4", f"vload m6, {tile}", f"{pop} m52, acc1",
+        f"{push} acc0, m0", "vadd.bf16 m0, m8, m10", f"{pop} m56, acc0",
+        f"{push} acc1, m4", "vtrpose.xlu m7, m12", f"{pop} m60, acc1",
+        # RAW and WAR around a pop: readers of its quad right after it, a writer of a source.
+        f"{pop} m16, acc0", f"vstore m18, {tile}", "vadd.bf16 m24, m18, m8",
+        "vadd.bf16 m26, m22, m8", f"{pop} m20, acc1", "vtrpose.xlu m30, m23",
+    ]
+
+
+def directed_fp32(units=("mxu1",)) -> dict:
+    """FP32 pushes and pops, and scaled pops, next to the instructions that they depend on, on each
+    MXU of units (fp32_scale_code). The model runs them in program order; the interlock must hold
+    each one until its scale register or its quad is ready."""
+    from .flow import assemble, preload
+    b = Builder(schedule=False)
+    b.begin()
+    gen = torch.Generator().manual_seed(3)
+    special = torch.tensor([0x00000000, 0x80000000, 0x00000001, 0x80000001, 0x007FFFFF, 0x7F800000,
+                            0xFF800000, 0x7FC00000, 0x7FC12345, 0xFFFFFFFF, 0x7F800001, 0x3F808000,
+                            0x3F818000, 0x7F7F8000, 0x7F7F7FFF, 0x00008000], dtype=torch.int64)
+    words = torch.randint(0, 1 << 32, (2, 32, 32), generator=gen)
+    words[0].view(-1)[:len(special)] = special
+    tiles = [words[t, :, 8 * q:8 * q + 8].to(torch.int32).numpy().tobytes() for t in range(2) for q in range(4)]
+    tiles += [(torch.randn(32, 16, generator=gen) * 3).to(torch.bfloat16).view(torch.int16).numpy().tobytes()
+              for _ in range(4)]
+    tiles += [fp8_codes(1024, gen).numpy().tobytes(), bytes([200, 7, 255, 0]) + bytes(FP8_TILE - 4)]
+    for i, data in enumerate(tiles):
+        b.dma.load_now(i * FP8_TILE, b.dram.add(f"t{i}", data), FP8_TILE, block=f"t{i}")
+    for r in range(64):
+        b.vload(r, min(r, 12) * FP8_TILE)
+    b.op(f"LI x6, {13 * FP8_TILE}")
+    for u in units:
+        for line in fp32_scale_code(u, b, "x6"):
+            b.op(line)
+    for r in range(64):
+        b.vstore(r, OUT_BASE + r * FP8_TILE)
+    out = b.dram.reserve("out", 64 * FP8_TILE)
+    b.dma.store_now(OUT_BASE, out, 64 * FP8_TILE)
+    source = b.finish()
+    sim = FuncSim(source, b.dram.blobs, b.dram.size)
+    sim.run()
+    words = torch.frombuffer(bytearray(sim.read_dram(out, 64 * FP8_TILE)), dtype=torch.int32).numpy().astype("uint32").tolist()
+    return {"name": "hazard_fp32" + ("_nv" if "nv" in units else ""), "isa": list(ISA_VERSION),
+            "variant": "directed", "program": assemble(source), "preload": preload(b.dram.blobs),
+            "check": [[out, words]], "perf": {}, "timeout": None, "source": source}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", type=Path)
@@ -612,7 +680,7 @@ def main(argv=None):
         ap.error(f"--units {a.units}: give mxu1 (default) or mxu1,nv (ipt-nvfp4)")
     a.out.mkdir(parents=True, exist_ok=True)
     if a.directed:
-        for t in (directed_vload_war(), directed_rows(units)):
+        for t in (directed_vload_war(), directed_rows(units), directed_fp32(units)):
             (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
             (a.out / f"{t['name']}.S").write_text(t["source"])
     total = {}

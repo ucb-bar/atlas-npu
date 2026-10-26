@@ -172,7 +172,9 @@ With the row count M (2026-10-25), the programs also run `vsetm`, and `--directe
 `hazard_rows`. Each set of programs ran as `mxu1` programs on `default` and on `ipt-nvfp4`, and as
 `mxu1,nv` programs on `ipt-nvfp4`: the directed tests with 64 programs × 400 instructions (66 / 66
 in each run), 32 programs × 400 instructions of seed 7, and 24 programs × 500 instructions of each
-of seeds 1234 and 9001. All 438 pass.
+of seeds 1234 and 9001. All 438 pass. `--directed` also writes `hazard_fp32` (`hazard_fp32_nv`
+with the NVFP4 MXU): `seli` and `seld` right before scaled pops, and the VPU, `vli`, `vload` and
+the XLU writing a quad right before or right after an FP32 push, and next to an FP32 pop.
 
 On the old RTL, the assertions came from three sources. Two-source VPU instructions named two
 pairs in one bank (now illegal). The MXU1 sequencer's push and pop checks counted an engine on
