@@ -804,6 +804,9 @@ def fp32_scale_code(u: str, b: Builder, x: str) -> list:
         # waits until the pop before it has written its last row, so the write ports are free).
         # Each MXU has its own scale register and destination, so both results stay visible.
         f"{scaled} m32, acc0, e5", "vmov m34, m32", f"seld e{e}, {x}", f"{scaled} m{36 + 2 * (e - 11)}, acc1, e{e}",
+        # RAW on the upper pair of a quad with the push path idle: the vmov waits for the first
+        # phase of the pop before it, which every earlier push has finished by then.
+        f"{pop} m52, acc1", "vmov m56, m52", "vadd.bf16 m2, m8, m10", f"{push} acc0, m0", f"{pop} m60, acc0",
     ]
 
 
