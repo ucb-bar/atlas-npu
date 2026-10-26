@@ -8,14 +8,12 @@ and an epilogue consumes y while it is still in registers. BF16 -> FP8 conversio
 an accumulator, as npu_model's kernels do: vmatpush.acc.bf16 reads the tile view vmatpop.bf16
 and the VPU use, and vmatpop.fp8.acc returns FP8 in the row-major layout vmatmul reads.
 """
-import math
 from dataclasses import dataclass
 
 from .asm import SEGMENT, Builder, Tensor
 from .layout import FP8_TILE, bf16_bits, pow2_bits
 
 ONE, HALF, MINUS_ONE = bf16_bits(1.0), bf16_bits(0.5), bf16_bits(-1.0)
-GELU_K1, GELU_K2 = bf16_bits(0.044715), bf16_bits(math.sqrt(2.0 / math.pi))
 NEG_BIG = bf16_bits(-30000.0)
 
 
@@ -181,18 +179,9 @@ class Kernels:
         return f
 
     # -- pointwise functions on a BF16 pair, in place ------------------------------------------
-    def gelu2(self, o: int) -> None:
-        """o = 2 * gelu_tanh(o) = o * (1 + tanh(sqrt(2/pi) * (o + 0.044715 o^3)))."""
-        b = self.b
-        t = b.regs.pair()
-        b.v("vcube.bf16", f"m{t}", f"m{o}")
-        b.v("vmul.bf16.vx", f"m{t}", f"m{t}", b.xconst(GELU_K1))
-        b.v("vadd.bf16", f"m{t}", f"m{t}", f"m{o}")
-        b.v("vmul.bf16.vx", f"m{t}", f"m{t}", b.xconst(GELU_K2))
-        b.v("vtanh.bf16", f"m{t}", f"m{t}")
-        b.v("vadd.bf16.vx", f"m{t}", f"m{t}", b.xconst(ONE))
-        b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{t}")
-        b.regs.release(pairs=(t,))
+    def gelu(self, o: int) -> None:
+        """o = gelu_tanh(o) = o * (1 + tanh(sqrt(2/pi) * (o + 0.044715 o^3))) / 2."""
+        self.b.v("vgelu.bf16", f"m{o}", f"m{o}")
 
     def scale(self, o: int, bits: int) -> None:
         self.b.v("vmul.bf16.vx", f"m{o}", f"m{o}", self.b.xconst(bits))

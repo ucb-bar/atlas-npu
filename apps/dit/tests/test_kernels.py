@@ -46,7 +46,7 @@ def test_linear_gelu_quant_epilogue():
     xq = kr.input_fp8("xq", Xq)
     lin = Linear("w", kr.b.dram.add("w", L.weight_blocks(Wq, bias)), 4, 8, True, a_w)
     g = kr.tensor("g", 50, 128, "fp8")
-    kr.k.linear(lin, xq, a_x + a_w, kr.k.epi_quant(g, a_g + 1, pre=lambda o, r: kr.k.gelu2(o)))
+    kr.k.linear(lin, xq, a_x + a_w, kr.k.epi_quant(g, a_g, pre=lambda o, r: kr.k.gelu(o)))
     kr.output(g)
     got = Q.from_fp8(kr.run().read("g"), a_g)
     assert rel(got, ref) < 0.05

@@ -319,7 +319,7 @@ class EncoderEmitter:
                            lk.epi_residual_scale("x", "ls"))
             lk.layernorm_rows(x, self.lp["ln2.w"], self.lp["ln2.b"], xq, a["L.ln2"], v.eps)
             lk.linear_rows(wl("up"), (xw, self.w_off["up"]), xq, a["L.ln2"] + wl("up").a_w,
-                           [Stream("hq", hq)], lk.epi_quant("hq", a["L.gelu"] + 1, pre=k.gelu2))
+                           [Stream("hq", hq)], lk.epi_quant("hq", a["L.gelu"], pre=k.gelu))
             lk.linear_rows(wl("down"), (xw, self.w_off["down"]), hq, a["L.gelu"] + wl("down").a_w,
                            [Stream("x", x), Stream("ls", self.lp["ls2"], per_row=False)],
                            lk.epi_residual_scale("x", "ls"))
@@ -340,7 +340,7 @@ class EncoderEmitter:
         lk.layernorm_rows(self.pooled, self.st["pool.ln.w"], self.st["pool.ln.b"], self.pm, a["pool.ln"], 1e-5)
         lin = self.lin["pool.up"]
         lk.linear_rows(lin, lin.addr, self.pm, a["pool.ln"] + lin.a_w, [Stream("ph", self.ph)],
-                       lk.epi_quant("ph", a["pool.gelu"] + 1, pre=k.gelu2))
+                       lk.epi_quant("ph", a["pool.gelu"], pre=k.gelu))
         lin = self.lin["pool.down"]
         lk.linear_rows(lin, lin.addr, self.ph, a["pool.gelu"] + lin.a_w, [Stream("pooled", self.pooled)],
                        lk.epi_residual_add("pooled"))

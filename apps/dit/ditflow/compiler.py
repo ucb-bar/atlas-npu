@@ -299,11 +299,10 @@ class DiTProgram:
             k.quant_store(s, 1, embq.tile(0, half_tiles + j), 127 - a["temb"])
             b.regs.release(pairs=(f, s))
         b.regs.release(pairs=(t,))
-        self.lin_call("time1", embq, a["temb"], k.epi_quant(vm["t1q"], a["t1"] + 1, pre=lambda o, r: k.gelu2(o)))
+        self.lin_call("time1", embq, a["temb"], k.epi_quant(vm["t1q"], a["t1"], pre=lambda o, r: k.gelu(o)))
 
         def gelu_silu(o, r):
-            k.gelu2(o)
-            k.scale(o, HALF)
+            k.gelu(o)
             k.silu(o)
         self.lin_call("time2", vm["t1q"], a["t1"], k.epi_quant(vm["stq"], a["ada_t"], pre=gelu_silu))
         for l in range(d.layers):
@@ -330,7 +329,7 @@ class DiTProgram:
         self.lin_call(f"{l}.o", vm["attnq"], a[f"{l}.attn"], k.epi_residual_gate(vm["x"], self.chunk(l, 2)))
         k.ln_modulate_quant(vm["x"], self.chunk(l, 4), self.chunk(l, 3), vm["xq"], a[f"{l}.ln2"])
         self.lin_call(f"{l}.up", vm["xq"], a[f"{l}.ln2"],
-                      k.epi_quant(vm["hq"], a[f"{l}.gelu"] + 1, pre=lambda o, r: k.gelu2(o)))
+                      k.epi_quant(vm["hq"], a[f"{l}.gelu"], pre=lambda o, r: k.gelu(o)))
         self.lin_call(f"{l}.down", vm["hq"], a[f"{l}.gelu"], k.epi_residual_gate(vm["x"], self.chunk(l, 5)))
 
     def epi_euler(self, o: int, r: int, n: int) -> None:
