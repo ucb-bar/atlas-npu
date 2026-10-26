@@ -282,10 +282,14 @@ def test_machine_models_the_mxu1_fp32_transfers_and_scaled_pop():
 
 
 def test_vsetm_ends_a_block_and_sets_the_costs_after_it():
-    """No instruction moves across vsetm; the instructions after it cost what they cost at its M."""
+    """No instruction moves across vsetm; the instructions after it cost what they cost at its M.
+    After a label they cost what they cost at 32 rows, as a branch can enter with any M."""
     pop, exp, vsetm = "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n", "    vsetm 3\n"
     assert S.schedule(pop + vsetm + exp) == pop + vsetm + exp
     assert S.schedule(vsetm + pop + exp) == vsetm + exp + pop
+    xlu = "    vtrpose.xlu m20, m4\n"                     # 66 cycles at any M; vexp 2M + 2
+    assert S.schedule(vsetm + exp + xlu) == vsetm + xlu + exp
+    assert S.schedule(vsetm + "L1:\n" + exp + xlu) == vsetm + "L1:\n" + exp + xlu
     vpu = ["vadd.bf16 m4, m0, m2", "vexp.bf16 m6, m4"]
     assert issue_cycles(vpu) == [0, 66] and issue_cycles(vpu, rows=3) == [0, 8]          # 2M + 2
     mm = ["vmatmul.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m1, w0"]

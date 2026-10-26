@@ -17,7 +17,9 @@ The dependencies come from OPS, which gives the operands of every instruction di
   The instructions of one channel keep their order.
 Labels, branches, CSR accesses, ECALL and instructions that OPS does not list stay in place and
 end a block. vsetm is one of them: no instruction moves across it. An instruction costs what it
-costs at the row count M of the last vsetm before it in the text (32 before the first).
+costs at the row count M of the last vsetm before it in the text, or at 32 if a label or the start
+comes first: a branch can enter a label with any M. So a loop body that runs at M < 32 sets M
+itself.
 """
 from bisect import insort
 from collections import defaultdict
@@ -532,7 +534,9 @@ def schedule(source: str, window: int = WINDOW) -> str:
         out.extend(notes)
         notes = []
         out.append(line)
-        if name == "vsetm":
+        if s.endswith(":"):
+            rows = 32
+        elif name == "vsetm":
             rows = int(args[0], 0)
     flush()
     out.extend(notes)

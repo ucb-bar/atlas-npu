@@ -211,6 +211,7 @@ class Builder:
         self._header = None
         self.xval: dict[int, int | None] = {}      # known values of x1-x3
         self.xfree = list(LOOP_REGS)
+        self.rows = 32                              # the row count M (vsetm)
 
     # -- program structure -------------------------------------------------------------------
     def begin(self) -> None:
@@ -237,6 +238,12 @@ class Builder:
         self.prog.label(name)
         for r in self.xval:                         # another path may enter here
             self.xval[r] = None
+
+    def vsetm(self, rows: int) -> None:
+        """M = rows for the tensor instructions after it."""
+        if rows != self.rows:
+            self.op(f"vsetm {rows}")
+            self.rows = rows
 
     def li(self, r: int, value: int) -> None:
         self.op(f"LI x{r}, {value:#x}")
@@ -279,8 +286,14 @@ class Builder:
             self.op(f"BEQ x{rs1}, x{rs2}, {out}")
             self.op(f"JAL x0, {top}")
             self.prog.label(out)
+            self._rows_after_label()
         for r in self.xval:                         # sched.py knows only the values a block sets
             self.xval[r] = None
+
+    def _rows_after_label(self) -> None:
+        """sched.py costs the instructions after a label at M = 32: set M there if it is not 32."""
+        if self.rows != 32:
+            self.op(f"vsetm {self.rows}")
 
     def xrelease(self, *regs: int) -> None:
         for r in regs:
@@ -309,7 +322,10 @@ class Builder:
         self.li(cnt, n)
         top = self.prog.new_label("loop")
         self.label(top)
+        rows = self.rows
+        self._rows_after_label()
         yield
+        self.vsetm(rows)                            # each pass starts at the same M
         for reg, delta in steps:
             self.add_imm(reg, reg, delta)
         self.op(f"ADDI x{cnt}, x{cnt}, -1")

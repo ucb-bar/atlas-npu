@@ -1,4 +1,4 @@
-"""The assembly builder (asm.py): loop ends."""
+"""The assembly builder (asm.py): loop ends and the row count in loops."""
 import pytest
 
 from ditflow.asm import Builder
@@ -21,3 +21,19 @@ def test_loop_end_reaches_the_top(body, end):
     sim = FuncSim(source, b.dram.blobs, 4 << 20)
     sim.run()
     assert sim.state.read_xrf(19) == 3 * body
+
+
+def test_loop_body_sets_m():
+    """A loop that runs at M < 32 sets M at the top of its body, where sched.py costs at 32 rows,
+    and a body that changes M sets it back before the next pass."""
+    b = Builder(schedule=False)
+    b.begin()
+    b.vsetm(3)
+    with b.loop(2):
+        b.op("vexp.bf16 m0, m2")
+        b.vsetm(32)
+        b.op("vexp.bf16 m4, m2")
+    lines = [s.strip() for s in b.prog.lines]
+    top = next(i for i, s in enumerate(lines) if s.startswith("loop_"))
+    assert lines[top + 1:top + 7] == ["vsetm 3", "vexp.bf16 m0, m2", "vsetm 32", "vexp.bf16 m4, m2", "vsetm 3",
+                                      "ADDI x11, x11, -1"]
