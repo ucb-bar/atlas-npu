@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from .asm import Builder, Ptr, Tensor, SCRATCH, DMA_MAX
 from .kernels import Kernels, Linear, NEG_BIG, ONE, HALF
-from .layout import FP8_TILE, bf16_bits, pow2_bits
+from .layout import FP8_TILE
 
 
 @dataclass
@@ -109,8 +109,7 @@ class LoopKernels:
                 b.vload2(bias, stage + KT * FP8_TILE)
             for r in range(R):
                 o = regs.pair()
-                b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
-                b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(pow2_bits(deq)))
+                b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
                 if bias is not None:
                     b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
                 ptrs = {s.name: Ptr(scol[s.name], (r * s.t.ct * s.t.tile_bytes if s.per_row else 0)
@@ -255,8 +254,7 @@ class LoopKernels:
                     b.v("vmatpush.weight.mxu1", "w1", f"m{K1}")
                     b.v("vmatmul.mxu1", "acc0", f"m{Q0}", "w0")
                     b.v("vmatmul.acc.mxu1", "acc0", f"m{Q1}", "w1")
-                    b.v("vmatpop.bf16.acc.mxu1", f"m{s}", "acc0")
-                    b.v("vmul.bf16.vx", f"m{s}", f"m{s}", b.xconst(pow2_bits(a_q + a_k)))
+                    b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{s}", "acc0", f"e{b.erf(127 + a_q + a_k)}")
                     b.vload2(t, Ptr(pm, 0))
                     b.v("vadd.bf16", f"m{s}", f"m{s}", f"m{t}")
                     b.v("vredmax.row.bf16", f"m{t}", f"m{s}")

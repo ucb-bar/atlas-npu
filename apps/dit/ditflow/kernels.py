@@ -3,7 +3,7 @@
 Every matmul runs on mxu1, the inner-product-tree MXU that both Atlas configurations have,
 as FP8 x FP8 with FP32 accumulation. A Linear's output tile is
     acc = sum_k X_q(k) @ W_q(k)^T          (vmatmul.mxu1, then vmatmul.acc.mxu1 over K tiles)
-    y   = acc * 2**(a_x + a_w) + bias      (vmatpop.bf16, vmul, vadd)
+    y   = acc * 2**(a_x + a_w) + bias      (vmatpop.bf16.scaled: one rounding; vadd)
 and an epilogue consumes y while it is still in registers. BF16 -> FP8 conversion goes through
 an accumulator, as npu_model's kernels do: vmatpush.acc.bf16 reads the tile view vmatpop.bf16
 and the VPU use, and vmatpop.fp8.acc returns FP8 in the row-major layout vmatmul reads.
@@ -11,7 +11,7 @@ and the VPU use, and vmatpop.fp8.acc returns FP8 in the row-major layout vmatmul
 from dataclasses import dataclass
 
 from .asm import SEGMENT, Builder, Tensor
-from .layout import FP8_TILE, bf16_bits, pow2_bits
+from .layout import FP8_TILE, bf16_bits
 
 ONE, HALF, MINUS_ONE = bf16_bits(1.0), bf16_bits(0.5), bf16_bits(-1.0)
 NEG_BIG = bf16_bits(-30000.0)
@@ -122,10 +122,9 @@ class Kernels:
                 b.vload2(bias, base + KT * FP8_TILE)
             for r in range(RT):
                 o = regs.pair()
-                b.v("vmatpop.bf16.acc.mxu1", f"m{o}", f"acc{r}")
+                b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
                 if r in held:
                     self._store(*held.pop(r))
-                b.v("vmul.bf16.vx", f"m{o}", f"m{o}", b.xconst(pow2_bits(deq)))
                 if bias is not None:
                     b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
                 store = epilogue(o, r, n)
@@ -286,7 +285,7 @@ class Kernels:
                     b.v("vmatmul.acc.mxu1", f"acc{rq}", f"m{Q[rq, 1]}", "w1")
                 for rq in range(RT):
                     S[rq, rk] = regs.pair()
-                    b.v("vmatpop.bf16.acc.mxu1", f"m{S[rq, rk]}", f"acc{rq}")
+                    b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{S[rq, rk]}", f"acc{rq}", f"e{b.erf(127 + a_q + a_k)}")
             regs.release(*Q.values(), *K.values())
             mask = None
             if kmask is not None:
@@ -295,7 +294,6 @@ class Kernels:
             for rq in range(RT):                                         # softmax over keys
                 m, t = regs.pair(), regs.pair()
                 for rk in range(RT):
-                    b.v("vmul.bf16.vx", f"m{S[rq, rk]}", f"m{S[rq, rk]}", b.xconst(pow2_bits(a_q + a_k)))
                     if mask is not None and rk == RT - 1:
                         b.v("vadd.bf16", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{mask}")
                     b.v("vredmax.row.bf16", f"m{m if rk == 0 else t}", f"m{S[rq, rk]}")
