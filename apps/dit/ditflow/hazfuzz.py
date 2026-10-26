@@ -57,7 +57,7 @@ ROW_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 31, 32)
 
 
 def fp8_codes(n: int, gen: torch.Generator) -> torch.Tensor:
-    """Random finite E4M3 codes with |value| <= 8 (exponent field <= 10), both signs."""
+    """Random finite E4M3 codes with |value| <= 15 (exponent field <= 10), both signs."""
     exp = torch.randint(0, 11, (n,), generator=gen)
     man = torch.randint(0, 8, (n,), generator=gen)
     sign = torch.randint(0, 2, (n,), generator=gen)
