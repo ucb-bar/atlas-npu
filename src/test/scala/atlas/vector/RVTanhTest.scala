@@ -1,7 +1,7 @@
 // ============================================================================
 // RVTanhTest.scala — BF16 tanh vector tests for the RV-style vector datapath.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVTanhTest
 // ============================================================================
 

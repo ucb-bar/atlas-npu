@@ -488,7 +488,7 @@ trait VpuVectorTestSupport extends Matchers with PeekPokeAPI {
       }
       outFile.close()
       println(
-        s"\nWrote sp26-atlas-acc/src/test/resources/vpu_test_vectors/vpu_${family}_rtl_outputs.txt"
+        s"\nWrote atlas-npu/src/test/resources/vpu_test_vectors/vpu_${family}_rtl_outputs.txt"
       )
       println(s"Family '$family': $passed passed, $failed failed out of ${vectors.length}")
       failed shouldBe 0

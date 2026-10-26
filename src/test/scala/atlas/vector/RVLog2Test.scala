@@ -1,7 +1,7 @@
 // ============================================================================
 // RVLog2Test.scala — BF16 log2 vector tests for the RV-style vector datapath.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVLog2Test
 // ============================================================================
 package atlas.vector

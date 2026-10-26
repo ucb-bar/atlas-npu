@@ -24,7 +24,7 @@ set -o pipefail
 #         make/sim exits with code 0.
 #
 # Assumes this script lives at:
-#   chipyard/generators/sp26-atlas-acc/baremetal/agentic/run_asm_tests.sh
+#   chipyard/generators/atlas-npu/baremetal/agentic/run_asm_tests.sh
 
 RUN_ALL=0
 PARALLEL=0

@@ -10,7 +10,7 @@
 //   result(j)     = Cat(lowHalf(2j+1),  lowHalf(2j))   // first-pulse bytes
 //   result(j+8)   = Cat(fp8Bytes(2j+1), fp8Bytes(2j))  // second-pulse bytes
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVFP8PackTest
 // ============================================================================
 package atlas.vector

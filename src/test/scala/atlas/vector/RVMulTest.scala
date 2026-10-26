@@ -2,7 +2,7 @@
 // RVMulTest.scala — BF16 multiply vector tests for the RV-style vector
 // datapath.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVMulTest
 // ============================================================================
 package atlas.vector

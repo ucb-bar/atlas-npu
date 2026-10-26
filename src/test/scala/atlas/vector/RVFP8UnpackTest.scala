@@ -13,7 +13,7 @@
 // Each byte converts as BF16_RNE(x * 2^(scale - 127))
 // (VectorTestUtils.goldenBf16FromE4m3).
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVFP8UnpackTest
 // ============================================================================
 package atlas.vector

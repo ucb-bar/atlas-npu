@@ -6,7 +6,7 @@
 // PopAccFP8 with a Python-computed scale exponent, and compares each lane
 // against the expected E4M3 byte.
 //
-// RUN: (from sp26-atlas-acc) 
+// RUN: (from atlas-npu) 
 //    mill atlas.test.testOnly atlas.ipt.InnerProductTreesVectorE4M3Test 
 // ============================================================================
 

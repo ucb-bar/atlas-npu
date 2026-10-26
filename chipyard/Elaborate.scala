@@ -1,4 +1,4 @@
-// chipyard/generators/sp26-atlas-acc/chipyard/src/main/scala/atlas/Elaborate.scala
+// chipyard/generators/atlas-npu/chipyard/src/main/scala/atlas/Elaborate.scala
 
 package atlas
 

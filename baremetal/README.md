@@ -43,18 +43,18 @@ cmake --build tests/build --target atlas_<test_name>
 cd $CHIPYARD/sims/vcs
 make run-binary \
   GEN_COVERAGE=1 \
-  BINARY=../../generators/sp26-atlas-acc/baremetal/tests/build/atlas_<test_name>.riscv \
+  BINARY=../../generators/atlas-npu/baremetal/tests/build/atlas_<test_name>.riscv \
   CONFIG=EE290SimConfig LOADMEM=1
 ```
 
 ## RUN THIS: Single-Command for Testing Flow
-From the `sp26-atlas-acc/baremetal` directory, to run select baremetal tests (e.g., `test1`, `test2`, and `test3`):
+From the `atlas-npu/baremetal` directory, to run select baremetal tests (e.g., `test1`, `test2`, and `test3`):
 
 ```
 ./agentic/run_asm_tests.sh test1 test2 test3
 ```
 
-To run all handwritten baremetal tests (i.e., those in `sp26-atlas-acc/baremetal/assembly`):
+To run all handwritten baremetal tests (i.e., those in `atlas-npu/baremetal/assembly`):
 
 ```
 ./agentic/run_asm_tests.sh --all

@@ -6,7 +6,7 @@
 // accumulator as BF16, and compares each lane against Python ground truth
 // using combined absolute + relative tolerance.
 //
-// RUN: (from sp26-atlas-acc) 
+// RUN: (from atlas-npu) 
 //    mill atlas.test.testOnly atlas.ipt.InnerProductTreesVectorTest 
 // ============================================================================
 

@@ -5,7 +5,7 @@
 // covering zero/identity/negative/sparse inputs, weight & accumulator
 // double-buffering, bias addition, and all-row correctness.
 //
-// RUN: (from sp26-atlas-acc) 
+// RUN: (from atlas-npu) 
 //    mill atlas.test.testOnly atlas.ipt.InnerProductTreesTest 
 // ============================================================================
 

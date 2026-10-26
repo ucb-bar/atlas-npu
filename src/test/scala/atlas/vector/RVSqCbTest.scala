@@ -1,7 +1,7 @@
 // ============================================================================
 // RVSqCbTest.scala — Legacy square/cube vector tests kept in commented form.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVSqCbTest
 // ============================================================================
 package atlas.vector

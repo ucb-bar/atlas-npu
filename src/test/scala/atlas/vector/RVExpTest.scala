@@ -2,7 +2,7 @@
 // RVExpTest.scala — BF16 exponent vector tests for the RV-style vector
 // datapath.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.RVExpTest
 // ============================================================================
 package atlas.vector

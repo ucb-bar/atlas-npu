@@ -2,7 +2,7 @@
 // AddSubSumTest.scala — Functional tests for the vector add/sub unit
 // (AddSubSumVec): Add and Sub.
 //
-// RUN: (from sp26-atlas-acc)
+// RUN: (from atlas-npu)
 //    mill atlas.test.testOnly atlas.vector.AddSubSumTest
 // ============================================================================
 

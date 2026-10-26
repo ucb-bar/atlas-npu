@@ -2,7 +2,7 @@
 // InnerProductTreesFullMatmulTest.scala — Multi-tile matmul tests for the
 // inner product trees MXU under VCS with full code-coverage collection.
 //
-// RUN: (from sp26-atlas-acc) 
+// RUN: (from atlas-npu) 
 //    mill atlas.test.testOnly atlas.ipt.InnerProductTreesFullMatmulTest 
 // ============================================================================
 
