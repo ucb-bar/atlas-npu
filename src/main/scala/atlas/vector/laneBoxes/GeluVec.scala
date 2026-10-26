@@ -69,11 +69,10 @@ class GeluVec(BF16T: AtlasFPType, numLanes: Int = 16) extends Module {
 
     private def add(valid: Bool, a: Vec[UInt], b: Vec[UInt]): Valid[Vec[UInt]] = {
         val box = Module(new AddSubSumVec(BF16T, numLanes))
-        box.io.req.valid                    := valid
-        box.io.req.bits.isSub               := false.B
-        box.io.req.bits.isDoneReadingColSum := false.B
-        box.io.req.bits.aVec                := a
-        box.io.req.bits.bVec                := b
+        box.io.req.valid      := valid
+        box.io.req.bits.isSub := false.B
+        box.io.req.bits.aVec  := a
+        box.io.req.bits.bVec  := b
         response(box.io.resp.valid, box.io.resp.bits.result)
     }
 

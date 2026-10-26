@@ -112,7 +112,7 @@ class VectorEngineBroadcastTest extends AnyFlatSpec {
   import VpuBroadcastHarness._
 
   private val ops = Seq("vadd" -> 1, "vsub" -> 2, "vmul" -> 3, "vminimum" -> 25, "vmaximum" -> 24)
-  private val (tanh, mov) = (8, 26)
+  private val (tanh, mov, csum) = (8, 26, 15)
   private val specials = Seq(0x0000, 0x8000, 0x0001, 0x8001, 0x7F80, 0xFF80, 0x7FC0, 0xFFC1, 0x3F80,
     0xBF80, 0x7F7F, 0xFF7F, 0x0080, 0x4049)
 
@@ -192,6 +192,19 @@ class VectorEngineBroadcastTest extends AnyFlatSpec {
       drive(dut, m4, Map(0 -> Cmd(3, 8, 4, 2, src = row0), next -> Cmd(2, 20, 0, 22, src = row0)))
       expect(tile(m4, 8), mul, "vmul.bf16.vr, then vsub.bf16.vr")
       expect(tile(m4, 20), sub, "vsub.bf16.vr after vmul.bf16.vr")
+      // vredsum.bf16 (column sums) in slot 1, which reads its pair twice, then .vx and .vr add and
+      // sub in slot 2 while it reads
+      val sums = mem.map(_.clone)
+      drive(dut, sums, Map(0 -> Cmd(csum, 24, 26)))
+      val m5 = mem.map(_.clone)
+      drive(dut, m5, Map(0 -> Cmd(csum, 24, 26), 64 -> Cmd(1, 8, 0, src = xreg, imm = 0x3FC0)))
+      expect(tile(m5, 8), add, "vadd.bf16.vx next to vredsum.bf16")
+      expect(tile(m5, 24), tile(sums, 24), "vredsum.bf16 next to vadd.bf16.vx")
+      val late = firstIssue(dut, Cmd(csum, 24, 26), Cmd(2, 20, 0, 22, src = row0))
+      val m6 = mem.map(_.clone)
+      drive(dut, m6, Map(0 -> Cmd(csum, 24, 26), late -> Cmd(2, 20, 0, 22, src = row0)))
+      expect(tile(m6, 20), sub, "vsub.bf16.vr next to vredsum.bf16")
+      expect(tile(m6, 24), tile(sums, 24), "vredsum.bf16 next to vsub.bf16.vr")
     }
   }
 }

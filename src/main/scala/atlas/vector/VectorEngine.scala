@@ -191,7 +191,6 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   // ── Add/Sub (rsum handled separately as a 32-element BF16 pair reduction) ──
   val addSubSum = Module(new AddSubSumVec(p.BF16))
   addSubSum.io.req.valid                     := (isAddValid || isSubValid)
-  addSubSum.io.req.bits.isDoneReadingColSum   := fsm.io.out.isDoneReadingColSum
   addSubSum.io.req.bits.isSub                := isSubValid
   addSubSum.io.req.bits.aVec                 := Mux(isAdd1 || isSub1, vector1, vector2)
   addSubSum.io.req.bits.bVec                 := Mux(isAdd1 || isSub1, second1, second2)

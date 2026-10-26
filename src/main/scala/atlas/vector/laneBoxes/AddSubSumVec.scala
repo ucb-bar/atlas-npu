@@ -10,7 +10,6 @@ import sp26FPUnits.hardfloat.consts._
 // Input bundles
 class AddSubSumReq(wordWidth: Int, numLanes: Int, tagWidth: Int) extends Bundle {
     val isSub = Bool()  // 1 = sub, 0 = add
-    val isDoneReadingColSum = Bool() // For column reduction instructions, indicates when done reading all elements for a lane
     val aVec = Vec(numLanes, UInt(wordWidth.W))
     val bVec = Vec(numLanes, UInt(wordWidth.W))
 }
@@ -49,7 +48,7 @@ class AddSubSumVec(BF16T: AtlasFPType, numLanes: Int = 16, tagWidth: Int = 16) e
     // Stage 1: Output and Conversion
     val isValidStage1 = RegNext(io.req.valid, false.B)
     val addSubResultNext = RegInit(0.U.asTypeOf(chiselTypeOf(addSubResult)))
-    when (io.req.valid && !io.req.bits.isDoneReadingColSum) {addSubResultNext := addSubResult}
+    when (io.req.valid) {addSubResultNext := addSubResult}
 
     // Round the FP32 sum to BF16, nearest even. FP32 has more than 2 x 8 + 1 significand bits, so
     // the two roundings give BF16_RNE of the exact sum (Figueroa, "When is double rounding
