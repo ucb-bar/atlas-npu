@@ -64,6 +64,7 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   fsm.io.in.instWriteBank          := io.inst.bits.instWriteBank
   fsm.io.in.instPackScaleE8M0      := io.inst.bits.packScaleE8M0
   fsm.io.in.instUnpackScaleE8M0    := io.inst.bits.unpackScaleE8M0
+  fsm.io.in.instRows               := io.inst.bits.rows
   // The row 0 responses of a .vr count as its slot's first read.
   fsm.io.in.dataInFire1            := dataInFire1 || fsm.io.out.row0Resp1
   fsm.io.in.dataInFire2            := dataInFire2 || fsm.io.out.row0Resp2
@@ -313,8 +314,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   pairMax.io.req.bits.aVec                   := Mux(isCMax1 || isPairMax1, vector1, vector2)
   pairMax.io.req.bits.bVec                   := MuxCase(pairMax.io.resp.bits.result,
                                                   Seq(
-                                                    (isCMax1 && (fsm.io.out.readRow1 === 1.U) && !fsm.io.out.readBank1(0)) -> vector1,
-                                                    (isCMax2 && (fsm.io.out.readRow2 === 1.U) && !fsm.io.out.readBank2(0)) -> vector2,
+                                                    (isCMax1 && fsm.io.out.firstRow1) -> vector1,
+                                                    (isCMax2 && fsm.io.out.firstRow2) -> vector2,
                                                     (isPairMax1 && io.data1.valid) -> second1,
                                                     (isPairMax2 && io.data2.valid) -> second2
                                                   ))
@@ -326,8 +327,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   pairMin.io.req.bits.aVec                   := Mux(isCMin1 || isPairMin1, vector1, vector2)
   pairMin.io.req.bits.bVec                   := MuxCase(pairMin.io.resp.bits.result,
                                                   Seq(
-                                                    (isCMin1 && (fsm.io.out.readRow1 === 1.U) && !fsm.io.out.readBank1(0)) -> vector1,
-                                                    (isCMin2 && (fsm.io.out.readRow2 === 1.U) && !fsm.io.out.readBank2(0)) -> vector2,
+                                                    (isCMin1 && fsm.io.out.firstRow1) -> vector1,
+                                                    (isCMin2 && fsm.io.out.firstRow2) -> vector2,
                                                     (isPairMin1 && io.data1.valid) -> second1,
                                                     (isPairMin2 && io.data2.valid) -> second2
                                                   ))

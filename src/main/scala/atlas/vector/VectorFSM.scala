@@ -17,6 +17,7 @@ class FSMIn extends Bundle {
     val instImm       = SInt(16.W)
     val instPackScaleE8M0   = UInt(8.W)
     val instUnpackScaleE8M0 = UInt(8.W)
+    val instRows      = UInt(5.W)   // the row count M, 0 for 32
     val dataInFire1  = Bool()
     val dataInFire2  = Bool()
     val dataOutFire1 = Bool()
@@ -54,6 +55,8 @@ class FSMOut extends Bundle {
     val isDoneReadingColMin = Bool()
     val isDoneReadingColSum = Bool()
     val isFirstEntryColSum = Bool()
+    val firstRow1  = Bool()   // the read response of this cycle is the slot's first row
+    val firstRow2  = Bool()
     val state      = UInt(2.W)
     val done1      = Bool()
     val done2      = Bool()
@@ -69,11 +72,20 @@ class FSMOut extends Bundle {
     val busy = Bool()
 }
 
+// A slot's read and write counters step through rows 0..M-1 of each register (M the row count of
+// its instruction; vpack and vunpack take all 32 rows): bits 4:0 hold the row, bit 5 the register
+// of the pair, bit 6 the pass of a column reduction (it reads the pair twice). After row M - 1 a
+// counter goes to row 0 of the next register, so a done counter holds row 0.
 class VectorFSM(val p: VpuParams) extends Module {
     val io = IO(new Bundle {
         val in = Input(new FSMIn())
         val out = Output(new FSMOut())
     })
+
+    private def next(counter: UInt, last: UInt): UInt =
+        Mux(counter(4, 0) === last, (counter(6, 5) + 1.U) ## 0.U(5.W), counter + 1.U)
+    // The last count of `registers` x M rows (M - 1 = last).
+    private def limit(registers: Int, last: UInt): UInt = (registers - 1).U(2.W) ## last
 
     val inst1         = RegInit(VPUOp.add)
     val readDone1     = RegInit(true.B)
@@ -102,6 +114,9 @@ class VectorFSM(val p: VpuParams) extends Module {
     val isNextWriteBank2 = writeCounter2(5)
     val readCounter2FiveBits = readCounter2(4,0)
     val writeCounter2FiveBits = writeCounter2(4,0)
+
+    val last1 = RegInit(31.U(5.W))   // M - 1 of each slot's instruction
+    val last2 = RegInit(31.U(5.W))
 
     val packScale1Reg   = RegInit(127.U(8.W))
     val packScale2Reg   = RegInit(127.U(8.W))
@@ -205,14 +220,17 @@ class VectorFSM(val p: VpuParams) extends Module {
     // Asymmetric thresholds:
     //   - fp8pack writes 1 mreg (32 rows)
     //   - fp8unpack reads 1 mreg (32 rows)
-    //   - vliCol / vliOne write exactly 1 mreg (32 rows)
-    //   - vliAll / vliRow write a full BF16 tensor pair (64 rows)
-    val readLim1  = Mux(isColReduce1, 127.U, Mux(isFp8unpack1, 31.U, 63.U))
+    //   - vliCol / vliOne write exactly 1 mreg (M rows)
+    //   - vliAll / vliRow write a full BF16 tensor pair (2M rows)
+    val readLim1  = Mux(isColReduce1, limit(4, last1), Mux(isFp8unpack1, limit(1, last1), limit(2, last1)))
     val doubleIsRowReduce = opIsRowReduce(inst1)
-    val readLim2  = Mux(doubleIsRowReduce, 31.U, Mux(isColReduce2, 127.U, Mux(isFp8unpack2, 31.U, 63.U)))
+    val readLim2  = Mux(doubleIsRowReduce, limit(1, last2),
+                    Mux(isColReduce2, limit(4, last2), Mux(isFp8unpack2, limit(1, last2), limit(2, last2))))
     val doubleUsesDualWritePorts = opUsesDualWritePorts(inst1)
-    val writeLim1 = Mux(doubleUsesDualWritePorts, 31.U, Mux(isColReduce1, 127.U, Mux(isFp8pack1 || isVliColOrOne1, 31.U, 63.U)))
-    val writeLim2 = Mux(doubleUsesDualWritePorts, 31.U, Mux(isColReduce2, 127.U, Mux(isFp8pack2 || isVliColOrOne2, 31.U, 63.U)))
+    val writeLim1 = Mux(doubleUsesDualWritePorts, limit(1, last1), Mux(isColReduce1, limit(4, last1),
+                    Mux(isFp8pack1 || isVliColOrOne1, limit(1, last1), limit(2, last1))))
+    val writeLim2 = Mux(doubleUsesDualWritePorts, limit(1, last2), Mux(isColReduce2, limit(4, last2),
+                    Mux(isFp8pack2 || isVliColOrOne2, limit(1, last2), limit(2, last2))))
 
     val isWriteOnly = opIsVli(io.in.instType)
     val inputIsRowReduce = opIsRowReduce(io.in.instType)
@@ -220,14 +238,17 @@ class VectorFSM(val p: VpuParams) extends Module {
     // read ports in its issue cycle and streams T(vs1) from the next cycle on.
     val inputUsesDoublePorts = opUsesDoublePorts(io.in.instType) && io.in.instSrc === VSRC_PAIR
     val inputIsRow0 = io.in.instSrc === VSRC_ROW0
-    val firstReadCount = Mux(isWriteOnly || inputIsRow0, 0.U, 1.U)
+    val inputLast = Mux(io.in.instType === VPUOp.fp8pack || io.in.instType === VPUOp.fp8unpack, 31.U,
+                        io.in.instRows - 1.U)
+    val firstCount = next(0.U(7.W), inputLast)
+    val firstReadCount = Mux(isWriteOnly || inputIsRow0, 0.U, firstCount)
     val inputUsesDualWritePorts = opUsesDualWritePorts(io.in.instType)
     val inputReadBank2 = Mux(inputIsRowReduce, io.in.instReadBank1 + 1.U, io.in.instReadBank2)
     val inputWriteBank2 = io.in.instWriteBank + 1.U
     val done1 = writeDone1 || (io.in.dataOutFire1 && writeCounter1 === writeLim1)
     val done2 = writeDone2 || (io.in.dataOutFire2 && writeCounter2 === writeLim2)
     val doubleDone = Mux(doubleUsesDualWritePorts, done1 && done2, done1)
-    val doubleReadLim = Mux(doubleIsRowReduce, 31.U, 63.U)
+    val doubleReadLim = Mux(doubleIsRowReduce, limit(1, last1), limit(2, last1))
 
     val idle :: single :: double :: Nil = Enum(3)
     val state = RegInit(idle)
@@ -278,6 +299,8 @@ class VectorFSM(val p: VpuParams) extends Module {
     val isDOUBLE = nextState === double
     val newInputToSINGLE = io.in.instFire && isSINGLE
     val newInputToDOUBLE = io.in.instFire && isDOUBLE
+    when (slot1NewInst) { last1 := inputLast }
+    when (slot2NewInst || newInputToDOUBLE) { last2 := inputLast }
     val readEarly1 = newInputToDOUBLE || (newInputToSINGLE && done1)
     val readEarly2 = newInputToDOUBLE || (newInputToSINGLE && !done1)
 
@@ -285,10 +308,10 @@ class VectorFSM(val p: VpuParams) extends Module {
         is(idle) {
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := 1.U
+                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                 inst2 := VPUOp.add
-                readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := 1.U
+                readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U
@@ -307,9 +330,9 @@ class VectorFSM(val p: VpuParams) extends Module {
         is(single) {
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := 1.U
+                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
-                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := 1.U
+                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U
@@ -328,16 +351,16 @@ class VectorFSM(val p: VpuParams) extends Module {
                     writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                     inst2 := inst2
                     readDone2 := Mux(readValid2 && io.in.dataInFire2 && readCounter2 === readLim2, true.B, readDone2)
-                    readBank2 := readBank2; readCounter2 := Mux(readValid2 && io.in.dataInFire2, readCounter2 + 1.U, readCounter2)
+                    readBank2 := readBank2; readCounter2 := Mux(readValid2 && io.in.dataInFire2, next(readCounter2, last2), readCounter2)
                     writeDone2 := Mux(io.in.dataOutFire2 && writeCounter2 === writeLim2, true.B, writeDone2)
-                    writeCounter2 := Mux(io.in.dataOutFire2, writeCounter2 + 1.U, writeCounter2)
+                    writeCounter2 := Mux(io.in.dataOutFire2, next(writeCounter2, last2), writeCounter2)
                     readValid1 := !isWriteOnly; readValid2 := !readDone2
                 }.elsewhen(done2) {
                     inst1 := inst1
                     readDone1 := Mux(io.in.dataInFire1 && readCounter1 === readLim1, true.B, readDone1)
-                    readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, readCounter1 + 1.U, readCounter1)
+                    readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, next(readCounter1, last1), readCounter1)
                     writeDone1 := Mux(io.in.dataOutFire1 && writeCounter1 === writeLim1, true.B, writeDone1)
-                    writeBank1 := writeBank1; writeCounter1 := Mux(io.in.dataOutFire1, writeCounter1 + 1.U, writeCounter1)
+                    writeBank1 := writeBank1; writeCounter1 := Mux(io.in.dataOutFire1, next(writeCounter1, last1), writeCounter1)
                     inst2 := io.in.instType; slot2NewInst := true.B
                     readDone2 := isWriteOnly; readBank2 := io.in.instReadBank1; readCounter2 := firstReadCount
                     writeDone2 := false.B; writeBank2 := io.in.instWriteBank; writeCounter2 := 0.U
@@ -352,14 +375,14 @@ class VectorFSM(val p: VpuParams) extends Module {
             }.otherwise {
                 inst1 := inst1
                 readDone1 := Mux(io.in.dataInFire1 && readCounter1 === readLim1, true.B, readDone1)
-                readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, readCounter1 + 1.U, readCounter1)
+                readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, next(readCounter1, last1), readCounter1)
                 writeDone1 := Mux(io.in.dataOutFire1 && writeCounter1 === writeLim1, true.B, writeDone1)
-                writeBank1 := writeBank1; writeCounter1 := Mux(io.in.dataOutFire1, writeCounter1 + 1.U, writeCounter1)
+                writeBank1 := writeBank1; writeCounter1 := Mux(io.in.dataOutFire1, next(writeCounter1, last1), writeCounter1)
                 inst2 := inst2
                 readDone2 := Mux(readValid2 && io.in.dataInFire2 && readCounter2 === readLim2, true.B, readDone2)
-                readBank2 := readBank2; readCounter2 := Mux(readValid2 && io.in.dataInFire2, readCounter2 + 1.U, readCounter2)
+                readBank2 := readBank2; readCounter2 := Mux(readValid2 && io.in.dataInFire2, next(readCounter2, last2), readCounter2)
                 writeDone2 := Mux(io.in.dataOutFire2 && writeCounter2 === writeLim2, true.B, writeDone2)
-                writeBank2 := writeBank2; writeCounter2 := Mux(io.in.dataOutFire2, writeCounter2 + 1.U, writeCounter2)
+                writeBank2 := writeBank2; writeCounter2 := Mux(io.in.dataOutFire2, next(writeCounter2, last2), writeCounter2)
                 readValid1 := !readDone1; readValid2 := !readDone2
             }
         }
@@ -367,9 +390,9 @@ class VectorFSM(val p: VpuParams) extends Module {
             // fp8pack/unpack never enter double state (single-input ops)
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := 1.U
+                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
-                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := 1.U
+                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U
@@ -390,16 +413,16 @@ class VectorFSM(val p: VpuParams) extends Module {
             }.otherwise {
                 inst1 := inst1
                 readDone1 := Mux(readValid1 && io.in.dataInFire1 && readCounter1 === doubleReadLim, true.B, readDone1)
-                readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, readCounter1 + 1.U, readCounter1)
+                readBank1 := readBank1; readCounter1 := Mux(readValid1 && io.in.dataInFire1, next(readCounter1, last1), readCounter1)
                 writeDone1 := Mux(io.in.dataOutFire1 && writeCounter1 === writeLim1, true.B, writeDone1)
                 writeBank1 := writeBank1
-                writeCounter1 := Mux(io.in.dataOutFire1, writeCounter1 + 1.U, writeCounter1)
+                writeCounter1 := Mux(io.in.dataOutFire1, next(writeCounter1, last1), writeCounter1)
                 inst2 := inst2
                 readDone2 := Mux(readValid1 && io.in.dataInFire1 && readCounter2 === doubleReadLim, true.B, readDone2)
-                readBank2 := readBank2; readCounter2 := Mux(readValid1 && io.in.dataInFire1, readCounter2 + 1.U, readCounter2)
+                readBank2 := readBank2; readCounter2 := Mux(readValid1 && io.in.dataInFire1, next(readCounter2, last2), readCounter2)
                 writeDone2 := Mux(doubleUsesDualWritePorts && io.in.dataOutFire2 && writeCounter2 === writeLim2, true.B, writeDone2)
                 writeBank2 := writeBank2
-                writeCounter2 := Mux(doubleUsesDualWritePorts && io.in.dataOutFire2, writeCounter2 + 1.U, writeCounter2)
+                writeCounter2 := Mux(doubleUsesDualWritePorts && io.in.dataOutFire2, next(writeCounter2, last2), writeCounter2)
                 readValid1 := !readDone1; readValid2 := !readDone2
             }
         }
@@ -456,7 +479,9 @@ class VectorFSM(val p: VpuParams) extends Module {
     io.out.isDoneReadingColMax := ((readCounter1 >= 65.U || readDone1) && inst1 === VPUOp.cmax) || ((readCounter2 >= 65.U || readDone2) && inst2 === VPUOp.cmax)
     io.out.isDoneReadingColMin := ((readCounter1 >= 65.U || readDone1) && inst1 === VPUOp.cmin) || ((readCounter2 >= 65.U || readDone2) && inst2 === VPUOp.cmin)
     io.out.isDoneReadingColSum := ((readCounter1 >= 65.U || readDone1) && inst1 === VPUOp.csum) || ((readCounter2 >= 65.U || readDone2) && inst2 === VPUOp.csum)
-    io.out.isFirstEntryColSum := (readCounter1 === 1.U && inst1 === VPUOp.csum) || (readCounter2 === 1.U && inst2 === VPUOp.csum)
+    io.out.firstRow1 := readCounter1 === next(0.U(7.W), last1)
+    io.out.firstRow2 := readCounter2 === next(0.U(7.W), last2)
+    io.out.isFirstEntryColSum := (io.out.firstRow1 && inst1 === VPUOp.csum) || (io.out.firstRow2 && inst2 === VPUOp.csum)
     io.out.state := state; io.out.readDone1 := readDone1; io.out.readDone2 := readDone2
     io.out.writeDone1 := writeDone1; io.out.writeDone2 := writeDone2
 

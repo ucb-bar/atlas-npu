@@ -6,7 +6,7 @@
 //
 // Bank tracking rationale:
 //   Most BF16 VPU ops span two consecutive mregs because the FSM toggles
-//   the bank at counter(5). The exceptions are:
+//   the bank at counter(5), after row M - 1. The exceptions are:
 //     - fp8pack:   reads two BF16 mregs, writes one packed-FP8 mreg
 //     - fp8unpack: reads one packed-FP8 mreg, writes two BF16 mregs
 //     - vliCol / vliOne: write exactly one 32x16 BF16 tensor register
@@ -90,6 +90,7 @@ class VectorEngineTop(
 
   vecInput.packScaleE8M0   := io.cmd.bits.scaleE8M0
   vecInput.unpackScaleE8M0 := io.cmd.bits.scaleE8M0
+  vecInput.rows            := io.cmd.bits.rows
 
   core.io.inst.valid := io.cmd.valid
   core.io.inst.bits  := vecInput

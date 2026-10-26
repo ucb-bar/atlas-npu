@@ -51,6 +51,7 @@ class VectorInput(val p: VpuParams) extends Bundle {
   val imm             = SInt(16.W)  // vli.*: the immediate; .vx: the BF16 scalar
   val packScaleE8M0   = UInt(8.W)   // E8M0 scale for VPACK_BF16_FP8
   val unpackScaleE8M0 = UInt(8.W)   // E8M0 scale for VUNPACK_FP8_BF16
+  val rows            = UInt(5.W)   // the row count M, 0 for 32
 }
 
 class RegData extends Bundle {
