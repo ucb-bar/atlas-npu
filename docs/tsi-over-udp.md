@@ -443,7 +443,8 @@ then takes less than line rate.
 ## Resources and timing
 
 Vivado 2024.1, 50 MHz, all three configurations meet timing (`bitstreams/AtlasStandaloneEth`, with
-ETH_RXFRAMES).
+ETH_RXFRAMES). These are the configurations of 2026-10-23: `default` had the systolic array
+(`mxu0`) too, and `ipt` is today's `default` (standalone/README.md, Configurations).
 `ipt-nvfp4` uses `SSI_SpreadLogic_high` placement and `Explore` routing (build_bitstream.sh
 arguments 5 and 6); the others use the defaults.
 
