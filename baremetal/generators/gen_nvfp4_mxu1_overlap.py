@@ -6,7 +6,7 @@ The NV MXU and mxu1 run the same program at the same time:
   nv acc1   = A_nv @ W_nv^T                       popped as FP32
   mxu1 acc0 = C_1 + A_1 @ W_1^T (E4M3 push)       popped as BF16
   mxu1 acc1 = A_1 @ W_1^T                         popped as E4M3 at e = 124 (x 2^-3)
-mxu1 data are E4M3 codes of magnitude at most 8 (subnormals included), so the E4M3 pop does not
+mxu1 data are E4M3 codes of magnitude at most 15 (subnormals included), so the E4M3 pop does not
 saturate. The arithmetic is npu_model's: configs/nvfp4.py (through nvfp4_common), fp8_mma.py and
 cvt.py.
 
@@ -28,7 +28,7 @@ c_nv = rand_fp32_tile(rng)
 
 
 def e4m3_tile() -> np.ndarray:
-    """32 x 32 E4M3 codes, both signs, exponent field 0-10 (|x| <= 8)."""
+    """32 x 32 E4M3 codes, both signs, exponent field 0-10 (|x| <= 15)."""
     return np.array([[rng.randrange(2) << 7 | rng.randrange(11) << 3 | rng.randrange(8)
                       for _ in range(32)] for _ in range(32)], np.uint8)
 
