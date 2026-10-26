@@ -111,7 +111,7 @@ class LoopKernels:
                 o = regs.pair()
                 b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
                 if bias is not None:
-                    b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
+                    b.v("vadd.bf16.vr", f"m{o}", f"m{o}", f"m{bias}")
                 ptrs = {s.name: Ptr(scol[s.name], (r * s.t.ct * s.t.tile_bytes if s.per_row else 0)
                                     + par * s.t.tile_bytes) for s in streams}
                 epilogue(o, r, ptrs)
@@ -160,12 +160,12 @@ class LoopKernels:
         return f
 
     def epi_residual_scale(self, x: str, scale: str):
-        """x += scale * y (scale a replicated row, e.g. LayerScale)."""
+        """x += scale * y (scale a row, row 0 of its tiles, e.g. LayerScale)."""
         def f(o, r, ptrs):
             b = self.b
             g = b.regs.pair()
             b.vload2(g, ptrs[scale])
-            b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{g}")
+            b.v("vmul.bf16.vr", f"m{o}", f"m{o}", f"m{g}")
             b.vload2(g, ptrs[x])
             b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{g}")
             b.vstore2(o, ptrs[x])
@@ -199,7 +199,7 @@ class LoopKernels:
         b.xrelease(ps, pd)
 
     def layernorm_rows(self, x: Tensor, w: Tensor, bias: Tensor, out: Tensor, a: int, eps: float) -> None:
-        """out = FP8((LN(x) * w + bias) / 2**a) per row tile; w, bias replicated rows."""
+        """out = FP8((LN(x) * w + bias) / 2**a) per row tile; w, bias rows (row 0 of their tiles)."""
         b = self.b
         px, po = b.xreg(), b.xreg()
         self.ptr(px, x.tile(0, 0))
@@ -216,7 +216,7 @@ class LoopKernels:
                        a_q: int, a_k: int, a_v: int, a_p: int, a_out: int, scratch: dict) -> None:
         """Multi-head attention with head_dim 64: out[:, 64h:64h+64] = FP8(softmax(q k^T / 8) v / 2**a_out).
         q rows and kv rows may differ (cross-attention). rope (cos, sin per kv/q row, applied to q
-        and k when q is kv) or None. masks: one BF16 tile per key tile (replicated rows), added to
+        and k when q is kv) or None. masks: one BF16 tile per key tile (row 0), added to
         the scores. scratch: FP8 tensors qbuf [q rows x 64], kbuf [kv rows x 64], vtbuf [64 x kv
         rows] (V^T), pbuf [32 x kv rows], and BF16 sbuf [32 x kv rows]."""
         b, k, regs = self.b, self.k, self.b.regs
@@ -256,7 +256,7 @@ class LoopKernels:
                     b.v("vmatmul.acc.mxu1", "acc0", f"m{Q1}", "w1")
                     b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{s}", "acc0", f"e{b.erf(127 + a_q + a_k)}")
                     b.vload2(t, Ptr(pm, 0))
-                    b.v("vadd.bf16", f"m{s}", f"m{s}", f"m{t}")
+                    b.v("vadd.bf16.vr", f"m{s}", f"m{s}", f"m{t}")
                     b.v("vredmax.row.bf16", f"m{t}", f"m{s}")
                     b.v("vmaximum.bf16", f"m{m}", f"m{m}", f"m{t}")
                     b.vstore2(s, Ptr(ps, 0))

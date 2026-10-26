@@ -126,7 +126,7 @@ class Kernels:
                 if r in held:
                     self._store(*held.pop(r))
                 if bias is not None:
-                    b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{bias}")
+                    b.v("vadd.bf16.vr", f"m{o}", f"m{o}", f"m{bias}")
                 store = epilogue(o, r, n)
                 if store is None:
                     regs.release(pairs=(o,))
@@ -155,12 +155,12 @@ class Kernels:
         return f
 
     def epi_residual_gate(self, x: Tensor, gate: Tensor):
-        """x += gate * y, with gate a replicated row of tiles."""
+        """x += gate * y, with gate a row of tiles (row 0)."""
         def f(o, r, n):
             b = self.b
             g = b.regs.pair()
             b.vload2(g, gate.tile(0, n))
-            b.v("vmul.bf16", f"m{o}", f"m{o}", f"m{g}")
+            b.v("vmul.bf16.vr", f"m{o}", f"m{o}", f"m{g}")
             b.vload2(g, x.tile(r, n))
             b.v("vadd.bf16", f"m{o}", f"m{o}", f"m{g}")
             b.vstore2(o, x.tile(r, n))
@@ -198,7 +198,7 @@ class Kernels:
 
     # -- LayerNorm (no affine, eps 1e-6), adaLN modulation, FP8 out ----------------------------
     def ln_modulate_quant(self, x: Tensor, scale1: Tensor, shift: Tensor, out: Tensor, a: int) -> None:
-        """out = FP8((LN(x) * scale1 + shift) / 2**a); scale1 = 1 + scale and shift are replicated rows."""
+        """out = FP8((LN(x) * scale1 + shift) / 2**a); scale1 = 1 + scale and shift are rows (.vr: row 0 of their tiles)."""
         self.b.prog.comment(f"layernorm+modulate {x.name} -> {out.name}")
         for r in range(x.rt):
             self.ln_row(lambda j, r=r: x.tile(r, j), lambda j, r=r: out.tile(r, j), x.ct, x.cols,
@@ -231,9 +231,9 @@ class Kernels:
             b.v("vsub.bf16", f"m{xj}", f"m{xj}", f"m{mean}")
             b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{var}")
             b.vload2(t, scale1.tile(0, j))
-            b.v("vmul.bf16", f"m{xj}", f"m{xj}", f"m{t}")
+            b.v("vmul.bf16.vr", f"m{xj}", f"m{xj}", f"m{t}")
             b.vload2(t, shift.tile(0, j))
-            b.v("vadd.bf16", f"m{xj}", f"m{xj}", f"m{t}")
+            b.v("vadd.bf16.vr", f"m{xj}", f"m{xj}", f"m{t}")
             self.quant_store(xj, j % 2, oa(j), 127 - a)
         regs.release(pairs=(mean, var, xj, t))
 
@@ -241,7 +241,7 @@ class Kernels:
     def attention(self, qkv: Tensor, rope_cos: Tensor, rope_sin: Tensor, kmask: Tensor | None,
                   out: Tensor, heads: int, a_q: int, a_k: int, a_v: int, a_p: int, a_out: int) -> None:
         """out = FP8(attention / 2**a_out). qkv holds q | k | v (each heads x 64 wide) per token row.
-        a_q is the exponent of q / sqrt(64). kmask (replicated rows) masks the last key tile's padding."""
+        a_q is the exponent of q / sqrt(64). kmask (row 0 of a tile) masks the last key tile's padding."""
         b, regs = self.b, self.b.regs
         RT, HT = qkv.rt, qkv.ct // 3
         assert RT <= 2 and HT == 2 * heads, "head_dim must be 64 and the sequence at most 64"
@@ -295,7 +295,7 @@ class Kernels:
                 m, t = regs.pair(), regs.pair()
                 for rk in range(RT):
                     if mask is not None and rk == RT - 1:
-                        b.v("vadd.bf16", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{mask}")
+                        b.v("vadd.bf16.vr", f"m{S[rq, rk]}", f"m{S[rq, rk]}", f"m{mask}")
                     b.v("vredmax.row.bf16", f"m{m if rk == 0 else t}", f"m{S[rq, rk]}")
                     if rk:
                         b.v("vmaximum.bf16", f"m{m}", f"m{m}", f"m{t}")
