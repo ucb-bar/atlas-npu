@@ -1,5 +1,5 @@
 # vpu_pack.S — VPU FP8 pack/unpack integration test
-# Tests: vfp8pack, vfp8unpack with non-trivial scaling
+# Tests: vpack.bf16.fp8, vunpack.fp8.bf16 with non-trivial scaling
 # @TIMEOUT 30000
 # @DRAM_BASE 0x90000000
 # @PYTHON_GEN gen_vpu_pack.py
@@ -46,7 +46,7 @@
     DELAY 33
 
 # ================================================================
-# Test 1: vfp8pack  m4, m0 with scale reg 0
+# Test 1: vpack.bf16.fp8  m4, m0 with scale reg 0
 #   scale reg 0 = 0x7E → 2^(-1)
 #   pack multiplies by it, so 2.0 → 1.0 → E4M3 0x38
 # ================================================================
@@ -64,7 +64,7 @@
     dma.wait ch1
 
 # ================================================================
-# Test 2: vfp8unpack  m8, m4 with scale reg 1
+# Test 2: vunpack.fp8.bf16  m8, m4 with scale reg 1
 #   scale reg 1 = 0x81 → 2^2 = 4.0
 #   result = 1.0 × 4.0 = 4.0 → BF16 0x4080
 # ================================================================

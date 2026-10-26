@@ -55,7 +55,7 @@ That's 32 unary outputs (~64 KiB of golden checks). After the unary
 sweep, a chain phase reuses Tile A through five LUT pipes
 (VLOG2 + VSQRT + VEXP2 + VRECIP + VTANH) and combines the products
 through VMUL.BF16 / VADD.BF16 / VSUB.BF16, VREDSUM.ROW.BF16,
-VFP8PACK + VFP8UNPACK, and VREDSUM.BF16 (column reduce). This drives
+VPACK.BF16.FP8 + VUNPACK.FP8.BF16, and VREDSUM.BF16 (column reduce). This drives
 the AddSubSum / ColAdd reduction trees and the FP8 datapath using
 LUT-derived (not constant) operands.
 
@@ -120,8 +120,8 @@ CHAIN_MUL_BASE     = 0x12000   # VMUL.BF16(VLOG2, VSQRT)
 CHAIN_ADD_BASE     = 0x12800   # VADD.BF16(VEXP2, VRECIP.BF16)
 CHAIN_SUB_BASE     = 0x13000   # VSUB.BF16(VTANH, MUL)
 CHAIN_RSUM_BASE    = 0x13800   # VREDSUM.ROW.BF16(ADD)
-CHAIN_PACK_BASE    = 0x14000   # VFP8PACK(ADD, scale=PACK_SCALE)
-CHAIN_UNPACK_BASE  = 0x14400   # VFP8UNPACK(PACK, scale=UNPACK_SCALE)
+CHAIN_PACK_BASE    = 0x14000   # VPACK.BF16.FP8(ADD, scale=PACK_SCALE)
+CHAIN_UNPACK_BASE  = 0x14400   # VUNPACK.FP8.BF16(PACK, scale=UNPACK_SCALE)
 CHAIN_CSUM_BASE    = 0x14C00   # VREDSUM.BF16(UNPACK)
 
 PACK_SCALE_E8M0   = 0x83

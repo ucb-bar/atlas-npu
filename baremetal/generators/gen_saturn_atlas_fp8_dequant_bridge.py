@@ -5,7 +5,7 @@ One-way Atlas -> Saturn FP8 handshake test. Together with the partner
 test saturn_atlas_fp8_quantize_bridge (Saturn -> Atlas direction), this
 closes the bidirectional FP8 handoff story. "Handoff" rather than
 "byte equivalence": each side is verified against its own correct
-golden, but Atlas's scaled VFP8UNPACK and Saturn's no-scale
+golden, but Atlas's scaled VUNPACK.FP8.BF16 and Saturn's no-scale
 vfwcvtbf16 produce different bits by construction (the E8M0 scale
 applies only to the Atlas path).
 
@@ -14,8 +14,8 @@ applies only to the Atlas path).
   stage 1   Atlas:   run mxu1_quant_relu_roundtrip kernel:
                        MXU1 matmul (A_fp8 @ B_fp8 -> BF16 raw)
                        VPU ReLU on BF16 raw
-                       VFP8PACK pack to FP8 (with E8M0 scale)
-                       VFP8UNPACK roundtrip back to BF16
+                       VPACK.BF16.FP8 to FP8 (with E8M0 scale)
+                       VUNPACK.FP8.BF16 roundtrip back to BF16
                      Atlas writes packed FP8 to DRAM[0x1800].
 
   ---- checkpoint 1 (Atlas FP8 production) ----
@@ -33,7 +33,7 @@ applies only to the Atlas path).
     e4m3_bytes_to_float (canonical E4M3 -> FP32) cast to BF16. Saturn's
     vfwcvtbf16.f.f.v does no scale; this golden does no scale.
 
-Atlas's own VFP8UNPACK output at 0x2000 applies the E8M0 scale (0x7E =
+Atlas's own VUNPACK.FP8.BF16 output at 0x2000 applies the E8M0 scale (0x7E =
 2^-1), so it is intentionally not compared against Saturn's no-scale
 decode. This cooperative test verifies Atlas's packed FP8 bytes at
 0x1800 and Saturn's no-scale decode at 0x3000; the existing

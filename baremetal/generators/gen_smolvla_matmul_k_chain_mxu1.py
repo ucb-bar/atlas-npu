@@ -9,8 +9,8 @@ Two-K-tile FP8 matmul that exercises the MXU1 accumulator chain:
 
 Seed 44 matches npu-model. Output is BF16, split across m8/m9
 (cols 0-15 and 16-31). Golden through atlas's IPTLinearRTLFunction,
-which handles per-K-tile BF16 rounding internally and mirrors
-hardware exactly.
+which chains the K tiles through the FP32 accumulator and rounds to
+BF16 once at the pop, as the hardware does.
 """
 
 import os

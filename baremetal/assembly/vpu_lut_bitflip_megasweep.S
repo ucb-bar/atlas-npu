@@ -28,7 +28,7 @@
 #   After the unary sweep, a chain phase reuses Tile A through five LUT
 #   pipes (VLOG2 + VSQRT + VEXP2 + VRECIP.BF16 + VTANH) and combines the
 #   products through VMUL.BF16 / VADD.BF16 / VSUB.BF16,
-#   VREDSUM.ROW.BF16, VFP8PACK + VFP8UNPACK, and VREDSUM.BF16 (column
+#   VREDSUM.ROW.BF16, VPACK.BF16.FP8 + VUNPACK.FP8.BF16, and VREDSUM.BF16 (column
 #   reduce). This drives the AddSubSum / ColAdd reduction trees and the
 #   FP8 datapath with LUT-derived (not constant) operands.
 #
@@ -50,8 +50,8 @@
 #     0x12800  m30/m31  VADD.BF16(VEXP2(A), VRECIP.BF16(A)) 2 KiB
 #     0x13000  m32/m33  VSUB.BF16(VTANH(A), MUL)            2 KiB
 #     0x13800  m34/m35  VREDSUM.ROW.BF16(ADD)               2 KiB
-#     0x14000  m36      VFP8PACK(ADD,    scale=0x83)        1 KiB
-#     0x14400  m38/m39  VFP8UNPACK(PACK, scale=0x86)        2 KiB
+#     0x14000  m36      VPACK.BF16.FP8(ADD, scale=0x83)    1 KiB
+#     0x14400  m38/m39  VUNPACK.FP8.BF16(PACK, scale=0x86) 2 KiB
 #     0x14C00  m40/m41  VREDSUM.BF16(UNPACK)                2 KiB
 #
 # VMEM staging:
