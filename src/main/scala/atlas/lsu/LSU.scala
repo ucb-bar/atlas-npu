@@ -10,12 +10,13 @@
 //                    Fixed 1-cycle latency.
 //
 //   VLOAD path (FSM)
-//     VLOAD  (VMEM → mreg): Streams mregRows lines.
-//                    Fixed mregRows + 2 cycle latency.
+//     VLOAD  (VMEM → mreg): Streams M lines into rows 0..M-1 (M: the
+//                    command's row count). Fixed M + 2 cycle latency.
 //
 //   VSTORE path (FSM)
-//     VSTORE (mreg → VMEM): Streams mregRows rows.
-//                    Fixed mregRows + 2 cycle latency.
+//     VSTORE (mreg → VMEM): Streams rows 0..M-1 into M lines.
+//                    Fixed M + 2 cycle latency.
+//   vload.scale / vstore.scale move 4 lines whatever M is.
 //
 // Software guarantees no same-bank VMEM conflicts between scalar and vector
 // paths, including read/write pairs. Under block banking, aligned VLOAD/VSTORE
@@ -182,6 +183,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val vloadMregId   = Reg(UInt(mregP.mregIdBits.W))
   val vloadVmemBase = Reg(UInt(vmemP.lineAddrBits.W))
   val vloadCounter  = RegInit(0.U(log2Ceil(mregRows + 1).W))
+  val vloadLast     = Reg(UInt(tensorLineBits.W))
   val vloadRespPending = RegInit(false.B)
   val vloadRespRow     = RegInit(0.U(log2Ceil(mregRows).W))
   val vloadWritePending = RegInit(false.B)
@@ -193,6 +195,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
   val vstoreMregId   = Reg(UInt(mregP.mregIdBits.W))
   val vstoreVmemBase = Reg(UInt(vmemP.lineAddrBits.W))
   val vstoreCounter  = RegInit(0.U(log2Ceil(mregRows + 1).W))
+  val vstoreLast     = Reg(UInt(tensorLineBits.W))
   // Register the mreg read response at the LSU ingress so VSTORE no longer
   // writes VMEM directly from the mreg SRAM/crossbar path.
   val mregReadRespValid_q = RegInit(false.B)
@@ -236,6 +239,9 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
            io.cmd.bits.vmemLineAddr(log2Ceil(scaleLines) - 1, 0) =/= 0.U),
     "ASSERT FAIL: vload.scale / vstore.scale base must be 128 B aligned")
 
+  // The last line of a transfer: M - 1, or the last of the 4 lines of a scale transfer.
+  private def lastLine: UInt = Mux(cmdIsScale, (scaleLines - 1).U, io.cmd.bits.rows - 1.U)
+
   // ── Vector port defaults ──
   val vloadLineAddr  = vloadVmemBase + vloadCounter
   val vstoreLineAddr = vstoreVmemBase + vstoreCounter
@@ -269,6 +275,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
         vloadMregId   := io.cmd.bits.mregBank
         vloadVmemBase := io.cmd.bits.vmemLineAddr
         vloadCounter  := 0.U
+        vloadLast     := lastLine
       }
     }
 
@@ -278,7 +285,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
       io.vmemVecRead.bits.bankIdx  := vmemP.getBankIdx(vloadLineAddr)
       io.vmemVecRead.bits.bankAddr := vmemP.getBankAddr(vloadLineAddr)
       vloadCounter := vloadCounter + 1.U
-      when(vloadCounter === Mux(vloadScale, (scaleLines - 1).U, (mregRows - 1).U)) {
+      when(vloadCounter === vloadLast) {
         vloadState := sVecDrain
       }
     }
@@ -323,6 +330,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
         vstoreMregId   := io.cmd.bits.mregBank
         vstoreVmemBase := io.cmd.bits.vmemLineAddr
         vstoreCounter  := 0.U
+        vstoreLast     := lastLine
       }
     }
 
@@ -336,7 +344,7 @@ class LSU(vmemP: VmemParams, mregP: MregParams) extends Module {
       io.mregReadReq.bits.mregId := vstoreMregId
       io.mregReadReq.bits.row    := vstoreCounter(log2Ceil(mregRows) - 1, 0)
       vstoreCounter := vstoreCounter + 1.U
-      when(vstoreCounter === Mux(vstoreScale, (scaleLines - 1).U, (mregRows - 1).U)) {
+      when(vstoreCounter === vstoreLast) {
         vstoreState := sVecDrain
       }
     }
