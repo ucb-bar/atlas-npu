@@ -53,21 +53,23 @@ The MXU sequencers' accept logic now also waits for these, which were only asser
 - a weight push while another weight push still writes, and an accumulator push while another
   accumulator push still writes (one write path each);
 - an accumulator push to `accN` while a matmul to `accN` is in flight (one write port);
-- a pop or `vmatmul.acc` of `accN` in the cycle a push writes row 0 of `accN`;
+- a pop of `accN` until a push to `accN` has written row 0 for the last time, and on the NVFP4
+  MXU also a `vmatmul.acc` of `accN` (mxu1's waits for the whole push), so that no read of a row
+  meets its write (below, "Reads during writes");
 - a pop of `accN` while a `vmatmul.acc` still reads its partial sums, and the reverse (one read
   port);
 - on mxu1, a pop of `accN` until an FP32 push has written row 0 in its second phase (T+M+2), and
-  a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase (until T+M)
+  a push or matmul to `accN` while an FP32 pop of `accN` is in its first phase (from T+M+1)
   (docs/fp8-mxu.md). A matmul or `vmatmul.acc` of `accN` waits for the whole FP32 push (T+2M+1),
   because a matmul waits while a push to its accumulator is in flight. M is the row count
-  (below); at 32 rows these are T+34, T+32 and T+65.
+  (below); at 32 rows these are T+34, T+33 and T+65.
 
 To let back-to-back commands on one register keep their 32-cycle stride, the MXUs now report a
 port to the tracker only while it will still access its bank after the current cycle. The MXU
 sequencers' own MREG-conflict assertions use the same rule. Before 2026-10-22 they counted an
 engine on its last row as busy, and so fired on legal back-to-back push and pop pairs.
 
-### One operand rule
+### Operand rules
 
 A two-source VPU instruction (`vadd`, `vsub`, `vmul`, `vminimum`, `vmaximum`) streams both
 source pairs in the same cycles. Two different pairs in one physical bank, such as `m4` and `m36`,
@@ -78,6 +80,13 @@ both operands.
 The `.vx` and `.vr` forms stream one pair, so this rule does not apply to them. A `.vr` reads row 0
 of T(vs2) on both VPU read ports in its issue cycle, before T(vs1) streams. So it waits until the
 other VPU slot has read its last row, and `issueBusy` has one vector for each `vpu_src`.
+
+`vpack.bf16.fp8 m[vd], m[vs2]` reads `m[vs2]` and then `m[vs2+1]`, and writes row k of `m[vd]` two
+cycles after it has read its second source row. With `vd = vs2 + 1` it writes rows of `m[vd]`
+before it reads them, and waiting does not help either: the instruction is illegal (2026-10-25;
+`vpack_illegal_overlap`). `vd = vs2` is legal, since each row of `m[vs2]` is read before it is
+written. `vunpack.fp8.bf16` writes row j of `m[vd]` and of `m[vd+1]` after it has read the source
+rows that they come from, so any overlap of its source with its destination pair is legal.
 
 ### Row count M
 
@@ -93,12 +102,45 @@ One MXU rule depends on M. A matmul on an accumulator issues only after the prev
 it has written row 0; at 32 rows the 32-cycle stride gives this. With fewer rows, the next matmul
 on the accumulator issues max(M, L) cycles after the previous one: L = 4 on mxu1 (row 0 lands at
 T+3) and L = 8 on the NVFP4 MXU (row 0 lands at T+7, behind an input register and the lanes' 5
-cycles). Matmuls on alternating accumulators issue every M cycles, and on mxu1 the in-flight FIFO
+cycles). Matmuls on alternating accumulators issue every M cycles when 2M >= L (M >= 2 on mxu1,
+M >= 4 on the NVFP4 MXU): each one finds the row 0 of the matmul two before it landed. With
+fewer rows they wait for that row 0, and the measured gaps alternate: 1 and 3 on mxu1 at M = 1;
+1 and 7 (M = 1), 2 and 6 (M = 2), 3 and 5 (M = 3) on the NVFP4 MXU. On mxu1 the in-flight FIFO
 has 3 entries (the IPT latency + 1). An entry retires after M writebacks, and a matmul waits while
-the FIFO is full. `Mxu1RowsTest`, `Nvfp4RowsTest`, `VectorEngineRowsTest` and `LsuRowsTest` check
+the FIFO is full.
+
+At M = 1 the first row is also the last one, and three rules cost a cycle there so that no unit
+reads an SRAM row in the cycle that another unit writes it (below, "Reads during writes"): a pop
+reports the registers that it writes in its last step too, so a reader of them issues 2 cycles
+after a pop (3 after an FP32 pop, for m[r+2] and m[r+3]); a pop or `vmatmul.acc` of an NVFP4
+accumulator waits until an acc push has written row 0 for the last time (2 cycles after a BF16
+push, 3 after an FP32 push); and a row reduction reads its one row in its issue cycle only, so a
+`vload` of its source issues the next cycle. `Mxu1RowsTest`, `Nvfp4RowsTest`, `VectorEngineRowsTest` and `LsuRowsTest` check
 each unit at M = 1, 2, 3, 6, 7, 31 and 32; the baremetal tests `vpu_rows`, `mxu1_rows`,
 `nvfp4_rows` and `lsu_rows` each instruction class at several M, with no `DELAY`; and
 `hazard_rows` and the random hazfuzz programs the interlock.
+
+### Reads during writes
+
+The MREG banks, the accumulators of both MXUs and the scale file are SRAMs with a read port and a
+write port. When a read and a write of one address meet in a cycle, firtool's model of such a
+memory returns the new row, and FPGA block RAM in READ_FIRST mode returns the old row. The design
+must not depend on either: no unit reads a row in the cycle that another unit writes it. The rules
+above make sure of that. Before 2026-10-25 two cases at M = 1 broke it:
+
+- A pop of one row writes row 0 in its last step and did not report that step, so a reader of
+  its destination that issued in that cycle read row 0 during the write (both MXUs, every pop).
+- A pop or `vmatmul.acc` of an NVFP4 accumulator issued 1 cycle after a BF16 acc push (2 after an
+  FP32 push) read row 0 while the push wrote it.
+
+On the VCU118, hazfuzz program 20 of seed 7 (mxu1 and NVFP4) failed in row 0 of one tile and
+passed in Verilator: `vmatmul.acc.nv acc1, m2, w0` issued in the last step of
+`vmatpop.fp32.acc.nv m0, acc1` at M = 1 and read row 0 of m2 while the pop wrote it.
+
+`FPGA_MEMS=1 standalone/sim/build.sh` builds the model with the FPGA's memories
+(`standalone/fpga/fpga_mems.py --read-first`): a read during a write returns the old row. On the
+old RTL that model fails program 20 with the board's words; it passes now. Run the suite and
+hazfuzz on it after a change of the interlock or of a unit's timing.
 
 ### Scalar registers
 

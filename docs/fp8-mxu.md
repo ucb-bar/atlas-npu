@@ -203,7 +203,9 @@ no pop reads the accumulator for `vmatmul.acc`. With a latency of 2, row 0 lands
 rows the row-0 rule costs nothing: back-to-back `vmatmul.acc.mxu1` on one accumulator issue every
 32 cycles, and row r of the next matmul reads C at T + 32 + r, after the previous matmul wrote it
 at T + 3 + r. With M rows they issue every max(M, 4) cycles, and row r of the next matmul reads C
-at T + max(M, 4) + r; matmuls on alternating accumulators issue every M cycles.
+at T + max(M, 4) + r. Matmuls on alternating accumulators issue every M cycles when 2M >= 4
+(M >= 2): each one then finds the row 0 of the matmul two before it landed. At M = 1 they issue
+1 and 3 cycles apart in turn.
 
 Two rules come with the FP32 transfers. A pop of an accumulator waits until an FP32 push has
 written row 0 in its second phase: for a push at T, from T + M + 2 (T + 34 at 32 rows). A matmul
