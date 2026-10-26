@@ -35,5 +35,5 @@ def test_loop_body_sets_m():
         b.op("vexp.bf16 m4, m2")
     lines = [s.strip() for s in b.prog.lines]
     top = next(i for i, s in enumerate(lines) if s.startswith("loop_"))
-    assert lines[top + 1:top + 7] == ["vsetm 3", "vexp.bf16 m0, m2", "vsetm 32", "vexp.bf16 m4, m2", "vsetm 3",
-                                      "ADDI x11, x11, -1"]
+    assert lines[top + 1:top + 8] == ["vsetm 3", "vexp.bf16 m0, m2", "vsetm 32", "vexp.bf16 m4, m2",
+                                      "ADDI x11, x11, -1", "vsetm 3", "BNE x11, x0, " + lines[top][:-1]]

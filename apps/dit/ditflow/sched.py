@@ -16,10 +16,11 @@ The dependencies come from OPS, which gives the operands of every instruction di
   DMA.WAIT of its channel. A DMA.WAIT for transfers from an earlier block may touch any address.
   The instructions of one channel keep their order.
 Labels, branches, CSR accesses, ECALL and instructions that OPS does not list stay in place and
-end a block. vsetm is one of them: no instruction moves across it. An instruction costs what it
-costs at the row count M of the last vsetm before it in the text, or at 32 if a label or the start
-comes first: a branch can enter a label with any M. So a loop body that runs at M < 32 sets M
-itself.
+end a block. vsetm does not end a block. Each instruction keeps the row count M of the last vsetm
+before it in the text, or 32 if a label or the start comes first (a branch can enter a label with
+any M, so a loop body that runs at M < 32 sets M itself). The scheduled block sets M with a vsetm
+before each instruction that uses M (ROWS) and needs another M than the one before it (after a
+label, before the first one), and at its end if the text sets another M.
 """
 from bisect import insort
 from collections import defaultdict
@@ -36,6 +37,7 @@ CONTROL = {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU", "JAL", "JALR"}
 # (the LSU has priority on a bank). The slow case leaves the DMA its slack.
 DMA_BEAT, DMA_LATENCY = 2, 16
 WINDOW = 48                     # ready instructions considered at each step, in program order
+ROWS = {"vpu", "vpu2", "vload", "vstore", "mm", "pushacc", "pop"}    # units whose commands use M
 
 
 @dataclass(frozen=True)
@@ -458,9 +460,11 @@ class Machine:
             f[ins.args[-1]] = self.dma + DMA_LATENCY
 
 
-def _order(block: Block, window: int) -> list[Ins]:
+def _order(block: Block, window: int, rows: int | None) -> list[Ins]:
     """Greedy list scheduling: of the first `window` ready instructions, issue the one the core
-    can issue first, the one with the longest path to the end of the block on a tie."""
+    can issue first, the one with the longest path to the end of the block on a tie. M is `rows`
+    at the start (None: not known); an instruction that needs another M issues one cycle later,
+    after a vsetm."""
     code = block.code
     succ = block.graph()
     height = [0] * len(code)
@@ -471,8 +475,14 @@ def _order(block: Block, window: int) -> list[Ins]:
             npred[j] += 1
     ready = [i for i in range(len(code)) if not npred[i]]
     m, t, out = Machine(), 0, []
+
+    def start(ins: Ins) -> int:
+        return t + (ins.op.unit in ROWS and ins.rows != rows)
+
     while ready:
-        e, _, i = min((m.earliest(code[i], t), -height[i], i) for i in ready[:window])
+        e, _, i = min((m.earliest(code[i], start(code[i])), -height[i], i) for i in ready[:window])
+        if code[i].op.unit in ROWS:
+            rows = code[i].rows
         m.issue(code[i], e)
         t = e + code[i].words
         out.append(code[i])
@@ -509,16 +519,20 @@ def schedule(source: str, window: int = WINDOW) -> str:
     lines = source.splitlines()
     consts = _constants(lines)
     out, code, notes = [], [], []
-    first, rows = True, 32
+    first, rows, entry, setm = True, 32, 32, False  # M in the text; M where the block starts; a vsetm
 
     def flush():
-        nonlocal code, first
-        if code:
-            for ins in _order(Block(code, {} if first else consts), window):
-                out.extend(ins.notes)
-                out.append(ins.text)
-            code = []
-        first = False
+        nonlocal code, first, setm
+        m = entry
+        for ins in _order(Block(code, {} if first else consts), window, entry) if code else ():
+            out.extend(ins.notes)
+            if ins.op.unit in ROWS and ins.rows != m:
+                m = ins.rows
+                out.append(f"    vsetm {m}")
+            out.append(ins.text)
+        if m != rows and (m is not None or setm):
+            out.append(f"    vsetm {rows}")
+        code, first, setm = [], False, False
 
     for line in lines:
         s = line.strip()
@@ -526,7 +540,10 @@ def schedule(source: str, window: int = WINDOW) -> str:
             notes.append(line)
             continue
         name, args = parse(s)
-        if s and not s.endswith(":") and name in OPS:
+        if name == "vsetm":
+            rows, setm = int(args[0], 0), True
+            continue
+        if not s.endswith(":") and name in OPS:
             code.append(Ins(line, name, args, OPS[name], notes, rows=rows))
             notes = []
             continue
@@ -535,9 +552,9 @@ def schedule(source: str, window: int = WINDOW) -> str:
         notes = []
         out.append(line)
         if s.endswith(":"):
-            rows = 32
-        elif name == "vsetm":
-            rows = int(args[0], 0)
+            rows, entry = 32, None
+        else:
+            entry = rows
     flush()
     out.extend(notes)
     return "\n".join(out) + "\n"

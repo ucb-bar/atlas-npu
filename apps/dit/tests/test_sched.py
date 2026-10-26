@@ -281,15 +281,17 @@ def test_machine_models_the_mxu1_fp32_transfers_and_scaled_pop():
                          "vmatpop.fp8.acc.mxu1 m12, acc1, e0"]) == [0, 1, 33]
 
 
-def test_vsetm_ends_a_block_and_sets_the_costs_after_it():
-    """No instruction moves across vsetm; the instructions after it cost what they cost at its M.
-    After a label they cost what they cost at 32 rows, as a branch can enter with any M."""
+def test_instructions_keep_their_m_across_vsetm():
+    """Each instruction runs and costs at the M of the last vsetm before it in the text (32 after a
+    label). Instructions move across vsetm: the scheduled block sets M before each instruction that
+    uses M and needs another one, and after a label, where a branch can enter with any M, before
+    the first one."""
     pop, exp, vsetm = "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n", "    vsetm 3\n"
     assert S.schedule(pop + vsetm + exp) == pop + vsetm + exp
     assert S.schedule(vsetm + pop + exp) == vsetm + exp + pop
-    xlu = "    vtrpose.xlu m20, m4\n"                     # 66 cycles at any M; vexp 2M + 2
-    assert S.schedule(vsetm + exp + xlu) == vsetm + xlu + exp
-    assert S.schedule(vsetm + "L1:\n" + exp + xlu) == vsetm + "L1:\n" + exp + xlu
+    xlu = "    vtrpose.xlu m20, m4\n"                     # 66 cycles at any M, no M; vexp 2M + 2
+    assert S.schedule(vsetm + exp + "    vsetm 32\n" + xlu) == xlu + vsetm + exp + "    vsetm 32\n"
+    assert S.schedule(vsetm + "L1:\n" + exp + xlu) == vsetm + "L1:\n" + xlu + "    vsetm 32\n" + exp
     vpu = ["vadd.bf16 m4, m0, m2", "vexp.bf16 m6, m4"]
     assert issue_cycles(vpu) == [0, 66] and issue_cycles(vpu, rows=3) == [0, 8]          # 2M + 2
     mm = ["vmatmul.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m1, w0"]
@@ -316,6 +318,44 @@ def test_machine_follows_the_rtl():
     assert (gap(push, mm), gap(push, mm, 3), gap(mm, push), gap(mm, push, 3)) == (32, 32, 32, 3)
     for push, at32, at3 in [("vmatpush.acc.fp32.mxu1 acc0, m12", 65, 7), ("vmatpush.acc.bf16.mxu1 acc0, m10", 33, 4)]:
         assert (gap(push, "vmatmul.acc.mxu1 acc0, m4, w0"), gap(push, "vmatmul.mxu1 acc0, m4, w0", 3)) == (at32, at3)
+
+
+def test_rows_across_vsetm_schedule():
+    """A block at M = 4 with weight loads at 32 rows computes the same after scheduling."""
+    body = """    LI x1, 0
+    LI x3, 4096
+    dma.load x1, x2, x3, ch0
+    dma.wait ch0
+    vsetm 4
+    vload m0, 0(x20)
+    vload m2, 16(x20)
+    vload m3, 24(x20)
+    vsetm 32
+    vload m1, 8(x20)
+    vsetm 4
+    vexp.bf16 m6, m2
+    vmatpush.weight.mxu1 w0, m1
+    vmatmul.mxu1 acc0, m0, w0
+    vmatpop.bf16.acc.mxu1 m8, acc0
+    vsetm 32
+    vload m1, 16(x20)
+    vsetm 4
+    vmatpush.weight.mxu1 w1, m1
+    vmatmul.mxu1 acc1, m0, w1
+    vmatpop.bf16.acc.mxu1 m10, acc1
+    vadd.bf16 m8, m8, m6
+    vsetm 32
+    vstore m8, 32(x20)
+    vstore m9, 40(x20)
+    vstore m10, 48(x20)
+    vstore m11, 56(x20)
+    LI x1, 1024
+    LI x2, 0x80002000
+    dma.store x2, x1, x3, ch1
+    dma.wait ch1"""
+    g = torch.Generator().manual_seed(8)
+    blobs = [("d", DRAM, (torch.randn(2048, generator=g)).to(torch.bfloat16).view(torch.uint8).numpy().tobytes())]
+    check(dram_program(body), blobs, [(DRAM + 0x2000, 4096)])
 
 
 def test_fp32_spill_and_scaled_pop_schedule():

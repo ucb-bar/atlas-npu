@@ -215,6 +215,7 @@ class Builder:
         self.const_use = dict.fromkeys(CONST_REGS, 0)
         self.xfree = list(LOOP_REGS)
         self.rows = 32                              # the row count M (vsetm)
+        self.label_rows: dict[str, int] = {}        # M at each label
 
     # -- program structure -------------------------------------------------------------------
     def begin(self) -> None:
@@ -238,7 +239,10 @@ class Builder:
         self.prog.op(text)
 
     def label(self, name: str) -> None:
+        """A label that a branch_back may jump to: M there is the M of the text before it."""
         self.prog.label(name)
+        self.label_rows[name] = self.rows
+        self._rows_after_label()
         for r in self.xval:                         # another path may enter here
             self.xval[r] = None
 
@@ -293,7 +297,9 @@ class Builder:
         return self.xfree.pop(0)
 
     def branch_back(self, rs1: int, rs2: int, top: str) -> None:
-        """Jump to top while x[rs1] != x[rs2]: a BNE, or a BEQ over a JAL if top is out of reach."""
+        """Jump to top while x[rs1] != x[rs2]: a BNE, or a BEQ over a JAL if top is out of reach.
+        M is set back to its value at top first."""
+        self.vsetm(self.label_rows[top])
         if self.prog.instructions_since(top) <= BRANCH_REACH:
             self.op(f"BNE x{rs1}, x{rs2}, {top}")
         else:
@@ -306,7 +312,8 @@ class Builder:
             self.xval[r] = None
 
     def _rows_after_label(self) -> None:
-        """sched.py costs the instructions after a label at M = 32: set M there if it is not 32."""
+        """The text after a label runs at M = 32 unless a vsetm follows (sched.py): set M there if
+        it is not 32."""
         if self.rows != 32:
             self.op(f"vsetm {self.rows}")
 
@@ -337,10 +344,7 @@ class Builder:
         self.li(cnt, n)
         top = self.prog.new_label("loop")
         self.label(top)
-        rows = self.rows
-        self._rows_after_label()
         yield
-        self.vsetm(rows)                            # each pass starts at the same M
         for reg, delta in steps:
             self.add_imm(reg, reg, delta)
         self.op(f"ADDI x{cnt}, x{cnt}, -1")
