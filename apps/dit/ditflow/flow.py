@@ -29,6 +29,7 @@ import torch
 from npu_model.isa import ISA_VERSION
 
 from . import compiler as C
+from . import layout as L
 from . import model as M
 from . import quant as Q
 
@@ -125,7 +126,10 @@ def _policy_cond(c, saved, read):
     v = V.VisionDims(**{k: (tuple(tuple(x) for x in val) if k == "views" else val)
                         for k, val in c.manifest["vision"].items()})
     cond = P.read_cond(c, v, saved["state"], read)
-    bits = b"".join(read(a, 2048) for a in c.manifest["outputs"]["pooled"])
+    # The pool writes rows 0..queries-1 (M = queries) of both registers of each tile; the other rows
+    # hold what VMEM held before, which on the board is the previous program's data.
+    rows = 32 * v.queries
+    bits = b"".join(read(a + h * L.FP8_TILE, rows) for a in c.manifest["outputs"]["pooled"] for h in (0, 1))
     return {"cond": cond, "pooled_bits": bits}
 
 
@@ -165,9 +169,11 @@ def golden(out: Path) -> None:
     bundle["check"] = [[addr, list(torch.frombuffer(bytearray(res[key]), dtype=torch.int32).numpy().astype("uint32").tolist())]
                        for key, addr in (("x_hi_bits", outs["x_hi"]), ("x_lo_bits", outs["x_lo"]), ("trace_bits", outs["trace"]))
                        if addr is not None]
-    for i, addr in enumerate(outs.get("pooled", []) if "pooled_bits" in res else []):
-        tile = res["pooled_bits"][2048 * i:2048 * (i + 1)]
-        bundle["check"].append([addr, list(torch.frombuffer(bytearray(tile), dtype=torch.int32).numpy().astype("uint32").tolist())])
+    if "pooled_bits" in res:                    # the rows _policy_cond reads, per register
+        n = len(res["pooled_bits"]) // (2 * len(outs["pooled"]))
+        for i, part in enumerate(res["pooled_bits"][k:k + n] for k in range(0, len(res["pooled_bits"]), n)):
+            bundle["check"].append([outs["pooled"][i // 2] + i % 2 * L.FP8_TILE,
+                                    list(torch.frombuffer(bytearray(part), dtype=torch.int32).numpy().astype("uint32").tolist())])
     (out / "bundle_checked.json").write_text(json.dumps(bundle))
 
 

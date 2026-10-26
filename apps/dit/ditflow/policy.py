@@ -154,9 +154,7 @@ class EncoderEmitter:
         for n in ("pool.q", "pool.kv", "pool.out", "pool.up", "pool.down", "proj"):
             place(n, f"{n}.w", p[f"{n}.b"])
         self.statics = {n: b.dram.add(n, rep(p[n])) for n in ("norm.w", "norm.b", "pool.ln.w", "pool.ln.b")}
-        query = torch.zeros(64, h)
-        query[:v.queries] = p["pool.query"]
-        self.query_dram = b.dram.add("pool.query", L.bf16_bytes(query))
+        self.query_dram = b.dram.add("pool.query", L.bf16_bytes(p["pool.query"]))
 
         # ---- DRAM: per-view inputs and constants ----
         self.view_data = []
@@ -212,14 +210,15 @@ class EncoderEmitter:
         self.lp = {n: T(f"enc.{n}", 32, h, "bf16") for n in LAYER_P}
         assert self.lp["ls2"].tile(0, 0) == self.lp["ln1.w"].tile(0, 0) + self.p_bytes - HT * L.BF16_TILE
         self.st = {n: T(f"enc.{n}", 32, h, "bf16") for n in self.statics}
-        self.query = T("enc.query", 64, h, "bf16")
-        self.qq = T("enc.qq", 64, h, "fp8")
-        self.qp = T("enc.qp", 64, h, "bf16")
-        self.pattn = T("enc.pattn", 64, h, "fp8")
-        self.pooled = T("enc.pooled", 64, h, "bf16")
-        self.pm = T("enc.pm", 64, h, "fp8")
-        self.ph = T("enc.ph", 64, v.mlp, "fp8")
-        self.proj_out = T("enc.proj", 64, v.token_dim, "bf16")
+        Q = v.queries                                      # the pool's rows: one tile at M = Q
+        self.query = T("enc.query", Q, h, "bf16")
+        self.qq = T("enc.qq", Q, h, "fp8")
+        self.qp = T("enc.qp", Q, h, "bf16")
+        self.pattn = T("enc.pattn", Q, h, "fp8")
+        self.pooled = T("enc.pooled", Q, h, "bf16")
+        self.pm = T("enc.pm", Q, h, "fp8")
+        self.ph = T("enc.ph", Q, v.mlp, "fp8")
+        self.proj_out = T("enc.proj", Q, v.token_dim, "bf16")
 
     def big_view(self, name, rows, cols, kind) -> Tensor:
         t = Tensor(name, self.big, rows, cols, kind)
@@ -234,9 +233,11 @@ class EncoderEmitter:
         b.dma.load("enc.static", self.query.addr, self.query_dram, self.query.nbytes)
         b.dma.wait("enc.static")
         # Pool queries: input independent, computed once for both views.
+        b.vsetm(v.queries)
         lk.quantize_rows(self.query, self.qq, a["pool.qin"])
         lin = self.lin["pool.q"]
         lk.linear_rows(lin, lin.addr, self.qq, a["pool.qin"] + lin.a_w, [Stream("qp", self.qp)], lk.epi_store("qp"))
+        b.vsetm(32)
         for vi, vd in enumerate(self.view_data):
             self.emit_view(vi, vd)
 
@@ -332,8 +333,9 @@ class EncoderEmitter:
         lk.linear_rows(lin, lin.addr, xq, a["pool.kvin"] + lin.a_w, [Stream("kv", kv)], lk.epi_store("kv"))
         lk.attention_rows(self.qp, 0, kv, 0, HT, v.heads, None, pmask, self.pattn,
                           a["pool.q"], a["pool.k"], a["pool.v"], a["pool.p"], a["pool.attn"],
-                          {n: Tensor(t.name, t.addr, 64 if n == "qbuf" else t.rows, t.cols, t.kind)
-                           for n, t in scratch.items()})
+                          {n: Tensor(t.name, t.addr, v.queries if n == "qbuf" else t.rows, t.cols, t.kind)
+                           for n, t in scratch.items()}, q_rows=v.queries)
+        b.vsetm(v.queries)
         lin = self.lin["pool.out"]
         lk.linear_rows(lin, lin.addr, self.pattn, a["pool.attn"] + lin.a_w, [Stream("pooled", self.pooled)],
                        lk.epi_store("pooled"))
@@ -353,6 +355,7 @@ class EncoderEmitter:
         b.vload2(t, self.proj_out.tile(0, 0))
         b.vstore2(t, out.tile(0, 0))
         b.regs.release(pairs=(t,))
+        b.vsetm(32)
 
 
 class PolicyProgram:

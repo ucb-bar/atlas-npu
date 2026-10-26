@@ -213,10 +213,14 @@ class LoopKernels:
     # -- attention -------------------------------------------------------------------------------
     def attention_rows(self, q: Tensor, q_ct0: int, kv: Tensor, k_ct0: int, v_ct0: int, heads: int,
                        rope: tuple[Tensor, Tensor] | None, masks: Tensor, out: Tensor,
-                       a_q: int, a_k: int, a_v: int, a_p: int, a_out: int, scratch: dict) -> None:
+                       a_q: int, a_k: int, a_v: int, a_p: int, a_out: int, scratch: dict,
+                       q_rows: int | None = None) -> None:
         """Multi-head attention with head_dim 64: out[:, 64h:64h+64] = FP8(softmax(q k^T / 8) v / 2**a_out).
-        q rows and kv rows may differ (cross-attention). rope (cos, sin per kv/q row, applied to q
-        and k when q is kv) or None. masks: one BF16 tile per key tile (row 0), added to
+        q rows and kv rows may differ (cross-attention): the query side runs at M = q_rows (default:
+        the caller's M). K and V become a weight and V^T, which read 32 rows, so they are computed at
+        32 rows: kv's padding rows must give finite K and V, and K = 0 under a padding key's mask
+        (rope's padding rows 0). rope (cos, sin per kv/q row, applied to q and k when q is kv) or
+        None. masks: one BF16 tile per key tile (row 0), added to
         the scores. scratch: FP8 tensors qbuf [q rows x 64], kbuf [kv rows x 64], vtbuf [64 x kv
         rows] (V^T), pbuf [32 x kv rows], and BF16 sbuf [32 x kv rows]."""
         b, k, regs = self.b, self.k, self.b.regs
@@ -225,12 +229,15 @@ class LoopKernels:
         raw_q, raw_k, raw_v, raw_p = 127 - a_q - 3, 127 - a_k, 127 - a_v, 127 - a_p
         raw_o = 127 + a_p + a_v - a_out
         TB, FT = 2048, FP8_TILE
+        rows = b.rows
         for h in range(heads):
             b.prog.comment(f"attention_rows head {h}")
-            # ---- Q (and K, V when self-attention) for every row tile ----
-            self._prep_rows(q, q_ct0 + 2 * h, qbuf, raw_q, rope if q is kv else None)
+            # ---- K and V at 32 rows, then Q, for every row tile ----
+            b.vsetm(32)
             self._prep_rows(kv, k_ct0 + 2 * h, kbuf, raw_k, rope)
             self._prep_vt(kv, v_ct0 + 2 * h, vtbuf, raw_v)
+            b.vsetm(q_rows or rows)
+            self._prep_rows(q, q_ct0 + 2 * h, qbuf, raw_q, rope if q is kv else None)
             # ---- one query tile at a time ----
             pq, po = b.xreg(), b.xreg()
             self.ptr(pq, qbuf.tile(0, 0))
@@ -297,6 +304,7 @@ class LoopKernels:
                 regs.release(P, V, pairs=(m, l, t, s))
                 b.xrelease(pk, ps, pm, pv, pp)
             b.xrelease(pq, po)
+            b.vsetm(rows)
 
     def _prep_rows(self, src: Tensor, ct0: int, dst: Tensor, raw: int, rope) -> None:
         """dst row r = FP8 of src tiles (r, ct0), (r, ct0 + 1), rotated by rope when given."""
