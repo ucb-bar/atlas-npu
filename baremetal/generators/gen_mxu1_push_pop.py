@@ -2,7 +2,7 @@
 """
 gen_mxu1_push_pop.py
 
-Generate test vectors for mxu1_push_pop_check.S.
+Generate test vectors for mxu1_push_pop.S.
 
 This generator matches the assembly exactly:
 
