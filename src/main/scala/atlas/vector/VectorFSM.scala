@@ -242,6 +242,8 @@ class VectorFSM(val p: VpuParams) extends Module {
                         io.in.instRows - 1.U)
     val firstCount = next(0.U(7.W), inputLast)
     val firstReadCount = Mux(isWriteOnly || inputIsRow0, 0.U, firstCount)
+    // A row reduction reads M rows on each port; at M = 1 its issue read is the last one.
+    val inputReadsOnce = inputIsRowReduce && inputLast === 0.U
     val inputUsesDualWritePorts = opUsesDualWritePorts(io.in.instType)
     val inputReadBank2 = Mux(inputIsRowReduce, io.in.instReadBank1 + 1.U, io.in.instReadBank2)
     val inputWriteBank2 = io.in.instWriteBank + 1.U
@@ -308,10 +310,10 @@ class VectorFSM(val p: VpuParams) extends Module {
         is(idle) {
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
+                readDone1 := inputReadsOnce; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
                 inst2 := VPUOp.add
-                readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
+                readDone2 := inputReadsOnce; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U
@@ -330,9 +332,9 @@ class VectorFSM(val p: VpuParams) extends Module {
         is(single) {
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
+                readDone1 := inputReadsOnce; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
-                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
+                inst2 := VPUOp.add; readDone2 := inputReadsOnce; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U
@@ -390,9 +392,9 @@ class VectorFSM(val p: VpuParams) extends Module {
             // fp8pack/unpack never enter double state (single-input ops)
             when(newInputToDOUBLE) {
                 inst1 := io.in.instType; slot1NewInst := true.B
-                readDone1 := false.B; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
+                readDone1 := inputReadsOnce; readBank1 := io.in.instReadBank1; readCounter1 := firstCount
                 writeDone1 := false.B; writeBank1 := io.in.instWriteBank; writeCounter1 := 0.U
-                inst2 := VPUOp.add; readDone2 := false.B; readBank2 := inputReadBank2; readCounter2 := firstCount
+                inst2 := VPUOp.add; readDone2 := inputReadsOnce; readBank2 := inputReadBank2; readCounter2 := firstCount
                 writeDone2 := !inputUsesDualWritePorts
                 writeBank2 := Mux(inputUsesDualWritePorts, inputWriteBank2, 0.U)
                 writeCounter2 := 0.U

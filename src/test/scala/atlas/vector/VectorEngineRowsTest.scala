@@ -144,4 +144,18 @@ class VectorEngineRowsTest extends AnyFlatSpec {
       for (c <- cmds) expect(c, mem, reference(dut, before, c)._1, before)
     }
   }
+
+  it should "run row reductions of one row back to back" in {
+    simulate(new VpuBroadcastHarness) { dut =>
+      val op = ops.map(o => o.name -> o).toMap
+      // At M = 1 a row reduction reads its only row in its issue cycle, then stops reading.
+      for (names <- Seq(Seq("vredsum.row", "vredsum.row", "vredsum.row"), Seq("vredmax.row", "vredmax.row", "vredmin.row"))) {
+        val cmds = names.zip(Seq((20, 0), (22, 2), (16, 4))).map { case (n, (vd, vs1)) => Cmd(op(n), vd, vs1, 0, 1) }
+        val before = randomMem(7)
+        val mem = before.map(_.clone)
+        run(dut, mem, cmds)
+        for (c <- cmds) expect(c, mem, reference(dut, before, c)._1, before)
+      }
+    }
+  }
 }
