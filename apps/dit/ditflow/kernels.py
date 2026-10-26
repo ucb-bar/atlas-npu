@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .asm import SEGMENT, Builder, Tensor
 from .layout import FP8_TILE, bf16_bits
 
-ONE, HALF, MINUS_ONE = bf16_bits(1.0), bf16_bits(0.5), bf16_bits(-1.0)
+ONE, MINUS_ONE = bf16_bits(1.0), bf16_bits(-1.0)
 NEG_BIG = bf16_bits(-30000.0)
 
 
@@ -104,12 +104,12 @@ class Kernels:
             if n + 1 < NT:
                 queue(n + 1)
             base = self.stage[n % 2]
-            b.vload(wreg[0], base)
+            b.vload_w(wreg[0], base)
             for k in range(KT):
                 slot = k % 2
                 b.v("vmatpush.weight.mxu1", f"w{slot}", f"m{wreg[slot]}")
                 if k + 1 < KT:
-                    b.vload(wreg[(k + 1) % 2], base + (k + 1) * FP8_TILE)
+                    b.vload_w(wreg[(k + 1) % 2], base + (k + 1) * FP8_TILE)
                 for r in range(RT):
                     if resident:
                         xm = xreg[r, k]
@@ -181,9 +181,6 @@ class Kernels:
     def gelu(self, o: int) -> None:
         """o = gelu_tanh(o) = o * (1 + tanh(sqrt(2/pi) * (o + 0.044715 o^3))) / 2."""
         self.b.v("vgelu.bf16", f"m{o}", f"m{o}")
-
-    def scale(self, o: int, bits: int) -> None:
-        self.b.v("vmul.bf16.vx", f"m{o}", f"m{o}", self.b.xconst(bits))
 
     def silu(self, o: int) -> None:
         """o = o / (1 + exp(-o))."""

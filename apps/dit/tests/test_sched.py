@@ -76,7 +76,7 @@ def test_dit_step():
     c = C.compile_dit(d, plan, x0, cond, steps=1, schedule=False)
     lines = [s.strip() for s in c.source.splitlines()]
     names = {S.parse(s)[0] for s in lines if s and not s.startswith("#") and not s.endswith(":")}
-    assert names - set(S.OPS) <= S.CONTROL | {"CSRRW", "ECALL"}, "instructions the scheduler keeps in place"
+    assert names - set(S.OPS) <= S.CONTROL | {"CSRRW", "ECALL", "vsetm"}, "instructions the scheduler keeps in place"
     out = c.manifest["outputs"]
     check(c.source, c.blobs, [(out["x_hi"], out["x_bytes"]), (out["x_lo"], out["x_bytes"]),
                               (out["trace"], out["x_bytes"])])
@@ -307,7 +307,7 @@ def test_machine_follows_the_rtl():
     """Issue gaps measured on the RTL (Verilator, 2026-10-25), at 32 and at 3 rows."""
     def gap(a, b, rows=32):
         return issue_cycles([a, b], rows)[1]
-    assert gap("lh x13, 0(x20)", "ADDI x14, x13, 0") == 4
+    assert gap("lw x13, 0(x20)", "ADDI x14, x13, 0") == 4
     for a, reg, at32, at3 in [("vexp.bf16 m20, m10", 11, 64, 6), ("vadd.bf16 m20, m10, m12", 13, 64, 6),
                               ("vgelu.bf16 m20, m10", 11, 64, 6), ("vadd.bf16.vr m20, m10, m12", 11, 65, 7),
                               ("vadd.bf16.vr m20, m10, m12", 12, 1, 1), ("vredsum.bf16 m20, m10", 11, 128, 12),

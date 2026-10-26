@@ -17,7 +17,7 @@ from . import model as M
 from . import quant as Q
 from . import vision as V
 from .asm import Builder, Tensor
-from .kernels import Kernels, Linear, HALF, ONE
+from .kernels import Kernels, Linear
 from .loopk import LoopKernels, Stream
 
 LAYER_W = ("qkv", "o", "up", "down")

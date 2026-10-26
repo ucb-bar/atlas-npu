@@ -61,7 +61,7 @@ def _vpu(roles: str, cls: str, both: bool = False) -> Op:
 OPS = {
     "LI": Op("alu", "xw i"), "ADDI": Op("alu", "xw xr i"), "ADD": Op("alu", "xw xr xr"),
     "seli": Op("alu", "ew i"), "dma.config": Op("alu", "xr c"),
-    "lh": Op("alu", "xw sr", 4), "sh": Op("alu", "xr sw"),
+    "lw": Op("alu", "xw sr", 4),
     "vload": Op("vload", "mw vr", 35), "vstore": Op("vstore", "mr vw", 35),
     "dma.load": Op("dma", "xr xr xr c"), "dma.store": Op("dma", "xr xr xr c"),
     "dma.wait": Op("wait", "c"),
@@ -421,7 +421,7 @@ class Machine:
         for r, c in ins.rw:
             f["w", r] = max(f["w", r], T + c)
             f["pw", r & 31] = max(f["pw", r & 31], T + c)
-        if ins.name == "lh":
+        if ins.name == "lw":
             f[ins.args[0]] = T + ins.lat
         if u in ("vload", "vstore"):
             f[u] = T + ins.lat

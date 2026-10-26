@@ -8,10 +8,9 @@ a buffer a DMA writes, and before a buffer a DMA store reads is overwritten.
 
 Fixed scalar registers:
     x1, x2, x3    DMA operands (VMEM word address, DRAM address, size)
-    x4            scalar load/store data
+    x4            scalar load data (the timestep, a .vx operand)
     x5, x6        sampler step counter and step count
     x7            byte address of the current step's t in VMEM
-    x8            byte address of the timestep scratch tile
     x9            DRAM address of the current step's trace slot
     x10           CSR data
     x19           kernel scratch (constants for ADD)
@@ -362,6 +361,13 @@ class Builder:
 
     def vload(self, m: int, addr: int) -> None:
         self.op(f"vload m{m}, {self._vaddr(addr)}")
+
+    def vload_w(self, m: int, addr) -> None:
+        """A vload of all 32 rows at any M, for vmatpush.weight, which reads all of them."""
+        rows = self.rows
+        self.vsetm(32)
+        self.vload(m, addr)
+        self.vsetm(rows)
 
     def vstore(self, m: int, addr: int) -> None:
         self.op(f"vstore m{m}, {self._vaddr(addr)}")

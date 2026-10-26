@@ -12,10 +12,10 @@ Numbers on Atlas:
   on the VPU.
 - adaLN is linear in cat(SiLU(time), SiLU(cond)), so its conditioning half (and its bias,
   with the +1 of `x * (1 + scale)` folded in) is computed once before the loop.
-- Vectors that scale token rows (adaLN outputs) are kept replicated over the 32 rows of a tile.
-  They come out of matmuls whose left operand has 32 equal rows: the timestep tile is built by
-  reducing a single element over rows and columns, and the conditioning row is replicated
-  exactly through the MXU (E @ Z^T, E the FP8 tile with ones in column 0).
+- The timestep path and adaLN run on one row (vsetm 1). The timestep is a .vx operand (lw of its
+  BF16 bits). adaLN's shift, scale and gate are row 0 of their tiles, which the kernels read with
+  .vr. A conditioning row q > 0 of the encoder's tiles moves to row 0 through the MXU (E @ Z^T,
+  E the FP8 tile with ones in column q).
 - The time MLP's exact GELU is evaluated in its tanh form, the only one the VPU has.
 - BF16 keeps 8 significant bits, so x is carried as hi + lo BF16 (a compensated sum) across the
   100 steps. VPU adds round to nearest even, so lo is the exact error of hi + d when |hi| >= |d|
@@ -29,11 +29,9 @@ import torch
 from . import layout as L
 from . import model as M
 from .asm import Builder, Tensor, DRAM_BASE
-from .kernels import Kernels, Linear, HALF
+from .kernels import Kernels, Linear
 from .loopk import LoopKernels, Stream
 from .quant import QuantPlan
-
-E_ONE_COL = 0x0038      # vli.col bits: FP8 1.0 in byte 0 of every row (column 0), 0 in byte 1
 
 
 @dataclass
@@ -113,13 +111,13 @@ class DiTProgram:
             kmask = km
         rowmask = torch.zeros(self.RT * 32, 32)
         rowmask[:self.T] = 1.0
-        tbits = grid[:self.steps].to(torch.bfloat16)
-        ttable = bytearray(tbits.view(torch.uint8).numpy().tobytes())
+        tbits = grid[:self.steps].to(torch.bfloat16).view(torch.int16).to(torch.int32) << 16    # x[31:16]
+        ttable = bytearray(tbits.numpy().tobytes())
         ttable += bytes(-len(ttable) % 32)
         hi = x0[0].to(torch.bfloat16)
         lo = (x0[0] - hi.float()).to(torch.bfloat16)
         consts = {
-            "rope_cos": cos, "rope_sin": sin, "freq": L.replicated(M.sinusoidal_freqs(d)),
+            "rope_cos": cos, "rope_sin": sin, "freq": M.sinusoidal_freqs(d).reshape(1, -1),
             "rowmask": rowmask, "x_hi": hi, "x_lo": lo,
         }
         if cond_tiles is None:
@@ -135,8 +133,8 @@ class DiTProgram:
             t = b.vmem.tensor(name, m.shape[0], m.shape[1], "bf16")
             self.vm[name] = t
             self._const_loads.append((t.addr, daddr, t.nbytes))
-        if cond_tiles is not None:                        # FP8 tiles with 1.0 in column q (row q replicator)
-            rows = sorted({q for _, q in cond_tiles} | {0})
+        rows = sorted({q for _, q in cond_tiles or () if q})
+        if rows:                                          # FP8 tiles with 1.0 in column q (row q to row 0)
             eq = torch.zeros(32 * len(rows), 32, dtype=torch.uint8)
             for i, q in enumerate(rows):
                 eq[32 * i:32 * i + 32, q] = 0x38
@@ -161,7 +159,6 @@ class DiTProgram:
         for l in range(d.layers):
             vt(f"{l}.condmod", 32, 6 * d.hidden, "bf16")
             vt(f"{l}.mod", 32, 6 * d.hidden, "bf16")
-        vt("e00", 32, 32, "bf16")
         vt("embq", 32, Tdim, "fp8")
         vt("t1q", 32, 2 * Tdim, "fp8")
         vt("stq", 32, Tdim, "fp8")
@@ -190,17 +187,12 @@ class DiTProgram:
         for vaddr, daddr, n in self._const_loads:
             b.dma.load("const", vaddr, daddr, n)
         b.dma.wait("const")
-        z = b.regs.pair()
-        b.vli(z, 0)
-        b.vstore2(z, vm["e00"].tile(0, 0))
-        b.regs.release(pairs=(z,))
         self.prologue()
         k.quantize(vm["x_hi"], vm["xin_q"], a["x"])
 
         b.li(5, 0)
         b.li(6, self.steps)
         b.li(7, self.vm_ttable)
-        b.li(8, vm["e00"].addr)
         if self.trace:
             b.li(9, self.out_trace)
         b.label("step")
@@ -219,7 +211,7 @@ class DiTProgram:
             b.op("dma.wait ch7")
             b.li(10, vb.nbytes)
             b.op("ADD x9, x9, x10")
-        b.op("ADDI x7, x7, 2")
+        b.op("ADDI x7, x7, 4")
         b.op("ADDI x5, x5, 1")
         b.op("CSRRW x0, 0x801, x5")                     # DBG1: steps done
         b.branch_back(5, 6, "step")
@@ -242,7 +234,7 @@ class DiTProgram:
 
     # -------------------------------------------------------------------------------------
     def prologue(self) -> None:
-        """condmod[l] = SiLU(cond) @ W_c[l]^T + b[l] (+1 on the scales), replicated over rows."""
+        """condmod[l] = SiLU(cond) @ W_c[l]^T + b[l] (+1 on the scales), in row 0."""
         b, k, a, vm = self.b, self.k, self.a, self.vm
         b.prog.comment("prologue: conditioning half of adaLN")
         condq = vm["condq"]
@@ -253,16 +245,17 @@ class DiTProgram:
             sources = [(t.tile(0, 0), q) for t, q in self.cond_tiles] + [(vm["state"].tile(0, 0), 0)]
         E = {}
         for j, (src, row) in enumerate(sources):
-            if row not in E:
-                E[row] = b.regs.one()
-                if self.cond_tiles is None:
-                    b.op(f"vli.col m{E[row]}, {E_ONE_COL:#06x}")
-                else:
-                    b.vload(E[row], vm["e_cols"].tile(self.eq_rows.index(row), 0))
             p = b.regs.pair()
             b.vload2(p, src)
             k.silu(p)
-            zq = k.quant_store(p, 0, None, 127 - a["ada_c"], keep=True)   # row `row` is the one used
+            if not row:
+                k.quant_store(p, 0, condq.tile(0, j), 127 - a["ada_c"])
+                b.regs.release(pairs=(p,))
+                continue
+            if row not in E:
+                E[row] = b.regs.one()
+                b.vload(E[row], vm["e_cols"].tile(self.eq_rows.index(row), 0))
+            zq = k.quant_store(p, 0, None, 127 - a["ada_c"], keep=True)
             zt = b.regs.one()
             b.v("vtrpose.xlu", f"m{zt}", f"m{zq}")
             b.v("vmatpush.weight.mxu1", "w0", f"m{zt}")
@@ -271,34 +264,30 @@ class DiTProgram:
             b.vstore(zq, condq.tile(0, j))
             b.regs.release(zq, zt, pairs=(p,))
         b.regs.release(*E.values())
+        b.vsetm(1)
         for l in range(self.d.layers):
             lin = self.lin[f"{l}.ada_c"]
             self.lk.linear_rows(lin, lin.addr, condq, a["ada_c"] + lin.a_w,
                                 [Stream("cm", vm[f"{l}.condmod"], per_row=False)], self.lk.epi_store("cm"))
+        b.vsetm(32)
 
     def time_path(self) -> None:
-        """mod[l] = SiLU(time_mlp(t)) @ W_t[l]^T + condmod[l], replicated over rows."""
+        """mod[l] = SiLU(time_mlp(t)) @ W_t[l]^T + condmod[l], in row 0 (M = 1)."""
         b, k, a, vm, d = self.b, self.k, self.a, self.vm, self.d
         b.prog.comment("timestep embedding")
-        b.op("lh x4, 0(x7)")
-        b.op("sh x4, 0(x8)")                            # e00[0, 0] = t
-        t = b.regs.pair()
-        b.vload2(t, vm["e00"].tile(0, 0))
-        b.v("vredsum.row.bf16", f"m{t}", f"m{t}")      # row 0 = t
-        b.v("vredsum.bf16", f"m{t}", f"m{t}")          # every element = 2t (both halves)
-        k.scale(t, HALF)
+        b.vsetm(1)
+        b.op("lw x4, 0(x7)")                            # t in x4[31:16]
         half_tiles = L.tiles(d.tdim // 2)
         embq = vm["embq"]
         for j in range(half_tiles):
             f, s = b.regs.pair(), b.regs.pair()
             b.vload2(f, vm["freq"].tile(0, j))
-            b.v("vmul.bf16", f"m{f}", f"m{f}", f"m{t}")
+            b.v("vmul.bf16.vx", f"m{f}", f"m{f}", "x4")
             b.v("vsin.bf16", f"m{s}", f"m{f}")
             k.quant_store(s, 0, embq.tile(0, j), 127 - a["temb"])
             b.v("vcos.bf16", f"m{s}", f"m{f}")
             k.quant_store(s, 1, embq.tile(0, half_tiles + j), 127 - a["temb"])
             b.regs.release(pairs=(f, s))
-        b.regs.release(pairs=(t,))
         self.lin_call("time1", embq, a["temb"], k.epi_quant(vm["t1q"], a["t1"], pre=lambda o, r: k.gelu(o)))
 
         def gelu_silu(o, r):
@@ -310,6 +299,7 @@ class DiTProgram:
             self.lk.linear_rows(lin, lin.addr, vm["stq"], a["ada_t"] + lin.a_w,
                                 [Stream("cm", vm[f"{l}.condmod"], per_row=False), Stream("mod", vm[f"{l}.mod"], per_row=False)],
                                 self.epi_add_mod)
+        b.vsetm(32)
 
     def epi_add_mod(self, o: int, r: int, ptrs: dict) -> None:
         b = self.b

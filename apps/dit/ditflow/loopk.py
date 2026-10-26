@@ -9,7 +9,7 @@ are one tile.
 from dataclasses import dataclass
 
 from .asm import Builder, Ptr, Tensor, SCRATCH, DMA_MAX
-from .kernels import Kernels, Linear, NEG_BIG, ONE, HALF
+from .kernels import Kernels, Linear, NEG_BIG
 from .layout import FP8_TILE
 
 
@@ -87,12 +87,12 @@ class LoopKernels:
             pending = self._block_chunks(k.stage[1 - par], xd, prefetch_off, BB, chans[1 - par]) \
                 if prefetch_off is not None else []
             per_k = -(-len(pending) // KT) if pending else 0
-            b.vload(wreg[0], stage)
+            b.vload_w(wreg[0], stage)
             for kk in range(KT):
                 slot = kk % 2
                 b.v("vmatpush.weight.mxu1", f"w{slot}", f"m{wreg[slot]}")
                 if kk + 1 < KT:
-                    b.vload(wreg[(kk + 1) % 2], stage + (kk + 1) * FP8_TILE)
+                    b.vload_w(wreg[(kk + 1) % 2], stage + (kk + 1) * FP8_TILE)
                 for r in range(R):
                     if resident:
                         xm = xr[r * KT + kk]
@@ -248,8 +248,8 @@ class LoopKernels:
                 self.ptr(pm, masks.tile(0, 0))
                 K0, K1 = regs.one(), regs.one()
                 with b.loop(RK, steps=[(pk, 2 * FT // 4), (ps, TB // 4), (pm, TB // 4)]):   # scores, row max
-                    b.vload(K0, Ptr(pk, 0))
-                    b.vload(K1, Ptr(pk, FT))
+                    b.vload_w(K0, Ptr(pk, 0))
+                    b.vload_w(K1, Ptr(pk, FT))
                     b.v("vmatpush.weight.mxu1", "w0", f"m{K0}")
                     b.v("vmatpush.weight.mxu1", "w1", f"m{K1}")
                     b.v("vmatmul.mxu1", "acc0", f"m{Q0}", "w0")
@@ -287,7 +287,7 @@ class LoopKernels:
                             b.vstore(P, Ptr(pp, 0))
                         else:
                             b.vload(P, Ptr(pp, 0))
-                        b.vload(V, Ptr(pv, 0))
+                        b.vload_w(V, Ptr(pv, 0))
                         b.v("vmatpush.weight.mxu1", "w0", f"m{V}")
                         b.v("vmatmul.acc.mxu1", "acc0", f"m{P}", "w0")
                     o = regs.one()
