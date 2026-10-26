@@ -60,7 +60,8 @@ def outputs(mode, source, blobs, regions):
 def check(source, blobs, regions):
     """Program order and the scheduled program agree bit for bit under every DMA timing model."""
     sched = S.schedule(source)
-    assert sched != source and sorted(sched.splitlines()) == sorted(source.splitlines())
+    lines = lambda text: sorted(line for line in text.splitlines() if "vsetm" not in line)
+    assert sched != source and lines(sched) == lines(source)
     gold = outputs(MODELS[0], source, blobs, regions)
     for mode in MODELS:
         assert outputs(mode, source, blobs, regions) == gold
@@ -283,15 +284,15 @@ def test_machine_models_the_mxu1_fp32_transfers_and_scaled_pop():
 
 def test_instructions_keep_their_m_across_vsetm():
     """Each instruction runs and costs at the M of the last vsetm before it in the text (32 after a
-    label). Instructions move across vsetm: the scheduled block sets M before each instruction that
-    uses M and needs another one, and after a label, where a branch can enter with any M, before
-    the first one."""
+    label that no vsetm follows). Instructions move across vsetm: the scheduled block sets M before
+    each instruction that uses M and needs another one."""
     pop, exp, vsetm = "    vmatpop.bf16.acc.mxu1 m10, acc0\n", "    vexp.bf16 m12, m14\n", "    vsetm 3\n"
     assert S.schedule(pop + vsetm + exp) == pop + vsetm + exp
     assert S.schedule(vsetm + pop + exp) == vsetm + exp + pop
     xlu = "    vtrpose.xlu m20, m4\n"                     # 66 cycles at any M, no M; vexp 2M + 2
     assert S.schedule(vsetm + exp + "    vsetm 32\n" + xlu) == xlu + vsetm + exp + "    vsetm 32\n"
-    assert S.schedule(vsetm + "L1:\n" + exp + xlu) == vsetm + "L1:\n" + xlu + "    vsetm 32\n" + exp
+    assert S.schedule(vsetm + "L1:\n" + exp + xlu) == vsetm + "L1:\n" + exp + xlu
+    assert S.schedule("L1:\n" + vsetm + xlu + exp) == "L1:\n" + vsetm + xlu + exp
     vpu = ["vadd.bf16 m4, m0, m2", "vexp.bf16 m6, m4"]
     assert issue_cycles(vpu) == [0, 66] and issue_cycles(vpu, rows=3) == [0, 8]          # 2M + 2
     mm = ["vmatmul.mxu1 acc0, m0, w0", "vmatmul.acc.mxu1 acc0, m1, w0", "vmatmul.acc.mxu1 acc1, m1, w0"]

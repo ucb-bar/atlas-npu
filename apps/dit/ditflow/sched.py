@@ -17,10 +17,10 @@ The dependencies come from OPS, which gives the operands of every instruction di
   The instructions of one channel keep their order.
 Labels, branches, CSR accesses, ECALL and instructions that OPS does not list stay in place and
 end a block. vsetm does not end a block. Each instruction keeps the row count M of the last vsetm
-before it in the text, or 32 if a label or the start comes first (a branch can enter a label with
-any M, so a loop body that runs at M < 32 sets M itself). The scheduled block sets M with a vsetm
-before each instruction that uses M (ROWS) and needs another M than the one before it (after a
-label, before the first one), and at its end if the text sets another M.
+before it in the text, or 32 if a label or the start comes first. A branch can enter a label with
+any M, so the text must have M = 32 at a label unless a vsetm follows the label (asm.Builder does
+this). The scheduled block sets M with a vsetm before each instruction that uses M (ROWS) and needs
+another M than the one before it, and at its end if the text after it needs another M.
 """
 from bisect import insort
 from collections import defaultdict
@@ -460,11 +460,10 @@ class Machine:
             f[ins.args[-1]] = self.dma + DMA_LATENCY
 
 
-def _order(block: Block, window: int, rows: int | None) -> list[Ins]:
+def _order(block: Block, window: int, rows: int) -> list[Ins]:
     """Greedy list scheduling: of the first `window` ready instructions, issue the one the core
     can issue first, the one with the longest path to the end of the block on a tie. M is `rows`
-    at the start (None: not known); an instruction that needs another M issues one cycle later,
-    after a vsetm."""
+    at the start; an instruction that needs another M issues one cycle later, after a vsetm."""
     code = block.code
     succ = block.graph()
     height = [0] * len(code)
@@ -519,10 +518,10 @@ def schedule(source: str, window: int = WINDOW) -> str:
     lines = source.splitlines()
     consts = _constants(lines)
     out, code, notes = [], [], []
-    first, rows, entry, setm = True, 32, 32, False  # M in the text; M where the block starts; a vsetm
+    first, rows, entry = True, 32, 32               # M of the text; M where the block starts
 
     def flush():
-        nonlocal code, first, setm
+        nonlocal code, first
         m = entry
         for ins in _order(Block(code, {} if first else consts), window, entry) if code else ():
             out.extend(ins.notes)
@@ -530,9 +529,9 @@ def schedule(source: str, window: int = WINDOW) -> str:
                 m = ins.rows
                 out.append(f"    vsetm {m}")
             out.append(ins.text)
-        if m != rows and (m is not None or setm):
+        if m is not None and m != rows:
             out.append(f"    vsetm {rows}")
-        code, first, setm = [], False, False
+        code, first = [], False
 
     for line in lines:
         s = line.strip()
@@ -541,9 +540,14 @@ def schedule(source: str, window: int = WINDOW) -> str:
             continue
         name, args = parse(s)
         if name == "vsetm":
-            rows, setm = int(args[0], 0), True
+            rows = int(args[0], 0)
+            if entry is None:                       # it sets M at the label
+                entry = rows
+                out.extend(notes + [line])
+                notes = []
             continue
         if not s.endswith(":") and name in OPS:
+            entry = rows if entry is None else entry
             code.append(Ins(line, name, args, OPS[name], notes, rows=rows))
             notes = []
             continue
