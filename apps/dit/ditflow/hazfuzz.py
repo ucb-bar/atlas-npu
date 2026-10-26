@@ -776,6 +776,7 @@ def fp32_scale_code(u: str, b: Builder, x: str) -> list:
     """The directed instructions of one MXU u for directed_fp32. m0-m7 hold FP32 quads, m8-m11
     BF16 data, m12 FP8 data; x holds the VMEM byte address of the scale bytes 200, 7, 255, 0."""
     push, pop, scaled = f"vmatpush.acc.fp32.{u}", f"vmatpop.fp32.acc.{u}", f"vmatpop.bf16.scaled.acc.{u}"
+    e = 11 if u == "mxu1" else 12
     tile = b._vaddr(8 * FP8_TILE)
     return [
         # The scale: seli and seld right before a scaled pop, seli right after one, seli after seld.
@@ -799,6 +800,10 @@ def fp32_scale_code(u: str, b: Builder, x: str) -> list:
         # RAW and WAR around a pop: readers of its quad right after it, a writer of a source.
         f"{pop} m16, acc0", f"vstore m18, {tile}", "vadd.bf16 m24, m18, m8",
         "vadd.bf16 m26, m22, m8", f"{pop} m20, acc1", "vtrpose.xlu m30, m23",
+        # The scale alone: seld right before a scaled pop that nothing else holds back (the vmov
+        # waits until the pop before it has written its last row, so the write ports are free).
+        # Each MXU has its own scale register and destination, so both results stay visible.
+        f"{scaled} m32, acc0, e5", "vmov m34, m32", f"seld e{e}, {x}", f"{scaled} m{36 + 2 * (e - 11)}, acc1, e{e}",
     ]
 
 
