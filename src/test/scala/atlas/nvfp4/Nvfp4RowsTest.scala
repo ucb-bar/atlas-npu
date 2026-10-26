@@ -175,14 +175,31 @@ class Nvfp4RowsTest extends AnyFlatSpec with SimulatorAPI with PeekPokeAPI {
   it should "push rows 0..M-1 of the m-registers into rows 0..M-1 of the accumulator" in {
     simulate(new Nvfp4Ports) { dut =>
       // Each push at M lands on the FP32 tile m4..m7 and is popped with all 32 rows; the pop waits
-      // until the push is done (M or 2M cycles).
+      // until the push is done (M or 2M cycles) and has written row 0 for the last time (T+1, or
+      // T+M+1 for an FP32 push): it never reads a row in the cycle that the push writes it.
       val cmds = Seq(
         Cmd(PushAccFP32, 4, 1, m = false), Cmd(PushAccBF16, 36, 1, m = true), Cmd(PopFP32, 40, 1, m = false),
         Cmd(PushAccFP32, 4, 0, m = false), Cmd(PushAccFP32, 48, 0, m = true), Cmd(PopFP32, 52, 0, m = false))
       val times = check(dut, 4, cmds, (40 until 44) ++ (52 until 56))((start, reg, row) => start(4 + reg % 4)(row))
       for ((m, t) <- times) {
         val gaps = spacing(t)
-        assert(Seq(gaps(1), gaps(4)) == Seq(m, 2 * m), s"M $m: pushes and pops issue at $t")
+        assert(Seq(gaps(1), gaps(4)) == Seq(m.max(2), (2 * m).max(m + 2)), s"M $m: pushes and pops issue at $t")
+      }
+    }
+  }
+
+  it should "issue vmatmul.acc after an accumulator push only once the push has written row 0" in {
+    simulate(new Nvfp4Ports) { dut =>
+      // A BF16 and an FP32 push at M, each followed by vmatmul.acc at M and an FP32 pop of all rows.
+      val cmds = Seq(Cmd(PushWeight, 8, 0, m = false),
+        Cmd(PushAccFP32, 4, 0, m = false), Cmd(PushAccBF16, 36, 0, m = true), Cmd(MatmulAcc, 9, 0, m = true),
+        Cmd(PopFP32, 16, 0, m = false),
+        Cmd(PushAccFP32, 12, 1, m = false), Cmd(PushAccFP32, 48, 1, m = true), Cmd(MatmulAcc, 10, 1, m = true),
+        Cmd(PopFP32, 20, 1, m = false))
+      val times = check(dut, 5, cmds, 16 until 24)((start, reg, row) => start(if (reg < 20) reg - 12 else reg - 8)(row))
+      for ((m, t) <- times) {
+        val gaps = spacing(t)
+        assert(Seq(gaps(2), gaps(6)) == Seq(m.max(2), (2 * m).max(m + 2)), s"M $m: pushes and matmuls issue at $t")
       }
     }
   }

@@ -210,11 +210,21 @@ when its engine is free and:
 
 - matmul: no weight push still writes its slot, no acc push still writes its buffer, no pop still
   reads it, and the previous matmul on the buffer has written row 0 (at T + 7, so that a matmul of
-  fewer than 8 rows does not read rows before they land);
+  fewer than 8 rows does not read rows before they land); for `vmatmul.acc`, also no acc push
+  writes row 0 of the buffer in this cycle or later;
 - weight push: no other weight push still writes (one write path), and the matmul feeding now does
   not read the slot;
 - acc push: no matmul feeds or writes back to the buffer, and no pop reads it;
-- pop: every matmul writeback to the buffer has landed, and no acc push still writes it.
+- pop: every matmul writeback to the buffer has landed, no acc push still writes it, and no acc
+  push writes row 0 of it in this cycle or later.
+
+An acc push at T writes row r at T + 1 + r, and an FP32 push writes columns 16-31 of row r again
+at T + M + 1 + r. A pop or `vmatmul.acc` reads row r of the buffer at T' + r. So a reader that
+starts after the push's last write of row 0 never reads a row in the cycle that the push writes
+it: a pop or `vmatmul.acc` issues max(M, 2) cycles after a BF16 push and max(2M, M + 2) cycles
+after an FP32 push. The rule costs a cycle only at M = 1. The design never reads and writes one
+accumulator row in a cycle, so it does not depend on what the memory returns then (FPGA block
+RAM returns the old row, firtool's model the new one; docs/interlock.md, "Reads during writes").
 
 With these rules a weight push to one slot overlaps a matmul on the other, back-to-back
 `vmatmul.acc.nv` on one accumulator run every max(M, 8) cycles (the 32-cycle stride at 32 rows),

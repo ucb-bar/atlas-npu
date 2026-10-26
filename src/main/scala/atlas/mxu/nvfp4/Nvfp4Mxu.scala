@@ -231,14 +231,20 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   private def matmulReadingSlot(s: Bool): Bool = e0Matmul && e0.weightSlot === s && !e0Boundary
   /** An accumulator push to b will still write after this cycle. */
   private def pushAccWriting(b: Bool): Bool = e0PushAcc && e0.accSel === b && !e0Boundary
+  /** An accumulator push to b writes row 0 for the last time in this cycle or later (row r of phase h
+    * at T+1+hM+r): a pop or vmatmul.acc accepted now would read row 0 while it is written. */
+  private def pushAccRow0(b: Bool): Bool =
+    e0PushAcc && e0.accSel === b && e0n <= Cat(e0.op === PushAccFP32, 0.U(log2Ceil(R).W))
   /** A pop of b will still read it after this cycle. */
   private def popReading(b: Bool): Bool = wv && w.accSel === b && !wBoundary
 
-  // Matmul: E0 free; its slot fully pushed; no acc push still writing the buffer (write port);
-  // no pop still reading it (read port, and a pop must read the old rows); the previous matmul on
-  // the buffer wrote row 0 (a matmul of M < 8 rows would read rows before they land).
+  // Matmul: E0 free; its slot fully pushed; no acc push still writing the buffer (write port), and
+  // for vmatmul.acc none writing row 0; no pop still reading it (read port, and a pop must read the
+  // old rows); the previous matmul on the buffer wrote row 0 (a matmul of M < 8 rows would read rows
+  // before they land).
   val canMat     = isMat && e0Boundary && !pushWActive(cmd.weightSlot) &&
-                   !pushAccWriting(cmd.accSel) && !popReading(cmd.accSel) && !row0Pending(cmd.accSel)
+                   !pushAccWriting(cmd.accSel) && !(cmd.op === MatmulAcc && pushAccRow0(cmd.accSel)) &&
+                   !popReading(cmd.accSel) && !row0Pending(cmd.accSel)
   // Weight push: one write path; the slot must not be read by the matmul feeding now.
   val pushWOk    = isPushW && !pushWWriting && !matmulReadingSlot(cmd.weightSlot)
   val canPushWE1 = pushWOk && e1Boundary
@@ -246,8 +252,9 @@ class Nvfp4Mxu(p: Nvfp4MxuParams, mregP: MregParams) extends Module {
   // Acc push: both read ports; no matmul writebacks and no pop on the buffer.
   val canPushAcc = isPushAcc && e0Boundary && e1Boundary &&
                    !computePending(cmd.accSel) && !popReading(cmd.accSel)
-  // Pop: all matmul writes to the buffer landed, no acc push still writing it.
-  val canPop     = isPop && wBoundary && !computePending(cmd.accSel) && !pushAccWriting(cmd.accSel)
+  // Pop: all matmul writes to the buffer landed, no acc push still writing it or writing row 0.
+  val canPop     = isPop && wBoundary && !computePending(cmd.accSel) && !pushAccWriting(cmd.accSel) &&
+                   !pushAccRow0(cmd.accSel)
 
   io.cmdReady := canMat || canPushWE1 || canPushWE0 || canPushAcc || canPop
   assert(!(io.cmd.valid && !io.cmdReady), "NV: command issued while the unit cannot accept it")
