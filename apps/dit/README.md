@@ -158,9 +158,9 @@ The conditioning vector's error is the encoder's FP8 quantization (the fake quan
 
 `vadd` and `vsub` now round to nearest even (they truncated), `vsquare` and `vcube` round the
 exact power once, `vpack` and `vunpack` are the Blackwell FP8 conversions, and `quant.to_fp8`
-keeps E4M3 subnormals. `mxu1` is unchanged: it still flushes subnormal FP8 inputs and rounds to
-BF16 per K tile. The same sampler (100 steps, the weights and inputs of the table above) in the
-functional model:
+keeps E4M3 subnormals. In this run `mxu1` still had the v1 numerics: it flushed subnormal FP8
+inputs and rounded to BF16 per K tile (the next section gives the FP32 `mxu1`). The same sampler
+(100 steps, the weights and inputs of the table above) in the functional model:
 
 | vs FP32 | final chunk (rel. L2 / max abs / cosine) | per-step velocity (rel. L2, mean) |
 |---|---|---|
