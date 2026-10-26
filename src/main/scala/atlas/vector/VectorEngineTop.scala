@@ -155,7 +155,7 @@ class VectorEngineTop(
 
   val cmdIssueBusy = core.io.issueBusy(io.cmd.bits.src)(io.cmd.bits.op)
   assert(!(io.cmd.valid && cmdIssueBusy),
-    "VPU: command issued while selected VPU resources are busy (software-scheduling contract violated)")
+    "VPU: command issued while selected VPU resources are busy (interlock violated)")
 
   assert(!(sameReadBank && !mirroredReadReq),
     "VPU: concurrent reads to the same MREG bank must target the same row")

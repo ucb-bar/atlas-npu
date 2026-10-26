@@ -313,8 +313,8 @@ class ScalarCore(spP: VmemParams, hasNvfp4: Boolean = false, dmaP: DmaParams = D
   val xluNotReady = dec.xlu_cmd =/= XLU_NONE && io.xlu_busy
   val lsuNotReady = (isVload && io.lsu_vload_busy) || (isVstore && io.lsu_vstore_busy) ||
                     (dec.is_mem_load && (memLoadPending || io.lsu_scalar_busy))
-  // A busy channel is illegal to reuse; slots are allocated round-robin and
-  // retire out of order, so the next slot must also be free.
+  // A transfer waits for its channel; slots are allocated round-robin and
+  // retire out of order, so it also waits for the next slot.
   val dmaNotReady = isDmaXfer && (io.dma_busy(dec.funct3) || !io.dma_can_enqueue)
 
   // ── MREG reservations and physical ports ──

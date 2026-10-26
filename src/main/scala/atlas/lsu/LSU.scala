@@ -18,10 +18,11 @@
 //                    Fixed M + 2 cycle latency.
 //   vload.scale / vstore.scale move 4 lines whatever M is.
 //
-// Software guarantees no same-bank VMEM conflicts between scalar and vector
-// paths, including read/write pairs. Under block banking, aligned VLOAD/VSTORE
-// operations stay in one bank for their entire 32-line transfer. Vmem asserts
-// on violations. All LSU operations have deterministic latency — no stalls.
+// ScalarCore's interlock keeps the scalar and vector paths off the same VMEM
+// bank, including read/write pairs (docs/interlock.md). Under block banking,
+// aligned VLOAD/VSTORE operations stay in one bank for their entire 32-line
+// transfer. Vmem asserts on violations. Every LSU operation has a fixed
+// latency: the LSU does not stall a command that it took.
 //
 // Busy signals:
 //   scalarBusy — true while a scalar load is in flight.

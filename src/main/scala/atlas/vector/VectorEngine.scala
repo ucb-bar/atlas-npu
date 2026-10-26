@@ -4,9 +4,9 @@
 // Dispatches one decoded vector operation to the appropriate lane-box module
 // and forwards the resulting vector back through small Valid-only interfaces.
 //
-// Software-scheduled model:
-//   The scalar core / compiler guarantees that commands are only issued
-//   when the selected op's issue-busy bit is low.
+// Issue:
+//   ScalarCore's interlock issues a command only when the selected op's
+//   issue-busy bit is low (docs/interlock.md).
 //   `io.busy` reports only that some VPU work is still in flight.
 //   No hardware backpressure is provided anywhere in the vector path.
 //   Assertions fire on violations to aid debugging.
@@ -54,8 +54,8 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
 	// FSM
 	val fsm = Module(new VectorFSM(p))
 
-  // ── Software-scheduled acceptance ──
-  // Commands launch directly; illegal timing is caught by the assert below.
+  // ── Acceptance ──
+  // Commands launch directly; the assert below catches one that the interlock should have held.
   fsm.io.in.instFire               := io.inst.valid
   fsm.io.in.instType               := io.inst.bits.instType
   fsm.io.in.instSrc                := io.inst.bits.src
@@ -510,10 +510,9 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
     (isAdd2 || isSub2)            -> addSubSum.io.resp.bits.result.asUInt
   ))
 
-  // Software-scheduled contract: commands must only be issued when the
-  // sequencer is ready.
+  // The interlock issues a command only when the sequencer is ready.
   assert(!io.inst.valid || fsm.io.out.VEReady,
-    "VPU: command issued while sequencer is busy (software-scheduling contract violated)")
+    "VPU: command issued while sequencer is busy (interlock violated)")
   assert(!(fsm.io.out.state === 2.U && opUsesDoubleRead(fsm.io.out.inst1) &&
            (io.data1.valid =/= io.data2.valid)),
     "VPU: dual-read instructions must receive both source rows in the same cycle")

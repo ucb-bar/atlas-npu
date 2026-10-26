@@ -8,7 +8,8 @@
 // Each step rounds as its instruction does, so vgelu gives the result of the
 // sequence bit for bit. One row per cycle. A result comes 10 cycles after its
 // row: one cycle in each lane box, and a register in front of each adder, so
-// that no stage is deeper than the input stage of vadd.
+// that each stage stays below the VPU's longest path (rowSumPair of
+// vredsum.row, 143 logic levels).
 // ============================================================================
 
 package atlas.vector

@@ -14,8 +14,8 @@
 //   DMA:         DRAM→VMEM loads (full-line write) and VMEM→DRAM stores (read).
 //   TileLink:    Saturn / SBUS host access (byte-masked read/write).
 //
-// Software guarantees LSU scalar and LSU vector never target the same block
-// bank simultaneously, whether the requests are reads or writes. Hardware
+// ScalarCore's interlock keeps LSU scalar and LSU vector off the same block
+// bank at the same time, whether the requests are reads or writes. Hardware
 // asserts.
 // Combined LSU has unconditional priority over DMA and TileLink.
 //

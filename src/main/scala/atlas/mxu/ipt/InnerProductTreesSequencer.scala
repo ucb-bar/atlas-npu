@@ -32,10 +32,11 @@
 // `accBufRow0Ready` (any in-flight entry with `rowsWritten === 0` blocks new
 // same-buffer ops).
 //
-// Software-scheduled execution model: the compiler / scalar core guarantees
-// no resource conflicts. Every reject condition has a named assertion to make
-// any contract violation a loud sim-time failure (silicon strips assertions —
-// behavior under software contract violation is undefined). The cmd interface
+// Issue: ScalarCore's interlock issues a command only when the sequencer can
+// take it (mxu1Ready and the register reservations, docs/interlock.md). Every
+// reject condition has a named assertion to make any contract violation a loud
+// sim-time failure (silicon strips assertions — behavior under a contract
+// violation is undefined). The cmd interface
 // is fire-and-forget (`Flipped(Valid)`); a violated cmd is blocked AND fires
 // a loud assertion.
 // ============================================================================
