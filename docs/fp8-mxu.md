@@ -205,7 +205,9 @@ rows the row-0 rule costs nothing: back-to-back `vmatmul.acc.mxu1` on one accumu
 at T + 3 + r. With M rows they issue every max(M, 4) cycles, and row r of the next matmul reads C
 at T + max(M, 4) + r; matmuls on alternating accumulators issue every M cycles.
 
-Two rules come with the FP32 transfers. A pop or `vmatmul.acc` of an accumulator waits until an
-FP32 push has written row 0 in its second phase: for a push at T, from T + M + 2 (T + 34 at 32
-rows). A push or matmul to an accumulator waits while an FP32 pop of it is in its first phase,
-because the pop reads each row again in the second phase: for a pop at T, from T + M + 1.
+Two rules come with the FP32 transfers. A pop of an accumulator waits until an FP32 push has
+written row 0 in its second phase: for a push at T, from T + M + 2 (T + 34 at 32 rows). A matmul
+or `vmatmul.acc` of it waits for the whole push, from T + 2M + 1 (T + 65), because a matmul waits
+while a push to its accumulator is in flight. A push or matmul to an accumulator waits while an
+FP32 pop of it is in its first phase, because the pop reads each row again in the second phase:
+for a pop at T, from T + M + 1.

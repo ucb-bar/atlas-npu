@@ -1,12 +1,13 @@
-# Hardware interlock (`pipeline-interlock` branch)
+# Hardware interlock
 
-On `main`, Atlas is software-scheduled: units never stall each other, and a program spaces
-dependent instructions with `DELAY` (npu_spec §4, "Spacing instructions with `DELAY`"). An
-instruction issued too early trips an RTL assertion in simulation. With the assertions stripped
-(FPGA, silicon), it corrupts state or is dropped: MXU and VPU commands are fire-and-forget.
+Before the interlock (2026-10-21, branch `pipeline-interlock`), Atlas was software-scheduled:
+units never stalled each other, and a program spaced dependent instructions with `DELAY`
+(npu_spec §4, "Spacing instructions with `DELAY`"). An instruction issued too early tripped an
+RTL assertion in simulation. With the assertions stripped (FPGA, silicon), it corrupted state or
+was dropped: MXU and VPU commands are fire-and-forget.
 
-On this branch, the scalar core holds the instruction in S1 until it can issue without a
-hazard. `DELAY` stays legal but is never required.
+Now the scalar core holds the instruction in S1 until it can issue without a hazard. `DELAY`
+stays legal but is never required. npu_model still models the software-scheduled timing (§4).
 
 ## What the interlock checks
 
