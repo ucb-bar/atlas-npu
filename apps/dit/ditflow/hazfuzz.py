@@ -1,14 +1,17 @@
 """Randomized hazard test of the interlock.
 
 Each program is a random stream of dependent tensor instructions with no DELAY: vload, vstore,
-VPU operations (with the .vx and .vr forms, and vgelu), MXU push / matmul / pop, and XLU
-transposes, over 20 registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a bank) and a few
-VMEM tiles. vsetm sets the row count M now and then, to 1, 2, 3, values near the matmul spacing of
-mxu1 (4) and of the NVFP4 MXU (8), 31 or 32, and the instructions that follow use rows 0..M-1.
-Instructions are biased to read or overwrite what the previous ones touch, so RAW, WAR and WAW
-hazards on MREG registers, weight slots, accumulators and VMEM tiles are frequent. A .vx often
-reads x4 right after a scalar load writes it. The program ends by storing every register and the
-VMEM tiles to DRAM.
+VPU operations (two-input ones with the .vx and .vr forms, every unary one, vli, row and column
+reductions, vpack and vunpack), MXU push (weights, FP8, BF16 and FP32 accumulators) / matmul /
+pop, and XLU transposes, over 20 registers (m0-m11 and m32-m39, so m_i and m_i+32 also share a
+bank) and a few VMEM tiles. vsetm sets the row count M now and then, to 1, 2, 3, values near the
+matmul spacing of mxu1 (4) and of the NVFP4 MXU (8), 31 or 32, and the instructions that follow use
+rows 0..M-1. Instructions are biased to read or overwrite what the previous ones touch, so RAW, WAR
+and WAW hazards on MREG registers, weight slots, accumulators and VMEM tiles are frequent. A .vx
+often reads x4 right after a scalar load writes it. At M <= 4, row reductions come more often and
+in runs of up to three; a column reduction is often followed by an independent .vx or .vr add or
+sub, which runs in the other VPU slot. The program ends by storing every register and the VMEM
+tiles to DRAM.
 
 The expected DRAM comes from the functional model (funcsim.py), which executes in program
 order: on an interlocked core that is the architecture's meaning. A hazard the interlock lets
@@ -19,6 +22,7 @@ model's arithmetic, not at the interlock.
 Values stay finite: the generator tracks each register's type (FP8, BF16, FP32) and a bound on
 its magnitude, and only emits operations whose inputs have the right type and whose result
 stays far below the BF16 range. FP8 data never uses the NaN codes; NVFP4 scales stay small.
+vrecip, vsqrt and vlog2 only read the result of a vexp of a small value, which is positive.
 An instruction of M < 32 rows keeps rows M.. of its destination, so it writes only a destination
 of its result's type (the bound becomes the larger one); an accumulator counts the rows 0..k-1
 that hold data, and a matmul.acc or pop of M rows needs k >= M.
@@ -43,6 +47,7 @@ REGS = list(range(12)) + list(range(32, 40))
 PAIRS = [r for r in REGS if r % 2 == 0]
 QUADS = [r for r in REGS if r % 4 == 0]
 DATA_TILES = [0 * SEGMENT + i * FP8_TILE for i in range(12)] + [1 * SEGMENT + i * FP8_TILE for i in range(8)]
+FP32_TILES = DATA_TILES[16:]                                  # m36-m39 start as an FP32 quad
 SCALE_TILES = [3 * SEGMENT + i * 128 for i in range(8)]        # 128 B: one register's NVFP4 scales
 OUT_BASE = 2 * SEGMENT
 SCALAR_WORD = 4 * SEGMENT                                     # byte address of the .vx scalar
@@ -52,7 +57,16 @@ NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
 
 VPU_BINARY = ("vadd.bf16", "vsub.bf16", "vmul.bf16", "vminimum.bf16", "vmaximum.bf16")
 SCALARS = (0.5, -1.25, 3.0, 0.0078125)                        # .vx operands, |s| < 2^2
-VPU_UNARY = ("vsquare.bf16", "vredsum.row.bf16", "vredmax.row.bf16", "vgelu.bf16")
+# Unary operations and the log2 bound of the result for an input bound b.
+VPU_UNARY = {"vsquare.bf16": lambda b: 2 * b, "vcube.bf16": lambda b: 3 * b, "vgelu.bf16": lambda b: b,
+             "vmov": lambda b: b, "vrelu.bf16": lambda b: b, "vtanh.bf16": lambda b: 1,
+             "vsin.bf16": lambda b: 1, "vcos.bf16": lambda b: 1}
+EXP = {"vexp.bf16": 24, "vexp2.bf16": 17}                    # of |x| < 2^4: e^16 < 2^24
+AFTER_EXP = {"vrecip.bf16": 24, "vsqrt.bf16": 12, "vlog2.bf16": 5}  # of a vexp result in (2^-24, 2^24)
+ROW_REDUCE = {"vredsum.row.bf16": lambda b: b + 5, "vredmax.row.bf16": lambda b: b,
+              "vredmin.row.bf16": lambda b: b}
+COL_REDUCE = {"vredsum.bf16": lambda b: b + 6, "vredmax.bf16": lambda b: b,   # 2M <= 64 values
+              "vredmin.bf16": lambda b: b}
 ROW_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 31, 32)
 
 
@@ -157,7 +171,10 @@ class Gen:
     def preload(self):
         b = self.b
         for i, t in enumerate(DATA_TILES):
-            if i % 2 == 0:
+            if t in FP32_TILES:
+                data = (torch.randn(32, 8, generator=self.gen) * 4).numpy().tobytes()
+                self.ttype[t], self.tbound[t] = "fp32", 5
+            elif i % 2 == 0:
                 data = fp8_codes(1024, self.gen).numpy().tobytes()
                 self.ttype[t], self.tbound[t] = "fp8", FP8_BOUND
             else:
@@ -204,6 +221,17 @@ class Gen:
         return self.op_xlu()
 
     def op_vload(self):
+        fp32 = [t for t in DATA_TILES if self.ttype[t] == "fp32"]
+        quad = self.pick(self.dests(QUADS, "fp32", 4))
+        if fp32 and quad is not None and self.rng.random() < 0.2:    # an FP32 quad, for FP32 pushes
+            for r in range(quad, quad + 4):
+                t = self.rng.choice(fp32)
+                self.b.vload(r, t)
+                self.count("vload")
+                self.spacer()
+                self.write_regs(r, 1, "fp32", self.tbound[t])
+            self.touch(*range(quad, quad + 4))
+            return True
         t = self.rng.choice(DATA_TILES)
         dst = self.pick(self.dests(REGS, self.ttype[t]))
         if dst is None:
@@ -230,59 +258,118 @@ class Gen:
         return True
 
     def op_vpu(self):
-        rng = self.rng
-        kind = rng.random()
-        if kind < 0.1:
-            dst = self.pick(self.dests(PAIRS, "bf16", 2))
-            if dst is None:
-                return False
-            val = rng.choice((0.5, -1.25, 3.0, 0.0078125))
-            self.b.vli(dst, L.bf16_bits(val))
-            self.count("vli.all")
-            self.spacer()
-            self.write_regs(dst, 2, "bf16", 2)
-            self.touch(dst, dst + 1)
-            return True
-        if kind < 0.65:
-            op = rng.choice(VPU_BINARY)
-            form = rng.choice(("", ".vx", ".vr"))
-            srcs = self.bf16_pairs()
-            a, c = self.pick(srcs), self.pick(srcs)
-            # Two different source pairs in one physical bank are an illegal .bf16 instruction.
-            if a is None or (form == "" and a % 32 == c % 32 and a != c):
-                return False
-            ba, bc = self.rbound[a], 2 if form == ".vx" else self.rbound[c]
-            bound = ba + bc if op == "vmul.bf16" else max(ba, bc) + (1 if op in ("vadd.bf16", "vsub.bf16") else 0)
-            if bound > MAX_BOUND:
-                return False
-            if form == ".vx":
-                self.b.li(4, L.bf16_bits(rng.choice(SCALARS)) << 16 | rng.getrandbits(16))
-                if rng.random() < 0.5:                           # through VMEM: the .vx waits for x4
-                    self.b.op("SW x4, 0(x19)")
-                    self.b.li(4, 0)
-                    self.b.op("LW x4, 0(x19)")
-            dst = self.pick(self.dests(PAIRS, "bf16", 2))
-            if dst is None:
-                return False
-            self.emit(op + form, f"m{dst}", f"m{a}", "x4" if form == ".vx" else f"m{c}")
-            self.write_regs(dst, 2, "bf16", bound)
-            self.touch(dst, dst + 1, a, a + 1, *(() if form == ".vx" else (c, c + 1)))
-            return True
-        op = rng.choice(VPU_UNARY)
-        a = self.pick(self.bf16_pairs())
-        if a is None:
-            return False
-        ba = self.rbound[a]
-        bound = {"vsquare.bf16": 2 * ba, "vredsum.row.bf16": ba + 5, "vredmax.row.bf16": ba,
-                 "vgelu.bf16": ba}[op]
-        if bound > MAX_BOUND:
-            return False
-        dst = self.pick(self.dests(PAIRS, "bf16", 2))
+        kind = self.rng.random()
+        if kind < 0.08:
+            return self.op_vli()
+        if kind < 0.40:
+            return self.op_binary()
+        if kind < 0.58:
+            return self.op_unary()
+        if kind < (0.80 if self.m <= 4 else 0.70):
+            return self.op_row_reduce()
+        if kind < 0.84:
+            return self.op_col_reduce()
+        return self.op_pack() if kind < 0.92 else self.op_unpack()
+
+    def op_vli(self):
+        op = self.rng.choice(("vli.all", "vli.row", "vli.col", "vli.one"))
+        n = 2 if op in ("vli.all", "vli.row") else 1             # vli.col and vli.one write m[vd]
+        dst = self.pick(self.dests(PAIRS if n == 2 else REGS, "bf16", n))
         if dst is None:
             return False
+        self.b.op(f"{op} m{dst}, {L.bf16_bits(self.rng.choice(SCALARS)) & 0xFFFF:#06x}")
+        self.count(op)
+        self.spacer()
+        self.write_regs(dst, n, "bf16", 2)
+        self.touch(*range(dst, dst + n))
+        return True
+
+    def op_binary(self, ops=VPU_BINARY, forms=("", ".vx", ".vr"), avoid=()):
+        rng = self.rng
+        op, form = rng.choice(ops), rng.choice(forms)
+        srcs = [r for r in self.bf16_pairs() if r not in avoid]
+        a, c = self.pick(srcs), self.pick(srcs)
+        # Two different source pairs in one physical bank are an illegal .bf16 instruction.
+        if a is None or (form == "" and a % 32 == c % 32 and a != c):
+            return False
+        ba, bc = self.rbound[a], 2 if form == ".vx" else self.rbound[c]
+        bound = ba + bc if op == "vmul.bf16" else max(ba, bc) + (1 if op in ("vadd.bf16", "vsub.bf16") else 0)
+        if bound > MAX_BOUND:
+            return False
+        if form == ".vx":
+            self.b.li(4, L.bf16_bits(rng.choice(SCALARS)) << 16 | rng.getrandbits(16))
+            if rng.random() < 0.5:                           # through VMEM: the .vx waits for x4
+                self.b.op("SW x4, 0(x19)")
+                self.b.li(4, 0)
+                self.b.op("LW x4, 0(x19)")
+        dst = self.pick([r for r in self.dests(PAIRS, "bf16", 2) if r not in avoid])
+        if dst is None:
+            return False
+        self.emit(op + form, f"m{dst}", f"m{a}", "x4" if form == ".vx" else f"m{c}")
+        self.write_regs(dst, 2, "bf16", bound)
+        self.touch(dst, dst + 1, a, a + 1, *(() if form == ".vx" else (c, c + 1)))
+        return True
+
+    def unary(self, ops: dict, a=None) -> int | None:
+        """One of ops (name: bound of the result) on the pair a (default: a random one); the
+        destination pair, or None."""
+        a = self.pick(self.bf16_pairs()) if a is None else a
+        if a is None:
+            return None
+        op = self.rng.choice(sorted(ops))
+        bound = ops[op](self.rbound[a]) if callable(ops[op]) else ops[op]
+        dst = self.pick(self.dests(PAIRS, "bf16", 2))
+        if bound > MAX_BOUND or dst is None:
+            return None
         self.emit(op, f"m{dst}", f"m{a}")
         self.write_regs(dst, 2, "bf16", max(bound, 1))
         self.touch(dst, dst + 1, a, a + 1)
+        return dst
+
+    def op_unary(self):
+        small = self.bf16_pairs(max_bound=4)
+        if not small or self.rng.random() < 0.5:
+            return self.unary(VPU_UNARY) is not None
+        # vexp of |x| < 16 is positive and finite: often reciprocal, square root or log2 of it next.
+        dst = self.unary(EXP, self.pick(small))
+        if dst is not None and self.rng.random() < 0.6:
+            self.unary(AFTER_EXP, dst)
+        return dst is not None
+
+    def op_row_reduce(self):
+        """A row reduction; at M <= 4 a run of up to three."""
+        done = False
+        for _ in range(self.rng.randint(1, 3) if self.m <= 4 else 1):
+            done = self.unary(ROW_REDUCE) is not None or done
+        return done
+
+    def op_col_reduce(self):
+        """A column reduction (of the 2M rows of its pair), often with an independent .vx or .vr add
+        or sub right after it, which the VPU runs in its other slot."""
+        dst = self.unary(COL_REDUCE)
+        if dst is not None and self.rng.random() < 0.5:
+            self.op_binary(("vadd.bf16", "vsub.bf16"), (".vx", ".vr"), avoid=(dst,))
+        return dst is not None
+
+    def op_pack(self):
+        """vpack of all 32 rows into any register but vs2 + 1 (illegal)."""
+        a = self.pick(self.bf16_pairs())
+        if a is None:
+            return False
+        dst = self.pick([r for r in REGS if r != a + 1])
+        self.emit("vpack.bf16.fp8", f"m{dst}", f"m{a}", f"e{self.rng.randrange(4)}")
+        self.set_regs(dst, 1, "fp8", FP8_BOUND)
+        self.touch(dst, a, a + 1)
+        return True
+
+    def op_unpack(self):
+        """vunpack of all 32 rows, also over its own source; e0-e3 scale by at most 2^2."""
+        a, dst = self.pick(self.fp8_regs()), self.pick(PAIRS)
+        if a is None:
+            return False
+        self.emit("vunpack.fp8.bf16", f"m{dst}", f"m{a}", f"e{self.rng.randrange(4)}")
+        self.set_regs(dst, 2, "bf16", FP8_BOUND + 2)
+        self.touch(dst, dst + 1, a)
         return True
 
     def op_mxu(self, u):
@@ -312,30 +399,35 @@ class Gen:
                 self.write_acc(u, a, new)
             self.touch(src)
             return True
-        if kind < 0.7:                                           # accumulator push: BF16 pair or FP32 quad
-            a = rng.randrange(2)
-            if rng.random() < 0.6:
+        if kind < 0.7:                                           # accumulator push: FP32 quad, FP8 or BF16 pair
+            a, r = rng.randrange(2), rng.random()
+            if r < 0.5 and self.typed(QUADS, "fp32", 4):
+                src = self.pick(self.typed(QUADS, "fp32", 4))
+                self.emit(f"vmatpush.acc.fp32.{u}", f"acc{a}", f"m{src}")
+                self.write_acc(u, a, self.rbound[src])
+                self.touch(*range(src, src + 4))
+            elif r < 0.65:
+                src = self.pick(self.fp8_regs())
+                if src is None:
+                    return False
+                self.emit(f"vmatpush.acc.fp8.{u}", f"acc{a}", f"m{src}")
+                self.write_acc(u, a, FP8_BOUND)
+                self.touch(src)
+            else:
                 src = self.pick(self.bf16_pairs())
                 if src is None:
                     return False
                 self.emit(f"vmatpush.acc.bf16.{u}", f"acc{a}", f"m{src}")
                 self.write_acc(u, a, self.rbound[src])
                 self.touch(src, src + 1)
-            else:
-                src = self.pick(self.typed(QUADS, "fp32", 4))
-                if src is None:
-                    return False
-                self.emit(f"vmatpush.acc.fp32.{u}", f"acc{a}", f"m{src}")
-                self.write_acc(u, a, self.rbound[src])
-                self.touch(*range(src, src + 4))
             return True
         a = rng.randrange(2)                                     # pops
         if not self.acc_ready(u, a):
             return False
         r = rng.random()
-        if r < 0.5:
-            return self.pop_bf16(u, a, scaled=r >= 0.3)
-        if r < 0.75:
+        if r < 0.4:
+            return self.pop_bf16(u, a, scaled=r >= 0.25)
+        if r < 0.6:
             dst = self.pick(self.dests(REGS, "fp8"))
             if dst is None:
                 return False
@@ -597,6 +689,89 @@ def directed_rows(units=("mxu1",)) -> dict:
             "timeout": None, "source": source}
 
 
+def small_rows_code(nv: bool, t: list) -> list:
+    """The instructions of directed_small_rows at one row count M. t: VMEM byte addresses of
+    tiles."""
+    code = [
+        # Three row reductions back to back, twice; then a vload of a source right after one.
+        "vredsum.row.bf16 m8, m10", "vredsum.row.bf16 m12, m14", "vredsum.row.bf16 m16, m18",
+        "vredmax.row.bf16 m20, m22", "vredmax.row.bf16 m24, m26", "vredmin.row.bf16 m28, m30",
+        "vredsum.row.bf16 m8, m10", f"vload m10, {t[5]}", "vredmax.row.bf16 m12, m14", f"vload m15, {t[6]}",
+        # mxu1 pops, each read right after it: by the VPU, an acc push, a matmul, an FP32 push, vstore.
+        "vmatpop.bf16.acc.mxu1 m16, acc0", "vmov m18, m16",
+        "vmatpop.bf16.acc.mxu1 m20, acc1", "vmatpush.acc.bf16.mxu1 acc0, m20",
+        "vmatpop.fp8.acc.mxu1 m2, acc0, e0", "vmatmul.acc.mxu1 acc1, m2, w0",
+        "vmatpop.fp32.acc.mxu1 m32, acc1", "vmatpush.acc.fp32.mxu1 acc0, m32",
+        "vmatpop.fp32.acc.mxu1 m32, acc0", f"vstore m34, {t[7]}",
+    ]
+    if nv:
+        code += [
+            # NVFP4 acc pushes, each read right after it by a pop or a vmatmul.acc.
+            "vmatpush.acc.bf16.nv acc0, m4", "vmatpop.bf16.acc.nv m26, acc0",
+            "vmatpush.acc.bf16.nv acc1, m6", "vmatmul.acc.nv acc1, m0, w0",
+            "vmatpush.acc.fp32.nv acc0, m32", "vmatpop.bf16.acc.nv m28, acc0",
+            "vmatpush.acc.fp32.nv acc1, m32", "vmatmul.acc.nv acc1, m1, w0",
+            # NVFP4 pops read right after them: the VPU, and a vmatmul.acc of the FP32 pop's m34.
+            "vmatpop.bf16.acc.nv m30, acc1", "vmov m24, m30",
+            "vmatpop.fp32.acc.nv m32, acc1", "vmatmul.acc.nv acc0, m34, w0",
+        ]
+    return code
+
+
+def directed_small_rows(units=("mxu1",)) -> dict:
+    """At M = 1 to 4, the instructions of small_rows_code: row reductions back to back and the
+    vload of a source right after one, and each MXU's pops and pushes with a reader right after
+    them. At M = 1 a reader issued in the last step of a pop, or an NVFP4 pop or vmatmul.acc
+    issued right after an acc push, would read row 0 in the cycle it is written (docs/interlock.md,
+    "Reads during writes"): an FPGA (read-first) gives the old row."""
+    from .flow import assemble, preload
+    b = Builder(schedule=False)
+    b.begin()
+    gen = torch.Generator().manual_seed(4)
+    nv = "nv" in units
+    # Tiles 0-3: FP8 (m0-m2 A, m3 weights); 4-7: BF16 (m4-m31); 8-11: FP32 (m32-m35).
+    for i in range(12):
+        data = (fp8_codes(1024, gen).numpy().tobytes() if i < 4 else
+                (torch.randn(32, 16, generator=gen) * 2).to(torch.bfloat16).view(torch.int16).numpy().tobytes()
+                if i < 8 else (torch.randn(32, 8, generator=gen) * 4).numpy().tobytes())
+        b.dma.load_now(i * FP8_TILE, b.dram.add(f"t{i}", data), FP8_TILE, block=f"t{i}")
+    t = [b._vaddr(i * FP8_TILE) for i in range(12)]
+    for r in range(36):
+        b.vload(r, (r if r < 4 else 4 + r % 4 if r < 32 else 8 + r % 4) * FP8_TILE)
+    b.op("seli e0, 127")
+    code = ["vmatpush.weight.mxu1 w0, m3", "vmatpush.acc.bf16.mxu1 acc0, m4", "vmatpush.acc.bf16.mxu1 acc1, m6"]
+    if nv:
+        scales = b.dram.add("scales", ue4m3_codes(5 * 128, gen).numpy().tobytes())
+        b.dma.load_now(SCALE_TILES[0], scales, 5 * 128, block="scales")
+        for k, r in enumerate((0, 1, 2, 3, 34)):
+            b.op(f"vload.scale m{r}, {b._vaddr(SCALE_TILES[k])}")
+        code += ["vmatpush.weight.nv w0, m3", "vmatpush.acc.bf16.nv acc0, m4", "vmatpush.acc.bf16.nv acc1, m6"]
+    for m in (1, 2, 3, 4):
+        code += [f"vsetm {m}"] + small_rows_code(nv, t)
+    # At 32 rows: every accumulator to an FP32 quad, then all registers and the tiles to DRAM.
+    code += ["vsetm 32", "vmatpop.fp32.acc.mxu1 m40, acc0", "vmatpop.fp32.acc.mxu1 m44, acc1"]
+    if nv:
+        code += ["vmatpop.fp32.acc.nv m48, acc0", "vmatpop.fp32.acc.nv m52, acc1"]
+    for line in code:
+        b.op(line)
+    regs = list(range(36)) + list(range(40, 56 if nv else 48))
+    for j, r in enumerate(regs):
+        b.vstore(r, OUT_BASE + j * FP8_TILE)
+    checks = []
+    for k, (vmem, n) in enumerate([(OUT_BASE, len(regs) * FP8_TILE), (0, 12 * FP8_TILE)]):
+        dram = b.dram.reserve(f"out{k}", n)
+        b.dma.store_now(vmem, dram, n)
+        checks.append((dram, n))
+    source = b.finish()
+    sim = FuncSim(source, b.dram.blobs, b.dram.size)
+    sim.run()
+    check = [[dram, torch.frombuffer(bytearray(sim.read_dram(dram, n)), dtype=torch.int32).numpy().astype("uint32").tolist()]
+             for dram, n in checks]
+    return {"name": "hazard_small_rows" + ("_nv" if nv else ""), "isa": list(ISA_VERSION), "variant": "directed",
+            "program": assemble(source), "preload": preload(b.dram.blobs), "check": check, "perf": {},
+            "timeout": None, "source": source}
+
+
 def fp32_scale_code(u: str, b: Builder, x: str) -> list:
     """The directed instructions of one MXU u for directed_fp32. m0-m7 hold FP32 quads, m8-m11
     BF16 data, m12 FP8 data; x holds the VMEM byte address of the scale bytes 200, 7, 255, 0."""
@@ -680,7 +855,7 @@ def main(argv=None):
         ap.error(f"--units {a.units}: give mxu1 (default) or mxu1,nv (ipt-nvfp4)")
     a.out.mkdir(parents=True, exist_ok=True)
     if a.directed:
-        for t in (directed_vload_war(), directed_rows(units), directed_fp32(units)):
+        for t in (directed_vload_war(), directed_rows(units), directed_small_rows(units), directed_fp32(units)):
             (a.out / f"{t['name']}.json").write_text(json.dumps({k: v for k, v in t.items() if k != "source"}))
             (a.out / f"{t['name']}.S").write_text(t["source"])
     total = {}
