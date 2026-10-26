@@ -152,13 +152,13 @@ def main():
     passed = sum(r.status == "PASS" for r in rows)
     print(f"\nSUMMARY: {passed}/{len(rows)} passed")
     if a.config:
-        want = {r.name: expect.expected(r.name, a.config) for r in rows}
-        illegal = sum(w == "ILLEGAL" for w in want.values())
-        bad = [r for r in rows if r.status != want[r.name]]
+        want = [expect.expected(r.name, a.config, Path(p)) for r, p in zip(rows, paths)]   # rows follow paths
+        illegal = want.count("ILLEGAL")
+        bad = [(r, w) for r, w in zip(rows, want) if r.status != w]
         print(f"CONFIG {a.config}: {len(rows) - len(bad)}/{len(rows)} as expected "
               f"({len(rows) - illegal} must pass, {illegal} must be illegal)")
-        for r in bad:
-            print(f"  {r.status:7s} {r.name} ({r.variant}), expected {want[r.name]}: {r.detail[:140]}")
+        for r, w in bad:
+            print(f"  {r.status:7s} {r.name} ({r.variant}), expected {w}: {r.detail[:140]}")
         sys.exit(0 if not bad else 1)
     for r in rows:
         if r.status != "PASS":

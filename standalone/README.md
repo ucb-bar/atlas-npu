@@ -47,7 +47,9 @@ trees) or `ipt-nvfp4` (inner-product trees + the NVFP4 MXU). The results dated b
 name the configurations of that time: `default` had the systolic array (`mxu0`) too, and `ipt`
 was today's `default`. `run_tests.py --config NAME` expects every test that needs a missing unit,
 or that has the line `# @EXPECT_ILLEGAL`, to stop with an illegal instruction, and every other test
-to pass. A bundle that is not a baremetal test (DiT, hazfuzz) must pass.
+to pass. A hazfuzz bundle is judged by its assembly (the `.S` beside it), so a bundle of
+`--units mxu1,nv` must pass on `ipt-nvfp4` and stop with an illegal instruction on `default`. A DiT
+bundle must pass.
 
 The ISA CSR (CSR block `+0x1C`, docs/perf-counters.md) gives the ISA version and the units. Each
 bundle has the ISA version of the assembler that built it. `Atlas.run` does not run a bundle
