@@ -76,6 +76,18 @@ python3 standalone/host/run_tests.py --sim build/vl_soc/atlas_sim --config ipt-n
 `--no-delay` removes every `DELAY` from the kernels. The model keeps all RTL assertions, so a
 hazard that got past the interlock fails the test.
 
+The FPGA's memories differ from firtool's models in one case: when a read and a write of one
+address meet in a cycle, block RAM returns the old data and firtool's model the new data. A model
+with the FPGA's behavior runs the same bundles:
+
+```bash
+FPGA_MEMS=1 standalone/sim/build.sh build/rtl-sim build/vl_fpga   # build/vl_fpga/atlas_sim
+```
+
+It builds from a copy of the RTL with `standalone/fpga/fpga_mems.py --read-first`. A test that
+passes on one model and fails on the other reads a memory row in the cycle that it is written
+(docs/interlock.md, "Reads during writes").
+
 The Ethernet model runs the same tests over UDP on 127.0.0.1, through `eth_udp_stack` and
 `eth_tsi`. Each test gets its own model and UDP port:
 

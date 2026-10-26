@@ -9,6 +9,9 @@
 # The UART model runs the link at 6.25 Mbaud (8 clocks per bit) instead of the board's 921,600.
 # DRAM_LINE_W=n sizes the behavioral DRAM to 2^n x 32 bytes (default 21: 64 MiB; the board has
 # 2 GiB of DDR4).
+# FPGA_MEMS=1 builds from a copy of rtl_dir (out_dir/rtl) with the FPGA's memories
+# (standalone/fpga/fpga_mems.py --read-first): a read of an address in the cycle that it is written
+# returns the old data, as block RAM does, not the new data of firtool's memory models.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -59,6 +62,13 @@ case "$model" in
         ;;
 esac
 extra+=(-GDRAM_LINE_W="${DRAM_LINE_W:-21}")
+if [[ "${FPGA_MEMS:-0}" == 1 ]]; then
+    rm -rf "$out/rtl"
+    mkdir -p "$out"
+    cp -r "$rtl" "$out/rtl"
+    python3 "$root/standalone/fpga/fpga_mems.py" --read-first "$out/rtl"
+    rtl="$out/rtl"
+fi
 # SystemVerilog packages (dotprod_pkg of the NVFP4 MXU) must come before their users.
 shopt -s nullglob
 chisel=("$rtl"/*_pkg.sv)

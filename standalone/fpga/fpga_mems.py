@@ -1,6 +1,7 @@
 """Rewrite firtool's single-port masked memories into Vivado's block-RAM template.
 
     python3 standalone/fpga/fpga_mems.py <rtl_dir>
+    python3 standalone/fpga/fpga_mems.py --read-first <rtl_dir>
 
 firtool models a SyncReadMem read/write port (RW0_*, byte mask) as a registered read address
 and 32 separate byte writes, which Vivado does not infer as block RAM: it builds the array from
@@ -9,6 +10,14 @@ body of each such module with UG901's single-port byte-write-enable template, ke
 name and ports. Behavior is the same for every read: data one cycle after an enabled read. On a
 write cycle the output holds the old data instead of X. Memories with separate read and write
 ports already infer and are left alone.
+
+--read-first is for a Verilator model with the FPGA's memories (standalone/sim/build.sh with
+FPGA_MEMS=1). firtool's model of a memory with separate read and write ports (R0_*, W0_*) reads
+the array at the registered address after the clock edge, so a read of an address in the cycle
+that it is written returns the new data. Block RAM in READ_FIRST mode returns the old data. With
+--read-first those memories register the row at the edge, as block RAM does, and hold it while
+the read port is idle. The design must not read and write one address in a cycle (the MXU and
+VPU interlock rules make sure of it); this model is the check.
 """
 import re
 import sys
@@ -49,10 +58,31 @@ def width(text, port):
     return int(m.group(1)) if m else None
 
 
+# firtool's read of a two-port memory: the array at the registered address, X while not enabled.
+TWO_PORT_READ = re.compile(r"  assign R0_data = _R0_en_d0 \? Memory\[_R0_addr_d0\] : \d+'bx;\n")
+
+
+def read_first(f, text):
+    """Make a two-port memory return the old row on a read during a write of its address."""
+    dw = re.search(r"output\s+\[(\d+):0\]\s+R0_data\b", text).group(1)
+    if len(TWO_PORT_READ.findall(text)) != 1:
+        sys.exit(f"{f.name}: unexpected two-port memory read; not rewritten")
+    f.write_text(TWO_PORT_READ.sub(f"  reg [{dw}:0] R0_q;\n  always @(posedge R0_clk)\n    if (R0_en)\n"
+                                   f"      R0_q <= Memory[R0_addr];\n  assign R0_data = R0_q;\n", text))
+    print(f"read-first {f.name}")
+
+
 def main():
-    rtl = Path(sys.argv[1])
+    args = sys.argv[1:]
+    sim = args[:1] == ["--read-first"]
+    rtl = Path(args[-1])
     for f in sorted(rtl.glob("*.sv")):
         text = f.read_text()
+        # A two-port SyncReadMem model reads at a registered address (a Queue's memory reads at once).
+        if (sim and len(re.findall(r"^module\s", text, re.M)) == 1 and "_R0_addr_d0" in text
+                and width(text, "R0_addr") is not None and width(text, "W0_addr") is not None):
+            read_first(f, text)
+            continue
         # A firtool memory module: one module, a Memory array, and RW0 mask/mode *input ports*
         # (modules that instantiate a memory mention the same names as connections).
         if (len(re.findall(r"^module\s", text, re.M)) != 1 or "Memory[" not in text
