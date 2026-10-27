@@ -51,6 +51,7 @@ FP32_TILES = DATA_TILES[16:]                                  # m36-m39 start as
 SCALE_TILES = [3 * SEGMENT + i * 128 for i in range(8)]        # 128 B: one register's NVFP4 scales
 OUT_BASE = 2 * SEGMENT
 SCALAR_WORD = 4 * SEGMENT                                     # byte address of the .vx scalar
+DUMP_BASE = 5 * SEGMENT                                       # directed_small_rows: results of each M
 MAX_BOUND = 60          # log2 of the largest magnitude a BF16 value may reach
 FP8_BOUND = 9           # 448 < 2**9
 NV_BOUND = 20           # 64 x 6 x 6 x 15 x 15 < 2**20 per NVFP4 matmul
@@ -729,15 +730,16 @@ def directed_small_rows(units=("mxu1",)) -> dict:
     b.begin()
     gen = torch.Generator().manual_seed(4)
     nv = "nv" in units
-    # Tiles 0-3: FP8 (m0-m2 A, m3 weights); 4-7: BF16 (m4-m31); 8-11: FP32 (m32-m35).
-    for i in range(12):
+    # Tile i holds m_i, each with its own data: FP8 (m0-m2 A, m3 weights), BF16 (m4-m31), FP32
+    # (m32-m35).
+    for i in range(36):
         data = (fp8_codes(1024, gen).numpy().tobytes() if i < 4 else
                 (torch.randn(32, 16, generator=gen) * 2).to(torch.bfloat16).view(torch.int16).numpy().tobytes()
-                if i < 8 else (torch.randn(32, 8, generator=gen) * 4).numpy().tobytes())
+                if i < 32 else (torch.randn(32, 8, generator=gen) * 4).numpy().tobytes())
         b.dma.load_now(i * FP8_TILE, b.dram.add(f"t{i}", data), FP8_TILE, block=f"t{i}")
-    t = [b._vaddr(i * FP8_TILE) for i in range(12)]
+    t = [b._vaddr(i * FP8_TILE) for i in range(36)]
     for r in range(36):
-        b.vload(r, (r if r < 4 else 4 + r % 4 if r < 32 else 8 + r % 4) * FP8_TILE)
+        b.vload(r, r * FP8_TILE)
     b.op("seli e0, 127")
     code = ["vmatpush.weight.mxu1 w0, m3", "vmatpush.acc.bf16.mxu1 acc0, m4", "vmatpush.acc.bf16.mxu1 acc1, m6"]
     if nv:
@@ -746,10 +748,14 @@ def directed_small_rows(units=("mxu1",)) -> dict:
         for k, r in enumerate((0, 1, 2, 3, 34)):
             b.op(f"vload.scale m{r}, {b._vaddr(SCALE_TILES[k])}")
         code += ["vmatpush.weight.nv w0, m3", "vmatpush.acc.bf16.nv acc0, m4", "vmatpush.acc.bf16.nv acc1, m6"]
+    # After each M, the registers that the code writes go to VMEM at 32 rows (the next M overwrites
+    # their rows 0..M-1).
+    dump = [2] + list(range(8, 36))
     for m in (1, 2, 3, 4):
-        code += [f"vsetm {m}"] + small_rows_code(nv, t)
-    # At 32 rows: every accumulator to an FP32 quad, then all registers and the tiles to DRAM.
-    code += ["vsetm 32", "vmatpop.fp32.acc.mxu1 m40, acc0", "vmatpop.fp32.acc.mxu1 m44, acc1"]
+        code += [f"vsetm {m}"] + small_rows_code(nv, t) + ["vsetm 32"]
+        code += [f"vstore m{r}, {b._vaddr(DUMP_BASE + ((m - 1) * len(dump) + j) * FP8_TILE)}" for j, r in enumerate(dump)]
+    # Every accumulator to an FP32 quad, then all registers and the tiles to DRAM.
+    code += ["vmatpop.fp32.acc.mxu1 m40, acc0", "vmatpop.fp32.acc.mxu1 m44, acc1"]
     if nv:
         code += ["vmatpop.fp32.acc.nv m48, acc0", "vmatpop.fp32.acc.nv m52, acc1"]
     for line in code:
@@ -758,7 +764,8 @@ def directed_small_rows(units=("mxu1",)) -> dict:
     for j, r in enumerate(regs):
         b.vstore(r, OUT_BASE + j * FP8_TILE)
     checks = []
-    for k, (vmem, n) in enumerate([(OUT_BASE, len(regs) * FP8_TILE), (0, 12 * FP8_TILE)]):
+    for k, (vmem, n) in enumerate([(OUT_BASE, len(regs) * FP8_TILE), (0, 36 * FP8_TILE),
+                                   (DUMP_BASE, 4 * len(dump) * FP8_TILE)]):
         dram = b.dram.reserve(f"out{k}", n)
         b.dma.store_now(vmem, dram, n)
         checks.append((dram, n))
