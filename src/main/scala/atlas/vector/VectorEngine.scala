@@ -351,13 +351,15 @@ class VectorEngine(val p: VpuParams) extends Module with VectorParam {
   mov.io.req.bits.aVec     := Mux(isMov1, vector1, vector2)
 
   // ── Column-sum (dedicated recoded-FP accumulator) ──
+  // The first row is added to -0, the identity of round-to-nearest addition, so a column of -0
+  // sums to -0 (a +0 start gave +0).
   val csum = Module(new ColAddVec(p.BF16))
-  val zeroRecoded = recFNFromFN(p.BF16.expWidth, p.BF16.sigWidth + 16, 0.U(32.W))
-  val zeroVecWide = VecInit.fill(p.numLanes)(zeroRecoded)
+  val negZeroRecoded = recFNFromFN(p.BF16.expWidth, p.BF16.sigWidth + 16, "h80000000".U(32.W))
+  val negZeroVecWide = VecInit.fill(p.numLanes)(negZeroRecoded)
   csum.io.req.valid                        := isCSumValid
   csum.io.req.bits.isDoneReadingColSum     := fsm.io.out.isDoneReadingColSum
   csum.io.req.bits.aVec                    := Mux(isCSum1, vector1, vector2)
-  csum.io.req.bits.bVec                    := Mux(fsm.io.out.isFirstEntryColSum, zeroVecWide, csum.io.resp.bits.result)
+  csum.io.req.bits.bVec                    := Mux(fsm.io.out.isFirstEntryColSum, negZeroVecWide, csum.io.resp.bits.result)
   val finalResultBF16 = VecInit(csum.io.resp.bits.result.map(res =>
     fNFromRecFN(p.BF16.expWidth, p.BF16.sigWidth + 16, res)(31, 16)
   ))

@@ -145,6 +145,19 @@ class VectorEngineRowsTest extends AnyFlatSpec {
     }
   }
 
+  it should "sum a column of -0 to -0" in {
+    simulate(new VpuBroadcastHarness) { dut =>
+      val op = ops.map(o => o.name -> o).toMap
+      val negZero = row(Seq.fill(16)(0x8000))
+      for (m <- Seq(1, 3, 32)) {
+        val mem = randomMem(11)
+        for (r <- Seq(0, 1); i <- 0 until 32) mem(r)(i) = negZero
+        run(dut, mem, Seq(Cmd(op("vredsum"), 8, 0, 2, m)))
+        for (r <- Seq(8, 9); i <- 0 until m) assert(mem(r)(i) == negZero, s"M $m: m$r row $i")
+      }
+    }
+  }
+
   it should "run row reductions of one row back to back" in {
     simulate(new VpuBroadcastHarness) { dut =>
       val op = ops.map(o => o.name -> o).toMap
