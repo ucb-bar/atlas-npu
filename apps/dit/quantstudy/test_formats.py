@@ -58,6 +58,19 @@ def test_fp8_flushes_only_on_atlas():
     assert F.fp8(x, 448.0).tolist() == [2.0 ** -8, 448.0, 448.0]
 
 
+def test_fp8_split_is_bf16_to_fp8_precision():
+    """hi + lo of fp8_split is BF16(x) up to lo's E4M3 rounding: half an E4M3 step of x - hi."""
+    g = torch.Generator().manual_seed(7)
+    x = torch.randn(4096, generator=g) * torch.exp2(torch.randint(-8, 4, (4096,), generator=g).float())
+    amax = float(x.abs().max())
+    a = quant.exponent_for(amax, 2.0)
+    s = F.bf16(x) * 2.0 ** -a
+    lo = s - F.e4m3(s)
+    for shift in (0, 4):
+        err = (F.fp8_split(x, amax, 2.0, shift=shift) * 2.0 ** -a - s).abs()
+        assert torch.all(err <= torch.maximum(lo.abs() * 2.0 ** -4, torch.tensor(2.0 ** -(10 + shift))))
+
+
 def test_fp32_emulation_against_blackwell_fp8_and_atlas_nvfp4():
     """An FP32 matmul of the dequantized operands is within FP32 rounding of the bit-exact dot
     products (Blackwell FP8: fp8_mma; Atlas NVFP4 MXU: nvfp4), relative to sum |a w|."""

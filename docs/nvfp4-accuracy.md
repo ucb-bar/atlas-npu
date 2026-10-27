@@ -50,7 +50,9 @@ actions. See Limits.
    feature error (ViT-B: 17.4% to 11.2% with a BF16 patch embedding, 12.4% with an exact input and
    FP8 weights). The patch embedding is less than 1% of the encoder's multiply-accumulates, so two
    FP8 passes (the input split into a high and a low FP8 part) cost little. This is a compiler
-   change.
+   change. ditflow has it as `build --split-input` (2026-10-26, "Patch embedding in two FP8
+   terms"): with ISA 2.0 `mxu1`, two FP8 terms of the input and of the weights take the ViT-B
+   features from 15.8% to 8.2% from FP32, as a BF16 patch embedding does.
 4. Decide 4-bit weights only with a trained specialist_dit checkpoint and the policy's own action
    error, and with quantization-aware fine-tuning: specialist_dit already fine-tunes the backbone
    (`vision_encoder_lr_multiplier`). The least harmful 4-bit option here is NVFP4 in the MLP only,
@@ -252,6 +254,29 @@ FP32 reference: Imagewoof probe 94.3%, k-NN 93.6%; Imagenette 99.1% and 99.1%.
 | (3) + FP8 attention (2) | 11.0% | 43.5% / 50.2% | 0.901 | 89.6% / 92.0% | 91.8% / 95.3% | 70.7% | 85.5% |
 | (5) + FP8 attention (2) | 10.8% | 46.7% / 56.6% | 0.890 | 88.8% / 91.5% | 90.7% / 94.5% | 74.6% | 93.1% |
 
+### Patch embedding in two FP8 terms (2026-10-26)
+
+Rows of (2), FP8 with the Blackwell arithmetic, that change only the patch embedding. "Input in
+two terms" is x = 2^a (hi + lo) of BF16(x): hi = E4M3(x / 2^a), lo = E4M3(x / 2^a - hi), one scale
+2^a, so both terms take the same weights into one FP32 accumulator (`formats.fp8_split`). "lo at
+2^-4" gives lo a scale of its own (2^(a - 4)). "Weights in two terms" splits the weights the same
+way; the matmuls are W_hi x_hi, W_hi x_lo and W_lo x_hi.
+
+| Patch embedding | ViT-B features rel. L2 (ImageNet) | ViT-S features rel. L2: ImageNet / UMI | ViT-S patch cosine | ViT-S Imagewoof probe: acc. / agree | ViT-S correspondence acc. | ViT-S UMI NN agree |
+|---|---|---|---|---|---|---|
+| FP8, as (2) | 15.8% | 15.8% / 19.2% | 0.986 | 94.4% / 98.6% | 81.5% | 97.7% |
+| BF16 | 8.2% | 10.1% / 12.8% | 0.995 | 94.1% / 99.2% | 81.7% | 98.4% |
+| FP8 weights x exact input | 9.6% | 10.7% / 14.0% | 0.994 | 94.3% / 98.9% | 81.7% | 98.2% |
+| FP8 weights x input in two terms | 9.7% | 10.7% / 14.2% | 0.994 | 94.3% / 98.9% | 81.6% | 98.3% |
+| the same, lo at 2^-4 | not run | 10.7% / 14.2% | 0.994 | 94.3% / 98.9% | 81.6% | 98.3% |
+| weights and input in two terms | 8.2% | 10.1% / 12.8% | 0.995 | 94.1% / 99.2% | 81.7% | 98.5% |
+
+The input in two terms is as good as an exact input, and lo needs no scale of its own. On ViT-B
+the weights in two terms gain another 1.4 points: both terms together give the BF16 patch
+embedding's features. The ViT-B run stopped after these rows (the GPU was reserved by another
+job), so its other columns are missing. ditflow's `build --split-input` runs the patch
+embedding with both splits (apps/dit/README.md).
+
 ### Observations
 
 - The feature error ranks the formats the same way on both models and both image domains: BF16,
@@ -314,8 +339,9 @@ $PY -c "from huggingface_hub import hf_hub_download as d; print(d('lerobot/umi_c
     'videos/observation.image/chunk-000/file-000.mp4', repo_type='dataset', local_dir='umi'))"
 ln -s umi/videos/observation.image/chunk-000/file-000.mp4 umi.mp4
 cd <atlas-npu>/apps/dit
-$PY -m pytest quantstudy                                       # formats and arithmetic, 6 tests
+$PY -m pytest quantstudy                                       # formats and arithmetic, 7 tests
 $PY -m quantstudy.study run   OUT --model vitb16 --data $DATA  # OUT/vitb16.json and the tables
+$PY -m quantstudy.study run   OUT --model vitb16 --data $DATA --configs "fp32;fp8-fp32acc, pe split"  # some rows
 $PY -m quantstudy.study check OUT --model vitb16 --data $DATA  # emulation vs bit-exact models
 ```
 

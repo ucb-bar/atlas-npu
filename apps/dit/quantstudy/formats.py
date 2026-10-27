@@ -81,6 +81,16 @@ def fp8(x: torch.Tensor, amax: float, margin: float = 1.0, flush: bool = False) 
     return (torch.where(y.abs() < 2.0 ** -6, 0.0, y) if flush else y) * 2.0 ** a
 
 
+def fp8_split(x: torch.Tensor, amax: float, margin: float = 1.0, shift: int = 0) -> torch.Tensor:
+    """BF16(x) as two E4M3 terms of one power-of-two scale 2^a (ditflow.quant): hi = E4M3(x / 2^a),
+    lo = E4M3((x / 2^a - hi) 2^shift) / 2^shift. With shift = 0, both terms take the same weights
+    into one accumulator on Atlas (two FP8 matmuls); shift > 0 gives lo a scale of its own."""
+    a = quant.exponent_for(amax, margin)
+    s = bf16(x) * 2.0 ** -a
+    hi = e4m3(s)
+    return (hi + e4m3((s - hi) * 2.0 ** shift) * 2.0 ** -shift) * 2.0 ** a
+
+
 def mm(a: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
     """a @ w^T with an FP32 accumulator (w holds one output column per row)."""
     return a @ w.mT

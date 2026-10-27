@@ -43,6 +43,11 @@ W4A8 = V.Fmt(Fm.mxfp4, partial(Fm.fp8, margin=2.0), Fm.mm)
 W4A8_MX = V.Fmt(Fm.mxfp4, Fm.mxfp8, Fm.mm)
 W4A16 = V.Fmt(Fm.nvfp4, Fm.bf16, Fm.mm)
 W8 = V.Fmt(ATLAS.weight, Fm.exact, Fm.mm_ipt)  # FP8 weights, exact activations
+SPLIT = partial(Fm.fp8_split, margin=2.0)
+PE_SPLIT = V.Fmt(Fm.fp8, SPLIT, Fm.mm)             # activations as two FP8 terms of one scale
+PE_SPLIT4 = V.Fmt(Fm.fp8, partial(SPLIT, shift=4), Fm.mm)
+PE_SPLIT_W = V.Fmt(Fm.fp8_split, SPLIT, Fm.mm)     # weights split too
+PE_W8 = V.Fmt(Fm.fp8, Fm.exact, Fm.mm)
 
 
 def every(fmt: V.Fmt, **kinds) -> dict:
@@ -67,6 +72,11 @@ CONFIGS = {
     "atlas-fp8, pe weights only": (every(ATLAS, pe=W8), None),
     "nvfp4, pe fp8": (every(NVFP4, pe=FP8), None),
     "nvfp4 mlp, fp8 rest": (every(FP8, up=NVFP4, down=NVFP4), None),
+    "fp8-fp32acc, pe bf16": (every(FP8, pe=BF16), None),
+    "fp8-fp32acc, pe weights only": (every(FP8, pe=PE_W8), None),
+    "fp8-fp32acc, pe split": (every(FP8, pe=PE_SPLIT), None),
+    "fp8-fp32acc, pe split, lo 2^-4": (every(FP8, pe=PE_SPLIT4), None),
+    "fp8-fp32acc, pe split, weights split": (every(FP8, pe=PE_SPLIT_W), None),
     "atlas-fp8+attn": (every(ATLAS), ATLAS),
     "fp8-fp32acc+attn": (every(FP8), FP8),
     "nvfp4+attn": (every(NVFP4), FP8),
@@ -184,7 +194,7 @@ def scale_census(t: torch.Tensor, amax: float, pow2: bool) -> torch.Tensor:
                          int(((s > 0) & (s < 2 ** -6)).sum()), int(((s == 0) & (raw > 0)).sum())])
 
 
-def per_linear(vit, run: V.Run, x: torch.Tensor) -> tuple[dict, dict]:
+def per_linear(vit, run: V.Run, x: torch.Tensor, configs: dict) -> tuple[dict, dict]:
     """Each linear's output error (no bias) against FP32 on the FP32 model's own inputs, and the
     NVFP4 block-scale census of the activations and weights."""
     err, ref = defaultdict(float), defaultdict(float)
@@ -194,7 +204,7 @@ def per_linear(vit, run: V.Run, x: torch.Tensor) -> tuple[dict, dict]:
         a = a.flatten(0, -2)
         y = a @ m.weight.T
         ref[m.name] += float(y.square().sum())
-        for name, (fmts, attn) in CONFIGS.items():
+        for name, (fmts, attn) in configs.items():
             fmt = fmts.get(m.kind)
             if fmt and attn is None:
                 err[name, m.name, m.kind] += float((fmt.mm(fmt.act(a, run.amax[m.act]), m.wq(fmt)) - y).square().sum())
@@ -251,8 +261,9 @@ def run_study(args) -> dict:
     ref_nn = nearest(ref["a"], ref["b"]), nearest(ref["u0"], ref["u1"])
     ref = {key: ref[key].cpu() for key in ("nette", "woof", "u0")}
 
+    configs = {n: c for n, c in CONFIGS.items() if not args.configs or n in args.configs.split(";")}
     results = {}
-    for name, (fmts, attn) in CONFIGS.items():
+    for name, (fmts, attn) in configs.items():
         t0 = time.time()
         run.fmt, run.attn = fmts, attn
         r = {}
@@ -276,7 +287,7 @@ def run_study(args) -> dict:
     lin = {}
     for key, x in (("nette", sets["nette"]["val"][0]), ("umi", u0)):
         run.amax = amax[key]
-        lin[key] = per_linear(vit, run, x[::len(x) // 32][:32])
+        lin[key] = per_linear(vit, run, x[::len(x) // 32][:32], configs)
     return {"model": V.MODELS[args.model], "args": {k: str(v) for k, v in vars(args).items()},
             "sizes": {k: len(v[0]) for k, v in evalsets.items()} | {f"{k}_train": len(s["train"][0])
                                                                      for k, s in sets.items()},
@@ -390,6 +401,7 @@ def main(argv=None) -> None:
     r.add_argument("--pairs-per-class", type=int, default=100)
     r.add_argument("--umi-pairs", type=int, default=1024)
     r.add_argument("--umi-calib", type=int, default=128)
+    r.add_argument("--configs", help="the configurations to run, separated by ';' (default: all)")
     c = sub.choices["check"]
     c.add_argument("--rows", type=int, default=64)
     c.add_argument("--nv-rows", type=int, default=8)
