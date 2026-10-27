@@ -218,6 +218,24 @@ of seeds 1234 and 9001. All 438 pass. `--directed` also writes `hazard_fp32` (`h
 with the NVFP4 MXU): `seli` and `seld` right before scaled pops, and the VPU, `vli`, `vload` and
 the XLU writing a quad right before or right after an FP32 push, and next to an FP32 pop.
 
+After the review of M (2026-10-26), hazfuzz also emits column reductions, often with an independent
+`.vx` or `.vr` add or sub that runs in the other VPU slot (the pair in which the add or sub used to
+lose its result), `vredmin.row`, `vpack` and `vunpack`, every `vli` and unary operation (`vrecip`,
+`vsqrt` and `vlog2` of a `vexp` result), FP8 accumulator pushes, FP32 quads loaded for FP32 pushes,
+and row reductions in runs of up to three at M <= 4. `--directed` adds `hazard_small_rows`: at M = 1
+to 4, back-to-back row reductions, the `vload` of a row reduction's source, and readers right after
+each MXU's pops and NVFP4 acc pushes; it fails on the old RTL, both with firtool's memories (through
+the row reductions) and with the FPGA's (through the reads during writes). In `hazard_fp32`, a
+`seld` right before a scaled pop and a writer of m[r+2] right before an FP32 push now run with
+nothing else holding the pop or push back: before, each such case also waited for a write port or
+the mxu1 push path, so a scaled pop that ignored the `seld`, or an FP32 push that ignored m[r+2] and
+m[r+3], still passed. Seeds 7 (32 programs × 400 instructions), 5000 and 6000 (48 × 500 each) ran as
+`mxu1` programs on `default` and `ipt-nvfp4` and as `mxu1,nv` programs on `ipt-nvfp4`, with the
+directed tests and the VCU118 program: all 397 pass, on firtool's memories and on the FPGA's
+(`FPGA_MEMS=1`). Programs 11 (`mxu1,nv`) and 5001 (`mxu1`) failed at first, 5001 also in its spaced
+copy: a column `vredsum.bf16` of a column of -0 gave +0 (the RTL started the sum from +0; it starts
+from -0 now).
+
 On the old RTL, the assertions came from three sources. Two-source VPU instructions named two
 pairs in one bank (now illegal). The MXU1 sequencer's push and pop checks counted an engine on
 its last row as busy (now aligned with the interlock). And `vload`'s WAR exemption, which the
