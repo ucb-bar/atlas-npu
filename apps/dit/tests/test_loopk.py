@@ -40,6 +40,30 @@ def test_linear_rows(rows, K, N):
     assert rel(got, ref) < 0.01
 
 
+def test_linear_rows_split():
+    """Input and weights as two FP8 terms each (W_hi x_hi + W_hi x_lo + W_lo x_hi): the error of a
+    BF16 matmul, not of an FP8 one."""
+    g = torch.Generator().manual_seed(8)
+    rows, K, N = 64, 768, 64
+    X = torch.randn(rows, K, generator=g)
+    W = (torch.rand(N, K, generator=g) * 2 - 1) / math.sqrt(K)
+    a_x, a_w = Q.exponent_for(float(X.abs().max()), 2.0), Q.exponent_for(float(W.abs().max()))
+    Wq = Q.to_fp8(W, a_w)
+    Wlo = Q.to_fp8(W - Q.from_fp8(Wq, a_w), a_w)
+    kr = KernelRun(stage_bytes=48 * 1024)
+    lk = LoopKernels(kr.b, kr.k)
+    x = kr.input_bf16("x", X)
+    hi, lo = kr.tensor("hi", rows, K, "fp8"), kr.tensor("lo", rows, K, "fp8")
+    kr.k.quantize(x, hi, a_x, lo)
+    lin = Linear("w", kr.b.dram.add("w", L.weight_blocks(Wq, None, Wlo)), L.tiles(N), L.tiles(K), False, a_w, 2)
+    y = kr.tensor("y", rows, N, "bf16")
+    lk.linear_rows(lin, lin.addr, (hi, lo), a_x + a_w, [Stream("y", y)], lk.epi_store("y"))
+    kr.output(y)
+    got = kr.run().read("y")
+    ref = X @ W.T
+    assert rel(got, ref) < 0.006 < rel(Q.fake(X, a_x) @ Q.from_fp8(Wq, a_w).T, ref)
+
+
 def test_layernorm_rows():
     g = torch.Generator().manual_seed(9)
     x = torch.randn(128, 192, generator=g) * 3 + 1

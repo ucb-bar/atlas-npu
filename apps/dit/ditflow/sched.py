@@ -88,6 +88,7 @@ OPS = {
     "vtrpose.xlu": Op("xlu", "mw mr", 66),
     "vmatpush.weight.mxu1": Op("push", "ww mr", 33),
     "vmatpush.acc.bf16.mxu1": Op("pushacc", "aw Mr", 33),
+    "vmatpush.acc.fp8.mxu1": Op("pushacc", "aw mr", 33),
     "vmatpush.acc.fp32.mxu1": Op("pushacc", "aw Qr", 65),
     "vmatmul.mxu1": Op("mm", "aw mr wr", 35),
     "vmatmul.acc.mxu1": Op("mm", "arw mr wr", 35),

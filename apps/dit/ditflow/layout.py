@@ -86,14 +86,16 @@ def weight_block_bytes(codes: torch.Tensor, bias: torch.Tensor | None) -> int:
     return kt * FP8_TILE + (BF16_TILE if bias is not None else 0)
 
 
-def weight_blocks(codes: torch.Tensor, bias: torch.Tensor | None) -> bytes:
-    """Weight codes [N, K] (uint8) and an optional bias [N] as one block per output tile."""
+def weight_blocks(codes: torch.Tensor, bias: torch.Tensor | None, lo: torch.Tensor | None = None) -> bytes:
+    """Weight codes [N, K] (uint8) and an optional bias [N] as one block per output tile; with lo,
+    the codes of a second term, after the first's tiles."""
     nt, kt = tiles(codes.shape[0]), tiles(codes.shape[1])
-    w = pad2(codes.to(torch.uint8), nt * T, kt * T)
+    w = [pad2(c.to(torch.uint8), nt * T, kt * T) for c in (codes, lo) if c is not None]
     b = None if bias is None else pad2(bias.reshape(1, -1).float(), 1, nt * T)[0]
     out = bytearray()
     for n in range(nt):
-        out += fp8_bytes(w[n * T:(n + 1) * T])
+        for c in w:
+            out += fp8_bytes(c[n * T:(n + 1) * T])
         if b is not None:
             out += bf16_bytes(replicated(b[n * T:(n + 1) * T]))
     return bytes(out)

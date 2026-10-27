@@ -45,6 +45,7 @@ class VisionPlan:
         self.p = dict(p)
         for name in V.weight_names(v):
             self.p[name] = Q.from_fp8(self.codes[name], self.weight[self.key(name)])
+        self.pe_lo = Q.to_fp8(p["pe.w"] - self.p["pe.w"], self.weight["pe.w"])   # W = W_hi + W_lo
 
     @staticmethod
     def key(name: str) -> str:
@@ -117,25 +118,28 @@ def fake_quant(plans: PolicyPlans, v, d, views, state, x0, steps=None):
 # --------------------------------------------------------------------------------------------
 
 class EncoderEmitter:
-    """Emits the encoder for every view into a Builder; leaves pooled tiles in `outs`."""
+    """Emits the encoder for every view into a Builder; leaves pooled tiles in `outs`. split: the
+    patch embedding takes the patches and its weights as two FP8 terms each (Kernels.quant_split,
+    LoopKernels.linear_rows)."""
 
-    def __init__(self, b: Builder, v: V.VisionDims, plan: VisionPlan, views: list[torch.Tensor]):
-        self.b, self.v, self.plan = b, v, plan
+    def __init__(self, b: Builder, v: V.VisionDims, plan: VisionPlan, views: list[torch.Tensor],
+                 split: bool = False):
+        self.b, self.v, self.plan, self.split = b, v, plan, split
         h, HT = v.hidden, L.tiles(v.hidden)
         self.HT = HT
         a, w, codes, p = plan.act, plan.weight, plan.codes, plan.p
         self.a = a
         self.lin = {}
 
-        def place(name, wname, bias, wkey=None):
+        def place(name, wname, bias, lo=None):
             c = codes[wname]
-            addr = b.dram.add(name, L.weight_blocks(c, bias))
+            addr = b.dram.add(name, L.weight_blocks(c, bias, lo))
             self.lin[name] = Linear(name, addr, L.tiles(c.shape[0]), L.tiles(c.shape[1]), bias is not None,
-                                    w[wkey or VisionPlan.key(wname)])
+                                    w[VisionPlan.key(wname)], 1 if lo is None else 2)
             return addr
 
         # ---- DRAM: weights (layers contiguous, one stride) and per-layer parameters ----
-        place("pe", "pe.w", p["pe.b"])
+        place("pe", "pe.w", p["pe.b"], plan.pe_lo if split else None)
         self.layer_w = []
         for l in range(v.layers):
             base = None
@@ -212,7 +216,11 @@ class EncoderEmitter:
         self.self_mask = T("enc.self_mask", 32, RT * 32, "bf16")
         self.pool_mask = T("enc.pool_mask", 32, RT * 32, "bf16")
         self.corr = T("enc.corr", 32, h, "bf16")
-        self.kpad = T("enc.kpad", RT * 32, 32, "bf16")
+        kpad_rt = max((vd["rt"] for vd in self.view_data if "kpad" in vd), default=0)
+        self.kpad = T("enc.kpad", kpad_rt * 32, 32, "bf16") if kpad_rt else None
+        # split: the patches' low terms take attnq .. kpad, free until the view's constants load
+        self.xp_lo = self.attnq.addr
+        assert not split or b.vmem.top - self.xp_lo >= RT * L.tiles(3 * v.patch * v.patch) * L.FP8_TILE
         self.lp = {n: T(f"enc.{n}", 32, h, "bf16") for n in LAYER_P}
         assert self.lp["ls2"].tile(0, 0) == self.lp["ln1.w"].tile(0, 0) + self.p_bytes - HT * L.BF16_TILE
         self.st = {n: T(f"enc.{n}", 32, h, "bf16") for n in self.statics}
@@ -260,22 +268,23 @@ class EncoderEmitter:
                    "vtbuf": cview(self.scratch["vtbuf"]), "pbuf": cview(self.scratch["pbuf"]),
                    "sbuf": cview(self.scratch["sbuf"])}
         b.prog.comment(f"---- view {vd['name']}: {vd['n']} patches, {vd['rt']} row tiles of {vd['per']} ----")
-        for t, key in ((cos, "cos"), (sin, "sin"), (smask, "self_mask"), (pmask, "pool_mask"), (self.corr, "corr"),
-                       (kpad, "kpad")):
-            if key in vd:
-                b.dma.load(f"view{vi}", t.addr, vd[key], t.nbytes)
-        b.dma.wait(f"view{vi}")
         b.vsetm(vd["per"])
 
         # Patches: BF16 rows streamed from DRAM through the staging buffers, quantized to FP8.
         kp = 3 * v.patch * v.patch
         xp = self.big_view("enc.xp", rows, kp, "fp8")
+        xp_lo = Tensor("enc.xp_lo", self.xp_lo, rows, kp, "fp8") if self.split else None
         row_bytes = L.tiles(kp) * L.BF16_TILE
         pd, po = b.xreg(), b.xreg()
         b.li(pd, vd["patches"])
         lk.ptr(po, xp.tile(0, 0))
+        steps = [(pd, row_bytes), (po, xp.ct * L.FP8_TILE // 4)]
+        if xp_lo is not None:
+            pl = b.xreg()
+            lk.ptr(pl, xp_lo.tile(0, 0))
+            steps.append((pl, xp.ct * L.FP8_TILE // 4))
         stage = k.stage[0]
-        with b.loop(vd["rt"], steps=[(pd, row_bytes), (po, xp.ct * L.FP8_TILE // 4)]):
+        with b.loop(vd["rt"], steps=steps):
             for i, off in enumerate(range(0, row_bytes, 4096)):
                 b.set_x(1, (stage + off) // 4)
                 b.add_imm(2, pd, off)
@@ -288,11 +297,20 @@ class EncoderEmitter:
             for c in range(xp.ct):
                 pr = b.regs.pair()
                 b.vload2(pr, stage + c * L.BF16_TILE)
-                k.quant_store(pr, c % 2, Ptr(po, c * L.FP8_TILE), 127 - a["pe_in"])
+                if xp_lo is None:
+                    k.quant_store(pr, c % 2, Ptr(po, c * L.FP8_TILE), 127 - a["pe_in"])
+                else:
+                    k.quant_split(pr, c % 2, Ptr(po, c * L.FP8_TILE), Ptr(pl, c * L.FP8_TILE), 127 - a["pe_in"])
                 b.regs.release(pairs=(pr,))
-        b.xrelease(pd, po)
+        b.xrelease(pd, po, *((pl,) if xp_lo is not None else ()))
         lin = self.lin["pe"]
-        lk.linear_rows(lin, lin.addr, xp, a["pe_in"] + lin.a_w, [Stream("x", x)], lk.epi_store("x"))
+        lk.linear_rows(lin, lin.addr, (xp, xp_lo) if xp_lo is not None else xp, a["pe_in"] + lin.a_w,
+                       [Stream("x", x)], lk.epi_store("x"))
+        for t, key in ((cos, "cos"), (sin, "sin"), (smask, "self_mask"), (pmask, "pool_mask"), (self.corr, "corr"),
+                       (kpad, "kpad")):
+            if key in vd:
+                b.dma.load(f"view{vi}", t.addr, vd[key], t.nbytes)
+        b.dma.wait(f"view{vi}")
         for c in range(HT):                                             # the prefix tokens
             t, u = b.regs.pair(), b.regs.pair()
             b.vload2(t, x.tile(vd["pre_tile"], c))
@@ -369,11 +387,12 @@ class EncoderEmitter:
 
 class PolicyProgram:
     def __init__(self, v: V.VisionDims, vplan: VisionPlan, d: M.DiTDims, dplan: Q.QuantPlan,
-                 views, state, x0, steps=None, trace=True, dram_size: int = 64 << 20, schedule: bool = True):
+                 views, state, x0, steps=None, trace=True, dram_size: int = 64 << 20, schedule: bool = True,
+                 split: bool = False):
         assert d.cond_dim == v.cond_dim and v.queries <= E_COLS
         self.v, self.d = v, d
         self.b = Builder(dram_size, schedule)
-        self.enc = EncoderEmitter(self.b, v, vplan, views)
+        self.enc = EncoderEmitter(self.b, v, vplan, views, split)
         self.b.vmem.reset(self.enc.mark)           # the DiT's tensors reuse the encoder's working set
         # Conditioning K tiles, in the order the DiT's adaLN weights are permuted to.
         tiles, perm = [], []
@@ -385,7 +404,7 @@ class PolicyProgram:
         perm += list(range(v.state_dim)) + [-1] * (32 - v.state_dim)
         state_tile = state.reshape(1, -1)
         self.dit = C.DiTProgram(d, dplan, x0, None, steps=steps, trace=trace, builder=self.b,
-                                cond_tiles=tiles, cond_perm=perm, state=state_tile)
+                                cond_tiles=tiles, cond_perm=perm, state=state_tile, split=split)
 
         self.out_pooled = [self.b.dram.reserve(f"out.{t.name}", t.nbytes) for t in self.enc.outs]
 

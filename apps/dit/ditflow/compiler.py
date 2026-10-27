@@ -51,14 +51,15 @@ class DiTProgram:
     def __init__(self, d: M.DiTDims, plan: QuantPlan, x0: torch.Tensor, cond: torch.Tensor | None,
                  steps: int | None = None, trace: bool = True, dram_size: int = 4 << 20,
                  builder: Builder | None = None, cond_tiles=None, cond_perm=None, state=None,
-                 schedule: bool = True):
+                 schedule: bool = True, split: bool = False):
         """cond: the conditioning vector, from DRAM. Or, when the observation encoder runs in the
         same program: cond_tiles, (VMEM tile, row) per conditioning K tile; cond_perm, the
-        conditioning index of each of their columns (-1: none; the state is the last tile); state."""
+        conditioning index of each of their columns (-1: none; the state is the last tile); state.
+        split: the input projection takes x as two FP8 terms (Kernels.quant_split)."""
         assert d.head_dim == 64 and d.horizon <= 64
         self.d, self.plan, self.steps, self.trace = d, plan, steps or d.steps, trace
         self.b = builder or Builder(dram_size, schedule)
-        self.cond_tiles, self.cond_perm = cond_tiles, cond_perm
+        self.cond_tiles, self.cond_perm, self.split = cond_tiles, cond_perm, split
         b = self.b
         self.T, self.H = d.horizon, d.hidden
         self.HT, self.RT = L.tiles(d.hidden), L.tiles(d.horizon)
@@ -168,6 +169,8 @@ class DiTProgram:
         vt("attnq", self.T, self.H, "fp8")
         vt("hq", self.T, 4 * self.H, "fp8")
         vt("xin_q", self.T, 32, "fp8")
+        if split:
+            vt("xin_lo", self.T, 32, "fp8")
         vt("vbuf", self.T, 32, "bf16")
         stage = max(lin.block_bytes for lin in self.lin.values())
         self.k = Kernels(b, stage, banked=True)
@@ -196,7 +199,7 @@ class DiTProgram:
                     b.vstore2(z, vm["qkv"].tile(r, c))
             b.regs.release(pairs=(z,))
         b.vsetm(self.M)
-        k.quantize(vm["x_hi"], vm["xin_q"], a["x"])
+        k.quantize(vm["x_hi"], vm["xin_q"], a["x"], vm.get("xin_lo"))
 
         b.li(5, 0)
         b.li(6, self.steps)
@@ -206,7 +209,8 @@ class DiTProgram:
         b.label("step")
         b.prog.comment("---- sampler step ----")
         self.time_path()
-        self.lin_call("in", vm["xin_q"], a["x"], k.epi_store(vm["x"]))
+        xin = (vm["xin_q"], vm["xin_lo"]) if self.split else vm["xin_q"]
+        self.lin_call("in", xin, a["x"], k.epi_store(vm["x"]))
         for l in range(d.layers):
             self.block(l)
         k.quantize(vm["x"], vm["xq"], a["h"])
@@ -236,7 +240,7 @@ class DiTProgram:
         }
         return Compiled(d, self.steps, source, b.dram.blobs, b.dram.regions, manifest)
 
-    def lin_call(self, name: str, xq: Tensor, a_x: int, epilogue) -> None:
+    def lin_call(self, name: str, xq, a_x: int, epilogue) -> None:
         lin = self.lin[name]
         self.k.linear(lin, xq, a_x + lin.a_w, epilogue)
 
@@ -349,12 +353,15 @@ class DiTProgram:
         b.v("vsub.bf16", f"m{t}", f"m{dd}", f"m{t}")              # lo = d - z
         b.vstore2(o, vm["x_hi"].tile(r, 0))
         b.vstore2(t, vm["x_lo"].tile(r, 0))
-        k.quant_store(o, r, vm["xin_q"].tile(r, 0), 127 - self.a["x"])
+        if self.split:
+            k.quant_split(o, r, vm["xin_q"].tile(r, 0), vm["xin_lo"].tile(r, 0), 127 - self.a["x"])
+        else:
+            k.quant_store(o, r, vm["xin_q"].tile(r, 0), 127 - self.a["x"])
         b.regs.release(pairs=(dd, kk, t))
 
 
-def compile_dit(d, plan, x0, cond, steps=None, trace=True, schedule=True) -> Compiled:
-    return DiTProgram(d, plan, x0, cond, steps=steps, trace=trace, schedule=schedule).compile()
+def compile_dit(d, plan, x0, cond, steps=None, trace=True, schedule=True, split=False) -> Compiled:
+    return DiTProgram(d, plan, x0, cond, steps=steps, trace=trace, schedule=schedule, split=split).compile()
 
 
 def read_outputs(c: Compiled, read) -> dict:

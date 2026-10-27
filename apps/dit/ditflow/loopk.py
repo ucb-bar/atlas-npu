@@ -52,31 +52,37 @@ class LoopKernels:
             self.b.op(f"dma.wait ch{ch}")
 
     # -- Linear over row pairs ----------------------------------------------------------------
-    def linear_rows(self, lin: Linear, wbase, xq: Tensor, deq: int, streams: list[Stream], epilogue) -> None:
+    def linear_rows(self, lin: Linear, wbase, xq, deq: int, streams: list[Stream], epilogue) -> None:
         """For every output tile (r, n): y = acc * 2**deq + bias, then epilogue(y_pair, r, ptrs) with
         ptrs[name] the Ptr of tile (r, n) (or (0, n)) of each stream. wbase: DRAM address of the
         first weight block, an int or (reg, offset). xq must have one or an even number of row
-        tiles."""
+        tiles; it is an FP8 tensor or a tuple of FP8 terms of one scale (Kernels.linear). With
+        weights in two terms (lin.wt = 2) and inputs in two, the matmuls are W_hi x_hi, W_hi x_lo
+        and W_lo x_hi (W_lo x_lo is below their rounding)."""
         b, k, regs = self.b, self.k, self.b.regs
+        terms = xq if isinstance(xq, tuple) else (xq,)
+        xq, TT, WT = terms[0], len(terms), lin.wt
+        assert WT == 1 or TT == 2, lin.name
         RT, KT, NT = xq.rt, lin.kt, lin.nt
         R = min(RT, 2)                                  # row tiles per pass
         assert RT % R == 0 and xq.ct == KT, (lin.name, RT, xq.ct, KT)
         BB = lin.block_bytes
         assert BB <= k.stage_bytes
-        resident = R * KT <= 24
+        resident = R * KT * TT <= 24
         b.prog.comment(f"linear_rows {lin.name}: {RT}x{KT} @ {KT}x{NT}, deq 2^{deq}")
-        xrow, xd = b.xreg(), b.xreg()
+        xrow, xd = [b.xreg() for _ in terms], b.xreg()
         srow = {s.name: b.xreg() for s in streams if s.per_row}
         scol = {s.name: b.xreg() for s in streams}
-        self.ptr(xrow, xq.tile(0, 0))
+        for p, x in zip(xrow, terms):
+            self.ptr(p, x.tile(0, 0))
         for s in streams:
             if s.per_row:
                 self.ptr(srow[s.name], s.t.tile(0, 0))
         wreg = [regs.one(), regs.one()]
         bias = regs.pair() if lin.has_bias else None
-        xr = [regs.one() for _ in range(R * KT)] if resident else [regs.one() for _ in range(4)]
+        xr = [regs.one() for _ in range(R * KT * TT)] if resident else [regs.one() for _ in range(4)]
         chans = [[0, 1, 2], [3, 4, 5]]
-        row_steps = [(xrow, R * KT * FP8_TILE // 4)] + \
+        row_steps = [(p, R * KT * FP8_TILE // 4) for p in xrow] + \
                     [(srow[s.name], R * s.t.ct * s.t.tile_bytes // 4) for s in streams if s.per_row]
 
         def nt_body(par, prefetch_off):
@@ -87,26 +93,32 @@ class LoopKernels:
             pending = self._block_chunks(k.stage[1 - par], xd, prefetch_off, BB, chans[1 - par]) \
                 if prefetch_off is not None else []
             per_k = -(-len(pending) // KT) if pending else 0
+            pushes = [(kk, w) for kk in range(KT) for w in range(WT)]       # weight tile w * KT + kk
             b.vload_w(wreg[0], stage)
-            for kk in range(KT):
-                slot = kk % 2
+            for i, (kk, w) in enumerate(pushes):
+                slot = i % 2
                 b.v("vmatpush.weight.mxu1", f"w{slot}", f"m{wreg[slot]}")
-                if kk + 1 < KT:
-                    b.vload_w(wreg[(kk + 1) % 2], stage + (kk + 1) * FP8_TILE)
+                if i + 1 < len(pushes):
+                    k2, w2 = pushes[i + 1]
+                    b.vload_w(wreg[(i + 1) % 2], stage + (w2 * KT + k2) * FP8_TILE)
                 for r in range(R):
-                    if resident:
-                        xm = xr[r * KT + kk]
-                    else:
-                        xm = xr[(kk * R + r) % 4]
-                        b.vload(xm, Ptr(xrow, (r * KT + kk) * FP8_TILE))
-                    b.v("vmatmul.acc.mxu1" if kk else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
+                    for t, p in enumerate(xrow[:TT - w]):
+                        if resident:
+                            xm = xr[(r * KT + kk) * TT + t]
+                        else:
+                            xm = xr[((kk * R + r) * TT + t) % 4]
+                            if not w:                                   # W_lo takes the loaded x_hi
+                                b.vload(xm, Ptr(p, (r * KT + kk) * FP8_TILE))
+                        b.v("vmatmul.acc.mxu1" if i or t else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
+                if w + 1 < WT:
+                    continue
                 for _ in range(per_k):
                     if pending:
                         pending.pop(0)()
             while pending:
                 pending.pop(0)()
             if bias is not None:
-                b.vload2_row(bias, stage + KT * FP8_TILE)
+                b.vload2_row(bias, stage + WT * KT * FP8_TILE)
             for r in range(R):
                 o = regs.pair()
                 b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{o}", f"acc{r}", f"e{b.erf(127 + deq)}")
@@ -121,7 +133,8 @@ class LoopKernels:
             if resident:
                 for r in range(R):
                     for kk in range(KT):
-                        b.vload(xr[r * KT + kk], Ptr(xrow, (r * KT + kk) * FP8_TILE))
+                        for t, p in enumerate(xrow):
+                            b.vload(xr[(r * KT + kk) * TT + t], Ptr(p, (r * KT + kk) * FP8_TILE))
             if isinstance(wbase, int):
                 b.li(xd, wbase)
             else:
@@ -144,7 +157,7 @@ class LoopKernels:
             elif pairs > 1:
                 self._wait(chans[0])            # the last pass prefetched one block past the end
         regs.release(*wreg, *xr, pairs=(bias,) if bias is not None else ())
-        b.xrelease(xrow, xd, *srow.values(), *scol.values())
+        b.xrelease(*xrow, xd, *srow.values(), *scol.values())
 
     # -- epilogues -------------------------------------------------------------------------
     def epi_store(self, name: str):

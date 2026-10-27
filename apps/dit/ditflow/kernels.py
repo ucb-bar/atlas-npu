@@ -19,17 +19,19 @@ NEG_BIG = bf16_bits(-30000.0)
 
 @dataclass
 class Linear:
-    """A Linear's weight blocks in DRAM (layout.weight_blocks)."""
+    """A Linear's weight blocks in DRAM (layout.weight_blocks). wt = 2: each block holds the
+    weights as two FP8 terms of one scale, W = W_hi + W_lo (LoopKernels.linear_rows)."""
     name: str
     addr: int
     nt: int
     kt: int
     has_bias: bool
     a_w: int
+    wt: int = 1
 
     @property
     def block_bytes(self) -> int:
-        return self.kt * FP8_TILE + (2 * FP8_TILE if self.has_bias else 0)
+        return self.wt * self.kt * FP8_TILE + (2 * FP8_TILE if self.has_bias else 0)
 
     def block(self, n: int) -> int:
         return self.addr + n * self.block_bytes
@@ -59,34 +61,58 @@ class Kernels:
         b.regs.release(q)
         return -1
 
-    def quantize(self, src: Tensor, dst: Tensor, a: int) -> None:
-        """dst = FP8(src / 2**a), tile by tile."""
+    def quant_split(self, src_pair: int, acc: int, hi_addr, lo_addr, raw: int) -> None:
+        """src as two FP8 terms of the scale 2**(127 - raw): hi = FP8(src * 2**(raw - 127)), and lo
+        the same of src - hi (exact in BF16), through acc{acc}; vstore'd to hi_addr and lo_addr."""
+        b = self.b
+        hi, lo, rest = b.regs.one(), b.regs.one(), b.regs.pair()
+        b.v("vmatpush.acc.bf16.mxu1", f"acc{acc}", f"m{src_pair}")
+        b.v("vmatpop.fp8.acc.mxu1", f"m{hi}", f"acc{acc}", f"e{b.erf(raw)}")
+        b.vstore(hi, hi_addr)
+        b.v("vmatpush.acc.fp8.mxu1", f"acc{acc}", f"m{hi}")
+        b.v("vmatpop.bf16.scaled.acc.mxu1", f"m{rest}", f"acc{acc}", f"e{b.erf(254 - raw)}")
+        b.v("vsub.bf16", f"m{rest}", f"m{src_pair}", f"m{rest}")
+        b.v("vmatpush.acc.bf16.mxu1", f"acc{acc}", f"m{rest}")
+        b.v("vmatpop.fp8.acc.mxu1", f"m{lo}", f"acc{acc}", f"e{b.erf(raw)}")
+        b.vstore(lo, lo_addr)
+        b.regs.release(hi, lo, pairs=(rest,))
+
+    def quantize(self, src: Tensor, dst: Tensor, a: int, lo: Tensor | None = None) -> None:
+        """dst = FP8(src / 2**a), tile by tile; with lo, dst and lo are the two terms (quant_split)."""
         b = self.b
         assert (src.rt, src.ct) == (dst.rt, dst.ct) and dst.kind == "fp8"
         for i, (r, c) in enumerate((r, c) for r in range(src.rt) for c in range(src.ct)):
             p = b.regs.pair()
             b.vload2(p, src.tile(r, c))
-            self.quant_store(p, i % 2, dst.tile(r, c), 127 - a)
+            if lo is None:
+                self.quant_store(p, i % 2, dst.tile(r, c), 127 - a)
+            else:
+                self.quant_split(p, i % 2, dst.tile(r, c), lo.tile(r, c), 127 - a)
             b.regs.release(pairs=(p,))
 
     # -- Linear --------------------------------------------------------------------------------
-    def linear(self, lin: Linear, xq: Tensor, deq: int, epilogue, resident: bool | None = None) -> None:
+    def linear(self, lin: Linear, xq, deq: int, epilogue, resident: bool | None = None) -> None:
         """For each output tile (r, n): y = acc * 2**deq + bias, then epilogue(y_pair, r, n). An
         epilogue may return a store through acc{r}: it runs after the next tile's pop of acc{r},
-        so the next tile's matmuls can overlap the epilogue."""
+        so the next tile's matmuls can overlap the epilogue. xq is an FP8 tensor, or a tuple of FP8
+        tensors of one scale whose sum is the input (quant_split): each multiplies the weights of
+        a K tile into the same accumulator."""
         b, regs = self.b, self.b.regs
+        terms = xq if isinstance(xq, tuple) else (xq,)
+        xq, TT = terms[0], len(terms)
         RT, KT, NT = xq.rt, lin.kt, lin.nt
         assert xq.kind == "fp8" and xq.ct == KT and RT <= 2, (lin.name, xq)
         assert lin.block_bytes <= self.stage_bytes
         if resident is None:
-            resident = RT * KT <= 24
+            resident = RT * KT * TT <= 24
         b.prog.comment(f"linear {lin.name}: {RT}x{KT} @ {KT}x{NT} tiles, deq 2^{deq}")
         xreg = {}
         if resident:
             for r in range(RT):
                 for k in range(KT):
-                    xreg[r, k] = regs.one()
-                    b.vload(xreg[r, k], xq.tile(r, k))
+                    for t, x in enumerate(terms):
+                        xreg[r, k, t] = regs.one()
+                        b.vload(xreg[r, k, t], x.tile(r, k))
         else:
             stream = [regs.one() for _ in range(4)]
         wreg = [regs.one(), regs.one()]
@@ -111,12 +137,13 @@ class Kernels:
                 if k + 1 < KT:
                     b.vload_w(wreg[(k + 1) % 2], base + (k + 1) * FP8_TILE)
                 for r in range(RT):
-                    if resident:
-                        xm = xreg[r, k]
-                    else:
-                        xm = stream[(k * RT + r) % 4]
-                        b.vload(xm, xq.tile(r, k))
-                    b.v("vmatmul.acc.mxu1" if k else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
+                    for t, x in enumerate(terms):
+                        if resident:
+                            xm = xreg[r, k, t]
+                        else:
+                            xm = stream[((k * RT + r) * TT + t) % 4]
+                            b.vload(xm, x.tile(r, k))
+                        b.v("vmatmul.acc.mxu1" if k or t else "vmatmul.mxu1", f"acc{r}", f"m{xm}", f"w{slot}")
                 b.dma.pump(per_k)
             if bias is not None:
                 b.vload2_row(bias, base + KT * FP8_TILE)

@@ -38,6 +38,29 @@ def test_linear(rows, K, N, resident):
     assert rel(got, ref) < 0.01
 
 
+def test_linear_split_input():
+    """Two FP8 terms of the input (quant_split) into one accumulator: the error of BF16 inputs,
+    not of FP8 ones."""
+    g = torch.Generator().manual_seed(6)
+    X = torch.randn(50, 256, generator=g)
+    W = (torch.rand(64, 256, generator=g) * 2 - 1) / 16
+    a_x, a_w = Q.exponent_for(float(X.abs().max()), 2.0), Q.exponent_for(float(W.abs().max()))
+    Wq = Q.to_fp8(W, a_w)
+    kr = KernelRun()
+    x = kr.input_bf16("x", X)
+    hi, lo = kr.tensor("hi", 50, 256, "fp8"), kr.tensor("lo", 50, 256, "fp8")
+    kr.k.quantize(x, hi, a_x, lo)
+    lin = Linear("w", kr.b.dram.add("w", L.weight_blocks(Wq, None)), 2, 8, False, a_w)
+    y = kr.tensor("y", 50, 64, "bf16")
+    kr.k.linear(lin, (hi, lo), a_x + a_w, kr.k.epi_store(y))
+    kr.output(y)
+    got = kr.run().read("y")
+    w = Q.from_fp8(Wq, a_w)
+    ref = X @ w.T
+    assert rel(got, ref) < 0.01 < rel(Q.fake(X, a_x) @ w.T, ref)
+    assert rel(got, ref) < 2 * rel(X.to(torch.bfloat16).float() @ w.T, ref) + 0.005
+
+
 def test_linear_gelu_quant_epilogue():
     Xq, a_x, Wq, a_w, bias = operands(50, 256, 128, seed=5)
     ref = F.gelu(Q.from_fp8(Xq, a_x) @ Q.from_fp8(Wq, a_w).T + bias, approximate="tanh")
