@@ -234,9 +234,12 @@ golden. "Same" means that the goldens are bit-identical to those of the row abov
 | the pool's 4 queries as one tile, M = 4 | | | | 7,773,942 | same pooled tokens |
 | each view's tokens spread over its row tiles | | | | 7,510,070 | rounding (zoom view) |
 | the view's constants load after the patch embedding | 252,418 | 459,874 | 207,456 | 7,510,209 | same |
-| `build --split-input` | 252,768 | 460,522 | 207,754 | 7,580,329 | more precise inputs |
+| input projections in two FP8 terms, now the default | 252,768 | 460,522 | 207,754 | 7,580,329 | more precise inputs |
+| the same program on the RTL with the interlock fixes at M = 1 | 252,960 | 460,810 | 207,850 | 7,580,521 | same |
 
-The 1- and 2-step programs give the same cycle counts in `ipt-nvfp4`. 100 steps take about
+The rows above the last one ran on the RTL before the interlock fixes at M = 1
+(docs/interlock.md): a pop of one row now holds a reader of its registers one cycle longer. The
+1- and 2-step programs give the same cycle counts in `ipt-nvfp4`. 100 steps take about
 20.8 M cycles (step 1 plus 99 times step 2), 0.42 s at 50 MHz; they took 31.7 M.
 
 Accuracy against FP32 (100 steps of the DiT; the conditioning vector of the policy, mean of the
@@ -248,9 +251,9 @@ input seeds 7, 11 and 12):
 | before, up to the time path at M = 1 | 1.286% | 5.52% | 5.34% | |
 | horizon as 2 x 25 rows | 1.282% | 5.52% | 5.34% | |
 | views spread and later | 1.282% | 5.52% | 5.31% | 4.67% |
-| `build --split-input` | 1.238% | 4.72% | 5.18% | 4.04% |
+| input projections in two FP8 terms | 1.238% | 4.72% | 5.18% | 4.04% |
 
-`--split-input` gives the DiT's input projection and the encoder's patch embedding their input
+The split input gives the DiT's input projection and the encoder's patch embedding their input
 as two FP8 terms of one scale, x = 2^a (hi + lo): `Kernels.quant_split` pops hi as FP8, pushes it
 back, pops it as BF16 (x 2^a), subtracts it from x (exact in BF16) and pops the rest as lo. Both
 terms multiply the same weights into one FP32 accumulator. The patch embedding also has its
@@ -260,7 +263,8 @@ and 0.30% with both split (BF16 inputs and weights: 0.24%). The random weights h
 outliers, so the pooled tokens gain less than the trained DINOv3 of docs/nvfp4-accuracy.md
 ("Patch embedding in two FP8 terms"), where the ViT-B features go from 15.8% to 8.2% from FP32.
 The DiT's chunk gains 0.04 points and its velocity 0.8 points. The split costs 0.9% of the
-policy's cycles and 0.1% of a step's. FP8 stays the default.
+policy's cycles and 0.1% of a step's. The split is the default; `build --no-split-input` gives
+both one FP8 term.
 
 Step 2 now spends its cycles as follows (% of 207,456): `mxu1` busy 59 (feed 39), the LSU's load
 path 59, the DMA 46, the VPU 39; the core stalls on a unit for 79 and on data for 10. The VPU
@@ -373,9 +377,9 @@ $PY -m ditflow.flow report ../../build/dit/small
 
 `build --steps N` compiles the first N steps of the same schedule; that is how the Verilator
 model runs it in minutes. `build --no-sched` keeps the program order ("Instruction
-scheduling"). `build --split-input` gives the DiT's input projection and the encoder's patch
-embedding their input as two FP8 terms, and the patch embedding its weights as two FP8 terms
-("ISA 2.0 compiler"). `build --policy` builds the whole policy (encoder + sampler); its
+scheduling"). `build --no-split-input` gives the DiT's input projection and the encoder's patch
+embedding their input as one FP8 term, and the patch embedding its weights as one FP8 term, not
+two ("ISA 2.0 compiler"). `build --policy` builds the whole policy (encoder + sampler); its
 image needs the DDR4 board or a Verilator model with `DRAM_LINE_W=21`. `golden` also writes
 `bundle_checked.json`, which is the bundle with the golden as its DRAM checks, so
 `standalone/host/run_tests.py --sim/--board` can verify it.

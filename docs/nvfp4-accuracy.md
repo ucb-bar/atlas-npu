@@ -50,9 +50,10 @@ actions. See Limits.
    feature error (ViT-B: 17.4% to 11.2% with a BF16 patch embedding, 12.4% with an exact input and
    FP8 weights). The patch embedding is less than 1% of the encoder's multiply-accumulates, so two
    FP8 passes (the input split into a high and a low FP8 part) cost little. This is a compiler
-   change. ditflow has it as `build --split-input` (2026-10-26, "Patch embedding in two FP8
-   terms"): with ISA 2.0 `mxu1`, two FP8 terms of the input and of the weights take the ViT-B
-   features from 15.8% to 8.2% from FP32, as a BF16 patch embedding does.
+   change. ditflow does it by default (2026-10-26, "Patch embedding in two FP8 terms";
+   `build --no-split-input` turns it off): with ISA 2.0 `mxu1`, two FP8 terms of the input and
+   of the weights take the ViT-B features from 15.8% to 8.2% from FP32, as a BF16 patch embedding
+   does.
 4. Decide 4-bit weights only with a trained specialist_dit checkpoint and the policy's own action
    error, and with quantization-aware fine-tuning: specialist_dit already fine-tunes the backbone
    (`vision_encoder_lr_multiplier`). The least harmful 4-bit option here is NVFP4 in the MLP only,
@@ -274,8 +275,8 @@ way; the matmuls are W_hi x_hi, W_hi x_lo and W_lo x_hi.
 The input in two terms is as good as an exact input, and lo needs no scale of its own. On ViT-B
 the weights in two terms gain another 1.4 points: both terms together give the BF16 patch
 embedding's features. The ViT-B run stopped after these rows (the GPU was reserved by another
-job), so its other columns are missing. ditflow's `build --split-input` runs the patch
-embedding with both splits (apps/dit/README.md).
+job), so its other columns are missing. ditflow runs the patch embedding with both splits
+unless `build --no-split-input` (apps/dit/README.md).
 
 ### Observations
 

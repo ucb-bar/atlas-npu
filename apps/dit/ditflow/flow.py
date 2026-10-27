@@ -1,7 +1,7 @@
 """The DiT-on-Atlas flow: build, golden, run, report.
 
     python -m ditflow.flow build  OUT [--preset small] [--steps N] [--seed S] [--input-seed I] [--policy]
-                                      [--no-sched] [--split-input]
+                                      [--no-sched] [--no-split-input]
     python -m ditflow.flow golden OUT                 # functional model, bit-exact with the RTL
     python -m ditflow.flow run    OUT --board [--port TTY] | --eth [IP] | --sim ATLAS_SIM
     python -m ditflow.flow report OUT
@@ -14,9 +14,9 @@ in FP32 ("fake quant"). The program's basic blocks are list scheduled (sched.py)
 Verilator model), reads back the action chunk and every step's velocity, and checks them
 bit for bit against the golden.
 
---split-input feeds the input projection of the DiT and the encoder's patch embedding with two FP8
-terms of x (x = hi + lo, Kernels.quant_split): two FP8 matmuls into one FP32 accumulator, close to
-BF16 inputs. The fake-quant reference is unchanged.
+The input projection of the DiT and the encoder's patch embedding take x as two FP8 terms
+(x = hi + lo, Kernels.quant_split): two FP8 matmuls into one FP32 accumulator, close to BF16
+inputs. --no-split-input gives them x as one FP8 term. The fake-quant reference is unchanged.
 
 --policy builds the whole policy instead: the observation encoder (vision.py, two camera crops
 and the state in) and the DiT sampler in one program (policy.py). Its references run
@@ -55,7 +55,7 @@ def preload(blobs) -> list:
 
 
 def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int, trace: bool,
-          schedule: bool = True, split: bool = False) -> None:
+          schedule: bool = True, split: bool = True) -> None:
     out.mkdir(parents=True, exist_ok=True)
     d = M.PRESETS[preset]
     steps = steps or d.steps
@@ -91,7 +91,7 @@ def build(out: Path, preset: str, steps: int | None, seed: int, input_seed: int,
 
 
 def build_policy(out: Path, steps: int | None, seed: int, input_seed: int, trace: bool,
-                 schedule: bool = True, split: bool = False) -> None:
+                 schedule: bool = True, split: bool = True) -> None:
     from . import policy as P
     from . import vision as V
     out.mkdir(parents=True, exist_ok=True)
@@ -265,8 +265,8 @@ def main(argv=None) -> None:
     b.add_argument("--no-trace", action="store_true")
     b.add_argument("--policy", action="store_true", help="encoder + DiT (the whole policy)")
     b.add_argument("--no-sched", action="store_true", help="keep the program order (no sched.py)")
-    b.add_argument("--split-input", action="store_true",
-                   help="two FP8 terms for the DiT's input projection and the patch embedding")
+    b.add_argument("--no-split-input", action="store_true",
+                   help="one FP8 term, not two, for the DiT's input projection and the patch embedding")
     g = sub.add_parser("golden")
     g.add_argument("out", type=Path)
     r = sub.add_parser("run")
@@ -281,9 +281,11 @@ def main(argv=None) -> None:
     p.add_argument("out", type=Path)
     a = ap.parse_args(argv)
     if a.cmd == "build" and a.policy:
-        build_policy(a.out, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched, a.split_input)
+        build_policy(a.out, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched,
+                     not a.no_split_input)
     elif a.cmd == "build":
-        build(a.out, a.preset, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched, a.split_input)
+        build(a.out, a.preset, a.steps, a.seed, a.input_seed, not a.no_trace, not a.no_sched,
+              not a.no_split_input)
     elif a.cmd == "golden":
         golden(a.out)
     elif a.cmd == "run":
