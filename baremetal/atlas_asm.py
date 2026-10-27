@@ -270,10 +270,57 @@ static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint3
 #define CSR_DBG1          (ATLAS_CSR_BASE + 0x14)
 #define CSR_EXEC_CONTROL  (ATLAS_CSR_BASE + 0x18)
 
+#define ATLAS_PMU_BASE        0x00041000UL
+#define PMU_CONTROL           0x000
+#define PMU_COMMAND           0x008
+#define PMU_INFO              0x018
+#define PMU_COUNTER_BASE      0x100
+#define PMU_COUNTER_STRIDE    8
+#define PMU_CONTROL_ENABLE    1U
+#define PMU_COMMAND_CLEAR     1U
+#define PMU_COMMAND_SNAPSHOT  2U
+#define PMU_INFO_VERSION(info) ((info) & 0xFFFFU)
+#define PMU_INFO_COUNT(info)   (((info) >> 16) & 0xFFFFU)
+#define PMU_MAX_COUNTERS      480U
+
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
 
 #define ATLAS_PROGRAM_LEN {n}
+
+static inline void pmu_fence(void) {{
+    asm volatile ("fence iorw, iorw" ::: "memory");
+}}
+
+static inline uint32_t pmu_read32(uint32_t offset) {{
+    pmu_fence();
+    uint32_t value = *(volatile const uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset);
+    pmu_fence();
+    return value;
+}}
+
+static inline void pmu_write32(uint32_t offset, uint32_t value) {{
+    pmu_fence();
+    *(volatile uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset) = value;
+    pmu_fence();
+}}
+
+static inline uint64_t pmu_read_counter(uint32_t id) {{
+    uint32_t offset = PMU_COUNTER_BASE + id * PMU_COUNTER_STRIDE;
+    uint64_t lo = pmu_read32(offset);
+    uint64_t hi = pmu_read32(offset + 4);
+    return lo | (hi << 32);
+}}
+
+static void atlas_pmu_snapshot_and_print(uint32_t counter_count) {{
+    pmu_write32(PMU_CONTROL, 0);
+    pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
+    printf("PMU counters (%u):\\n", counter_count);
+    for (uint32_t id = 0; id < counter_count; id++) {{
+        uint64_t value = pmu_read_counter(id);
+        printf("  pmu[%u] = %llu\\n", id, (unsigned long long)value);
+    }}
+}}
 
 static const uint32_t atlas_program[ATLAS_PROGRAM_LEN] = {{
 {array_body}}};
@@ -337,6 +384,16 @@ int main(void)
     }}
     printf("IMEM readback OK\\n");
 
+    uint32_t pmu_info = pmu_read32(PMU_INFO);
+    uint32_t pmu_count = PMU_INFO_COUNT(pmu_info);
+    if (PMU_INFO_VERSION(pmu_info) != 1U || pmu_count > PMU_MAX_COUNTERS) {{
+        printf("*** FAILED *** (invalid PMU INFO: 0x%08x)\\n", pmu_info);
+        return 1;
+    }}
+    printf("Preparing PMU (%u counters) ...\\n", pmu_count);
+    pmu_write32(PMU_COMMAND, PMU_COMMAND_CLEAR);
+    pmu_write32(PMU_CONTROL, PMU_CONTROL_ENABLE);
+
     printf("Issuing Atlas START command ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_START);
     asm volatile ("fence" ::: "memory");
@@ -351,6 +408,8 @@ int main(void)
     printf("Issuing Atlas STOP command ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
     asm volatile ("fence" ::: "memory");
+
+    atlas_pmu_snapshot_and_print(pmu_count);
 
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);
