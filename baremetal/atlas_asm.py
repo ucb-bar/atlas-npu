@@ -283,6 +283,27 @@ static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint3
 #define PMU_INFO_COUNT(info)   (((info) >> 16) & 0xFFFFU)
 #define PMU_MAX_COUNTERS      480U
 
+/* PMU polling configuration */
+#ifndef PMU_POLL_ENABLE
+#define PMU_POLL_ENABLE 0
+#endif
+
+#ifndef PMU_POLL_COUNTER_ID
+#define PMU_POLL_COUNTER_ID 0U
+#endif
+
+#ifndef PMU_POLL_INTERVAL
+#define PMU_POLL_INTERVAL 1000U
+#endif
+
+#ifndef PMU_POLL_PRINT
+#define PMU_POLL_PRINT 0
+#endif
+
+#if PMU_POLL_ENABLE && (PMU_POLL_INTERVAL == 0)
+#error "PMU_POLL_INTERVAL must be greater than zero"
+#endif
+
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
 
@@ -400,7 +421,32 @@ int main(void)
 
     printf("Waiting for Atlas core to execute ...\\n");
     uint32_t dbg0 = 0;
+
+    #if PMU_POLL_ENABLE
+    if (PMU_POLL_COUNTER_ID >= pmu_count) {{
+        printf("Invalid PMU counter ID %u (count=%u)\\n",
+            PMU_POLL_COUNTER_ID, pmu_count);
+        return 1;
+    }}
+    #endif
+
     for (i = 0; i < 200000000U; i++) {{
+        #if PMU_POLL_ENABLE
+        if ((i % PMU_POLL_INTERVAL) == 0) {{
+            /* Snapshot without disabling counting */
+            pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
+
+            uint64_t value = pmu_read_counter(PMU_POLL_COUNTER_ID);
+
+            #if PMU_POLL_PRINT
+            printf("PMU[%u] = %llu (poll=%u)\\n",
+                PMU_POLL_COUNTER_ID,
+                (unsigned long long)value, i);
+            #endif
+            }}
+        #endif
+
+        /* Original completion condition */
         dbg0 = mmio_read32(CSR_DBG0);
         if (dbg0 != 0) break;
     }}
