@@ -1,3 +1,23 @@
+# To generate the header: PMU_MANIFEST=/path/tile.pmu.json PMU_PLATFORM=/path/config.json
+# Poll by name: PMU_POLL_COUNTER_ID=TILE_PMU_EVENT_<EVENT_NAME>
+# PMU off by default. Enable collection with PMU_ENABLE=1; add
+# PMU_POLL_ENABLE=1 for execution-time snapshots. PMU_POLL_COUNTER_ID accepts
+# an integer or an event macro from ATLAS_PMU_HEADER=/absolute/path/to/header.h.
+PMU_MANIFEST ?=
+PMU_PLATFORM ?=
+PMU_SOFTWARE_DIR ?= $(abspath ../../pmu/software)
+ATLAS_PMU_HEADER ?=
+PMU_ENABLE ?= 0
+PMU_POLL_ENABLE ?= 0
+PMU_POLL_COUNTER_ID ?= 0
+PMU_POLL_INTERVAL ?= 1000
+PMU_POLL_PRINT ?= 0
+PMU_CMAKE_ARGS = -DPMU_ENABLE=$(PMU_ENABLE) -DPMU_POLL_ENABLE=$(PMU_POLL_ENABLE) \
+ -DPMU_POLL_COUNTER_ID=$(PMU_POLL_COUNTER_ID) -DPMU_POLL_INTERVAL=$(PMU_POLL_INTERVAL) \
+ -DPMU_POLL_PRINT=$(PMU_POLL_PRINT) -DATLAS_PMU_HEADER="$(ATLAS_PMU_HEADER)" \
+ -DPMU_MANIFEST="$(PMU_MANIFEST)" -DPMU_PLATFORM="$(PMU_PLATFORM)" \
+ -DPMU_SOFTWARE_DIR="$(PMU_SOFTWARE_DIR)"
+
 PYTHON ?= python3
 NPU_MODEL_DIR ?= ../npu-model
 ATLAS_ASSEMBLER_RUN = PYTHONPATH="$(abspath $(NPU_MODEL_DIR))$${PYTHONPATH:+:$$PYTHONPATH}" \
@@ -54,25 +74,20 @@ cicd: build-assembly
 # Clearing MAKEFLAGS keeps the cmake-generated Makefile from inheriting an
 # auth string it can't parse. cmake's --parallel still works (it passes -j directly).
 build-assembly: $(GENERATED_C)
-	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
+	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug $(PMU_CMAKE_ARGS)
 	MAKEFLAGS= cmake --build $(BUILD_DIR) --parallel
 
 $(TESTS): %: $(BUILD_DIR)/atlas_%.riscv
 	@:
 
-$(BUILD_DIR)/CMakeCache.txt:
-	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
+.PHONY: pmu-config
+pmu-config:
+	cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug $(PMU_CMAKE_ARGS)
 
-# Lazy-reconfigure: if this test's .c is newer than CMakeCache, rerun cmake
-# configure (handles "new test added since last configure" without forcing all
-# 102 .c files to be generated upfront). CMakeCache is order-only — its mtime
-# does not trigger a rebuild of the binary.
-# MAKEFLAGS= avoids leaking the parent's (4.4) `fifo:` jobserver into cmake's
-# internal gmake (4.3 on this host), which would otherwise error out under -j.
-$(BUILD_DIR)/atlas_%.riscv: $(TESTS_DIR)/atlas_%.c | $(BUILD_DIR)/CMakeCache.txt
+# Reconfigure once per invocation to apply PMU option changes to cached builds.
+$(BUILD_DIR)/atlas_%.riscv: $(TESTS_DIR)/atlas_%.c pmu-config
 	@if [ "$<" -nt "$(BUILD_DIR)/CMakeCache.txt" ]; then \
-	    echo "--> Reconfiguring CMake (atlas_$*.c is newer than CMakeCache)"; \
-	    cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug; \
+	    cmake -S $(TESTS_DIR) -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug $(PMU_CMAKE_ARGS); \
 	fi
 	MAKEFLAGS= cmake --build $(BUILD_DIR) --target atlas_$*
 

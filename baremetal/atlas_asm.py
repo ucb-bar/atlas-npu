@@ -222,6 +222,111 @@ def _parse_perf_macs(source):
     return macs0, macs1
 
 
+def emit_pmu_support():
+    """Shared opt-in tile PMU configuration and MMIO helpers."""
+    return r'''
+/* Optional hardware-generated header supplies event IDs and MMIO addresses. */
+#ifndef PMU_ENABLE
+#define PMU_ENABLE 0
+#endif
+
+#if PMU_ENABLE && defined(ATLAS_PMU_HEADER)
+#include ATLAS_PMU_HEADER
+#endif
+
+#ifndef ATLAS_PMU_BASE
+#ifdef TILE_PMU_BASE
+#define ATLAS_PMU_BASE TILE_PMU_BASE
+#else
+#define ATLAS_PMU_BASE        0x00041000UL
+#endif
+#endif
+#define PMU_CONTROL           0x000
+#define PMU_COMMAND           0x008
+#define PMU_INFO              0x018
+#define PMU_COUNTER_BASE      0x100
+#define PMU_COUNTER_STRIDE    8
+#ifndef PMU_CONTROL_ENABLE
+#define PMU_CONTROL_ENABLE    1U
+#endif
+#ifndef PMU_COMMAND_CLEAR
+#define PMU_COMMAND_CLEAR     1U
+#endif
+#ifndef PMU_COMMAND_SNAPSHOT
+#define PMU_COMMAND_SNAPSHOT  2U
+#endif
+#ifndef PMU_INFO_VERSION
+#define PMU_INFO_VERSION(info) ((info) & 0xFFFFU)
+#endif
+#ifndef PMU_INFO_COUNT
+#define PMU_INFO_COUNT(info)   (((info) >> 16) & 0xFFFFU)
+#endif
+#define PMU_MAX_COUNTERS      480U
+
+/* PMU polling configuration */
+#ifndef PMU_POLL_ENABLE
+#define PMU_POLL_ENABLE 0
+#endif
+
+#ifndef PMU_POLL_COUNTER_ID
+#define PMU_POLL_COUNTER_ID 0U
+#endif
+
+#ifndef PMU_POLL_INTERVAL
+#define PMU_POLL_INTERVAL 1000U
+#endif
+
+#ifndef PMU_POLL_PRINT
+#define PMU_POLL_PRINT 0
+#endif
+
+#if PMU_POLL_ENABLE && !PMU_ENABLE
+#error "PMU_POLL_ENABLE requires PMU_ENABLE"
+#endif
+
+#if PMU_POLL_ENABLE && (PMU_POLL_INTERVAL == 0)
+#error "PMU_POLL_INTERVAL must be greater than zero"
+#endif
+
+#if PMU_ENABLE
+static inline void pmu_fence(void) {
+    asm volatile ("fence iorw, iorw" ::: "memory");
+}
+
+static inline uint32_t pmu_read32(uint32_t offset) {
+    pmu_fence();
+    uint32_t value = *(volatile const uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset);
+    pmu_fence();
+    return value;
+}
+
+static inline void pmu_write32(uint32_t offset, uint32_t value) {
+    pmu_fence();
+    *(volatile uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset) = value;
+    pmu_fence();
+}
+
+static inline uint64_t pmu_read_counter(uint32_t id) {
+    uint32_t offset = PMU_COUNTER_BASE + id * PMU_COUNTER_STRIDE;
+    uint64_t lo = pmu_read32(offset);
+    uint64_t hi = pmu_read32(offset + 4);
+    return lo | (hi << 32);
+}
+
+static void atlas_pmu_snapshot_and_print(uint32_t counter_count) {
+    pmu_write32(PMU_CONTROL, 0);
+    pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
+    printf("PMU counters (%u):\n", counter_count);
+    for (uint32_t id = 0; id < counter_count; id++) {
+        uint64_t value = pmu_read_counter(id);
+        printf("  pmu[%u] = %llu\n", id, (unsigned long long)value);
+    }
+}
+
+#endif
+'''
+
+
 def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
                 perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None):
     """Generate a complete baremetal C test.
@@ -270,78 +375,12 @@ static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint3
 #define CSR_DBG1          (ATLAS_CSR_BASE + 0x14)
 #define CSR_EXEC_CONTROL  (ATLAS_CSR_BASE + 0x18)
 
-#define ATLAS_PMU_BASE        0x00041000UL
-#define PMU_CONTROL           0x000
-#define PMU_COMMAND           0x008
-#define PMU_INFO              0x018
-#define PMU_COUNTER_BASE      0x100
-#define PMU_COUNTER_STRIDE    8
-#define PMU_CONTROL_ENABLE    1U
-#define PMU_COMMAND_CLEAR     1U
-#define PMU_COMMAND_SNAPSHOT  2U
-#define PMU_INFO_VERSION(info) ((info) & 0xFFFFU)
-#define PMU_INFO_COUNT(info)   (((info) >> 16) & 0xFFFFU)
-#define PMU_MAX_COUNTERS      480U
-
-/* PMU polling configuration */
-#ifndef PMU_POLL_ENABLE
-#define PMU_POLL_ENABLE 0
-#endif
-
-#ifndef PMU_POLL_COUNTER_ID
-#define PMU_POLL_COUNTER_ID 0U
-#endif
-
-#ifndef PMU_POLL_INTERVAL
-#define PMU_POLL_INTERVAL 1000U
-#endif
-
-#ifndef PMU_POLL_PRINT
-#define PMU_POLL_PRINT 0
-#endif
-
-#if PMU_POLL_ENABLE && (PMU_POLL_INTERVAL == 0)
-#error "PMU_POLL_INTERVAL must be greater than zero"
-#endif
+{emit_pmu_support()}
 
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
 
 #define ATLAS_PROGRAM_LEN {n}
-
-static inline void pmu_fence(void) {{
-    asm volatile ("fence iorw, iorw" ::: "memory");
-}}
-
-static inline uint32_t pmu_read32(uint32_t offset) {{
-    pmu_fence();
-    uint32_t value = *(volatile const uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset);
-    pmu_fence();
-    return value;
-}}
-
-static inline void pmu_write32(uint32_t offset, uint32_t value) {{
-    pmu_fence();
-    *(volatile uint32_t *)(uintptr_t)(ATLAS_PMU_BASE + offset) = value;
-    pmu_fence();
-}}
-
-static inline uint64_t pmu_read_counter(uint32_t id) {{
-    uint32_t offset = PMU_COUNTER_BASE + id * PMU_COUNTER_STRIDE;
-    uint64_t lo = pmu_read32(offset);
-    uint64_t hi = pmu_read32(offset + 4);
-    return lo | (hi << 32);
-}}
-
-static void atlas_pmu_snapshot_and_print(uint32_t counter_count) {{
-    pmu_write32(PMU_CONTROL, 0);
-    pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
-    printf("PMU counters (%u):\\n", counter_count);
-    for (uint32_t id = 0; id < counter_count; id++) {{
-        uint64_t value = pmu_read_counter(id);
-        printf("  pmu[%u] = %llu\\n", id, (unsigned long long)value);
-    }}
-}}
 
 static const uint32_t atlas_program[ATLAS_PROGRAM_LEN] = {{
 {array_body}}};
@@ -405,6 +444,7 @@ int main(void)
     }}
     printf("IMEM readback OK\\n");
 
+    #if PMU_ENABLE
     uint32_t pmu_info = pmu_read32(PMU_INFO);
     uint32_t pmu_count = PMU_INFO_COUNT(pmu_info);
     if (PMU_INFO_VERSION(pmu_info) != 1U || pmu_count > PMU_MAX_COUNTERS) {{
@@ -412,8 +452,15 @@ int main(void)
         return 1;
     }}
     printf("Preparing PMU (%u counters) ...\\n", pmu_count);
+    #if PMU_POLL_ENABLE
+    if (PMU_POLL_COUNTER_ID >= pmu_count) {{
+        printf("*** FAILED *** (invalid PMU poll counter ID)\\n");
+        return 1;
+    }}
+    #endif
     pmu_write32(PMU_COMMAND, PMU_COMMAND_CLEAR);
     pmu_write32(PMU_CONTROL, PMU_CONTROL_ENABLE);
+    #endif
 
     printf("Issuing Atlas START command ...\\n");
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_START);
@@ -422,14 +469,6 @@ int main(void)
     printf("Waiting for Atlas core to execute ...\\n");
     uint32_t dbg0 = 0;
 
-    #if PMU_POLL_ENABLE
-    if (PMU_POLL_COUNTER_ID >= pmu_count) {{
-        printf("Invalid PMU counter ID %u (count=%u)\\n",
-            PMU_POLL_COUNTER_ID, pmu_count);
-        return 1;
-    }}
-    #endif
-
     for (i = 0; i < 200000000U; i++) {{
         #if PMU_POLL_ENABLE
         if ((i % PMU_POLL_INTERVAL) == 0) {{
@@ -437,6 +476,7 @@ int main(void)
             pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
 
             uint64_t value = pmu_read_counter(PMU_POLL_COUNTER_ID);
+            (void)value;
 
             #if PMU_POLL_PRINT
             printf("PMU[%u] = %llu (poll=%u)\\n",
@@ -455,7 +495,9 @@ int main(void)
     mmio_write32(CSR_EXEC_CONTROL, ATLAS_EXEC_STOP);
     asm volatile ("fence" ::: "memory");
 
+    #if PMU_ENABLE
     atlas_pmu_snapshot_and_print(pmu_count);
+    #endif
 
     uint32_t cycles   = mmio_read32(CSR_CYCLE);
     uint32_t instcnt  = mmio_read32(CSR_INSTCNT);

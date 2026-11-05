@@ -83,6 +83,42 @@ endfunction()
 # Executables — atlas_<stem> from ../assembly/<stem>.S + atlas_<stem>.c
 #################################
 
+
+option(PMU_ENABLE "Enable Atlas tile PMU collection and final counter dump" OFF)
+option(PMU_POLL_ENABLE "Snapshot the Atlas PMU during execution" OFF)
+set(PMU_POLL_COUNTER_ID 0 CACHE STRING "PMU counter ID or generated event macro to poll")
+set(ATLAS_PMU_HEADER "" CACHE FILEPATH "Optional hardware-generated PMU event/address header")
+set(PMU_POLL_INTERVAL 1000 CACHE STRING "Execution polls between PMU snapshots")
+option(PMU_POLL_PRINT "Print each PMU polling sample" OFF)
+if(PMU_POLL_ENABLE AND NOT PMU_ENABLE)
+  message(FATAL_ERROR "PMU_POLL_ENABLE requires PMU_ENABLE")
+endif()
+if(PMU_POLL_ENABLE AND NOT PMU_POLL_INTERVAL MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "PMU_POLL_INTERVAL must be a positive integer")
+endif()
+
+
+# Generate once per hardware configuration, never during target execution.
+set(PMU_MANIFEST "" CACHE FILEPATH "Schema-v2 tile PMU event manifest")
+set(PMU_PLATFORM "" CACHE FILEPATH "Matching Chipyard JSON device tree")
+set(PMU_SOFTWARE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../pmu/software" CACHE PATH "pmu/software directory")
+if(PMU_MANIFEST OR PMU_PLATFORM)
+  if(NOT PMU_MANIFEST OR NOT PMU_PLATFORM)
+    message(FATAL_ERROR "Set both PMU_MANIFEST and PMU_PLATFORM")
+  endif()
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(_pmu_header "${CMAKE_CURRENT_BINARY_DIR}/tile_pmu_platform.h")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PMU_MANIFEST}" "${PMU_PLATFORM}" "${PMU_SOFTWARE_DIR}/generate_platform_header.py")
+  execute_process(COMMAND "${Python3_EXECUTABLE}" "${PMU_SOFTWARE_DIR}/generate_platform_header.py"
+    --manifest "${PMU_MANIFEST}" --platform "${PMU_PLATFORM}" --output "${_pmu_header}"
+    RESULT_VARIABLE _pmu_result)
+  if(NOT _pmu_result EQUAL 0)
+    message(FATAL_ERROR "PMU platform header generation failed")
+  endif()
+  set(ATLAS_PMU_HEADER "${_pmu_header}")
+endif()
+
 file(GLOB_RECURSE _ATLAS_ASM "${CMAKE_CURRENT_SOURCE_DIR}/../assembly/*.S")
 list(SORT _ATLAS_ASM)
 
@@ -102,6 +138,15 @@ foreach(_asm IN LISTS _ATLAS_ASM)
 
     if(EXISTS ${_c})
         add_executable(${_tgt} ${_c})
+  target_compile_definitions(${_tgt} PRIVATE
+    PMU_ENABLE=$<BOOL:${PMU_ENABLE}> PMU_POLL_ENABLE=$<BOOL:${PMU_POLL_ENABLE}>
+    PMU_POLL_COUNTER_ID=${PMU_POLL_COUNTER_ID} PMU_POLL_INTERVAL=${PMU_POLL_INTERVAL}
+    PMU_POLL_PRINT=$<BOOL:${PMU_POLL_PRINT}>)
+  if(ATLAS_PMU_HEADER)
+    target_include_directories(${_tgt} PRIVATE "${PMU_SOFTWARE_DIR}")
+    target_compile_definitions(${_tgt} PRIVATE ATLAS_PMU_HEADER="${ATLAS_PMU_HEADER}")
+  endif()
+
         add_dump_target(${_tgt})
         math(EXPR _atlas_n "${_atlas_n}+1")
         list(APPEND _atlas_combo_targets ${_tgt})
