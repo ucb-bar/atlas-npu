@@ -107,7 +107,8 @@ class DmaCommand(vmemParams: VmemParams, dmaParams: DmaParams) extends Bundle {
 
 class DmaEngine(
     params:         AtlasParams,
-    tlBundleParams: TLBundleParameters
+    tlBundleParams: TLBundleParameters,
+    enablePerf: Boolean = false
 ) extends Module {
 
   private val dmaP  = params.dma
@@ -137,6 +138,9 @@ class DmaEngine(
 
     val tl = new TLBundle(tlBundleParams)
     val debugInFlight = Output(UInt((tagBits + 1).W))
+    val perfReadTransactions = Output(new DmaTransactionPerf(32))
+    val perfWriteTransactions = Output(new DmaTransactionPerf(32))
+    val perfRequestBackpressure = Output(Bool())
     val perfIssuedBeat = Output(Bool())
     val perfCompletedBeat = Output(Bool())
     val perfVmemStall = Output(Bool())
@@ -310,6 +314,21 @@ class DmaEngine(
   io.perfVmemStall :=
     (io.vmemRead.valid && !io.vmemReadGrant) ||
     (tlAdapter.io.response.valid && respIsLoad && !io.vmemWriteGrant)
+
+  io.perfRequestBackpressure := io.tl.a.valid && !io.tl.a.ready
+  io.perfReadTransactions := 0.U.asTypeOf(io.perfReadTransactions)
+  io.perfWriteTransactions := 0.U.asTypeOf(io.perfWriteTransactions)
+  if (enablePerf) {
+    val latency = Module(new DmaLatencyTracker(numIds))
+    latency.io.issue.valid := io.tl.a.fire
+    latency.io.issue.bits.source := io.tl.a.bits.source
+    latency.io.issue.bits.isRead := !currentCmdIsStore
+    latency.io.response.valid := io.tl.d.valid
+    latency.io.response.bits := io.tl.d.bits.source
+    latency.io.responseAccepted := io.tl.d.ready
+    io.perfReadTransactions := latency.io.reads
+    io.perfWriteTransactions := latency.io.writes
+  }
 
   when(tlAdapter.io.response.fire) {
     slotDFireOH(respSlotIdx) := true.B

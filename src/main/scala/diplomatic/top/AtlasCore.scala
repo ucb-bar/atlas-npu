@@ -78,7 +78,7 @@ class AtlasCore(
   val csrfile = Module(new CSRFile(csrBP))
   val vmem    = Module(new Vmem(vmemP, vmemBP))
   val scalar  = Module(new ScalarCore(vmemP))
-  val dma     = Module(new DmaEngine(tp, dmaBP))
+  val dma     = Module(new DmaEngine(tp, dmaBP, enablePerf = pmuRegistry.nonEmpty))
   val lsu     = Module(new LSU(vmemP, mregP))
   val mxu0    = Module(new SystolicArrayTop(saP, mregP))
   val mxu1    = Module(new InnerProductTreesTop(iptP, mregP))
@@ -104,30 +104,83 @@ class AtlasCore(
 
   csrfile.io.csr <> scalar.io.csrPort
   pmuRegistry.foreach { registry =>
+    def alwaysEvent(name: String, increment: UInt, unit: String, description: String): Unit =
+      registry.register(name, increment, unit, description)
+
     def event(name: String, increment: UInt, unit: String, description: String): Unit =
       registry.register(name, Mux(csrfile.io.execRun, increment, 0.U), unit, description)
 
+    // Host IMEM loading and DMA drain remain visible while execution is stopped.
+    alwaysEvent("imem.observation_cycles", 1.U, "cycles", "Cycles the PMU is enabled, including halted-time loading")
+    alwaysEvent("core.instructions_retired", scalar.io.csrPort.inst_retire.asUInt,
+      "instructions", "Scalar instructions retired, excluding repeated fetches during stalls")
+    alwaysEvent("imem.fetch_cycles", imem.io.perf.fetchCycles.asUInt, "cycles",
+      "Cycles the IMEM fetch port is active")
+    alwaysEvent("imem.host_write_words", imem.io.perf.hostWriteWords.asUInt, "words",
+      "Accepted host writes at the native 32-bit IMEM port")
+    alwaysEvent("imem.host_write_words_while_running", imem.io.perf.hostWriteWordsWhileRunning.asUInt, "words",
+      "Host writes accepted while instruction fetch is active")
+    alwaysEvent("imem.load_overlap_cycles", imem.io.perf.hostWriteWordsWhileRunning.asUInt, "cycles",
+      "Cycles with an accepted IMEM write and active fetch")
+    alwaysEvent("imem.host_write_stall_cycles", imem.io.perf.hostWriteStallCycles.asUInt, "cycles",
+      "Cycles a presented host write is not accepted")
+    alwaysEvent("imem.host_read_requests", imem.io.perf.hostReadRequests.asUInt, "requests",
+      "Accepted host IMEM Get requests")
+    alwaysEvent("imem.host_read_blocked_by_fetch_cycles", imem.io.perf.hostReadBlockedByFetchCycles.asUInt, "cycles",
+      "Cycles a host Get is presented while fetch owns the SRAM read port")
+    alwaysEvent("imem.response_backpressure_cycles", imem.io.perf.responseBackpressureCycles.asUInt, "cycles",
+      "Cycles an IMEM response waits for host acceptance")
+    alwaysEvent("imem.host_busy_cycles", imem.io.perf.hostBusyCycles.asUInt, "cycles",
+      "Cycles with a presented or pending host IMEM request")
+    for (half <- 0 until 2) {
+      alwaysEvent(s"imem.half_$half.fetch_cycles", imem.io.perf.halfFetchCycles(half).asUInt,
+        "cycles", s"Fetch cycles in IMEM half $half")
+      alwaysEvent(s"imem.half_$half.host_write_words", imem.io.perf.halfHostWriteWords(half).asUInt,
+        "words", s"Accepted host instruction-word writes to IMEM half $half")
+      alwaysEvent(s"imem.half_$half.host_write_words_while_running",
+        imem.io.perf.halfHostWriteWordsWhileRunning(half).asUInt,
+        "words", s"Host writes to IMEM half $half overlapping active execution")
+      alwaysEvent(s"imem.half_$half.instructions_retired",
+        (scalar.io.csrPort.inst_retire && scalar.io.retiredImemHalf === (half == 1).B).asUInt,
+        "instructions", s"Scalar instructions retired from IMEM half $half")
+    }
+    for ((direction, perf) <- Seq(("read", dma.io.perfReadTransactions), ("write", dma.io.perfWriteTransactions))) {
+      val prefix = s"dma.$direction"
+      alwaysEvent(s"$prefix.transactions_issued", perf.issued.asUInt, "transactions", "Native DMA transactions accepted on TileLink A")
+      alwaysEvent(s"$prefix.transactions_completed", perf.completed.asUInt, "transactions", "Native DMA transactions consumed on TileLink D")
+      alwaysEvent(s"$prefix.bytes_completed", Mux(perf.completed, dmaP.beatBytes.U, 0.U), "bytes", "Bytes in completed native DMA transactions")
+      alwaysEvent(s"$prefix.latency_cycles_sum", perf.latencyCycles, "transaction-cycles", "Sum of A-fire to D-fire latencies, emitted at completion")
+      alwaysEvent(s"$prefix.response_latency_cycles_sum", perf.responseLatencyCycles, "transaction-cycles", "Sum of A-fire to first D-valid latencies, emitted at completion")
+      alwaysEvent(s"$prefix.response_backpressure_cycles_sum", perf.responseBackpressureCycles, "transaction-cycles", "Sum of first D-valid to D-fire delays, emitted at completion")
+      for ((bucket, index) <- DmaLatencyBuckets.names.zipWithIndex) {
+        alwaysEvent(s"$prefix.latency_$bucket", perf.latencyBuckets(index).asUInt,
+          "transactions", s"Completed native DMA transactions in latency bucket $bucket cycles")
+      }
+    }
+    alwaysEvent("dma.request_backpressure_cycles", dma.io.perfRequestBackpressure.asUInt,
+      "cycles", "Cycles TileLink A is valid but not ready at the native DMA port")
+
     event("core.run_cycles", csrfile.io.execRun.asUInt, "cycles",
       "Cycles while Atlas execution is enabled")
-    event("dma.active_cycles", dma.io.channelBusy.asUInt.orR.asUInt, "cycles",
+    alwaysEvent("dma.active_cycles", dma.io.channelBusy.asUInt.orR.asUInt, "cycles",
       "Cycles with at least one DMA channel active")
-    event("dma.commands", scalar.io.dmaCmd.valid.asUInt, "commands",
+    alwaysEvent("dma.commands", scalar.io.dmaCmd.valid.asUInt, "commands",
       "DMA commands issued by the scalar core")
-    event("dma.beats_issued", dma.io.perfIssuedBeat.asUInt, "beats",
+    alwaysEvent("dma.beats_issued", dma.io.perfIssuedBeat.asUInt, "beats",
       "VMEM beats issued by DMA")
-    event("dma.beats_completed", dma.io.perfCompletedBeat.asUInt, "beats",
+    alwaysEvent("dma.beats_completed", dma.io.perfCompletedBeat.asUInt, "beats",
       "VMEM beats completed by DMA")
-    event("dma.vmem_stall_cycles", dma.io.perfVmemStall.asUInt, "cycles",
+    alwaysEvent("dma.vmem_stall_cycles", dma.io.perfVmemStall.asUInt, "cycles",
       "Cycles DMA is stalled by VMEM")
-    event("dma.saturated_cycles", dma.io.perfSaturated.asUInt, "cycles",
+    alwaysEvent("dma.saturated_cycles", dma.io.perfSaturated.asUInt, "cycles",
       "Cycles DMA is at its configured in-flight limit")
-    event("dma.limit_blocked_cycles", dma.io.perfLimitBlocked.asUInt, "cycles",
+    alwaysEvent("dma.limit_blocked_cycles", dma.io.perfLimitBlocked.asUInt, "cycles",
       "Cycles an otherwise ready DMA request is blocked by the in-flight limit")
-    event("dma.outstanding_cycles", dma.io.perfOutstanding.asUInt, "cycles",
+    alwaysEvent("dma.outstanding_cycles", dma.io.perfOutstanding.asUInt, "cycles",
       "Cycles with at least one DMA beat outstanding")
-    event("dma.response_wait_beat_cycles", dma.io.perfResponseWaitBeatCycles, "beat-cycles",
+    alwaysEvent("dma.response_wait_beat_cycles", dma.io.perfResponseWaitBeatCycles, "beat-cycles",
       "Outstanding DMA beats summed across cycles while awaiting responses")
-    event("dma.fence_wait_cycles", scalar.io.dmaFenceWait.asUInt, "cycles",
+    alwaysEvent("dma.fence_wait_cycles", scalar.io.dmaFenceWait.asUInt, "cycles",
       "Cycles the scalar core waits for a DMA fence")
     event("vpu.active_cycles", vpu.io.busy.asUInt, "cycles",
       "Cycles the vector processing unit is active")

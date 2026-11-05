@@ -222,6 +222,31 @@ def _parse_perf_macs(source):
     return macs0, macs1
 
 
+def _parse_imem_background_words(source):
+    """Optional host write traffic into the upper half of the 128-KiB IMEM."""
+    match = re.search(r"^\s*#\s*@IMEM_BACKGROUND_WORDS\s+(\d+)\s*$", source, re.MULTILINE)
+    words = int(match.group(1)) if match else 0
+    if not 0 <= words <= 16384:
+        raise ValueError("IMEM_BACKGROUND_WORDS must fit in the upper IMEM half (0..16384)")
+    return words
+
+
+def emit_imem_background_support(words):
+    if not 0 <= words <= 16384:
+        raise ValueError("IMEM_BACKGROUND_WORDS must fit in the upper IMEM half (0..16384)")
+    if not words:
+        return ""
+    return f"""
+/* Benchmark-only host traffic, independent of PMU collection/polling flags.
+ * The benchmark program executes from the lower IMEM half. */
+static inline void atlas_background_imem_write(uint32_t poll) {{
+    uintptr_t address = ATLAS_IMEM_BASE + 0x10000UL + (poll % {words}U) * 4;
+    *(volatile uint32_t *)address = 0x00000013U; /* NOP */
+    asm volatile ("fence iorw, iorw" ::: "memory");
+}}
+"""
+
+
 def emit_pmu_support():
     """Shared opt-in tile PMU configuration and MMIO helpers."""
     return r'''
@@ -328,7 +353,8 @@ static void atlas_pmu_snapshot_and_print(uint32_t counter_count) {
 
 
 def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
-                perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None):
+                perf_report=False, perf_macs_mxu0=None, perf_macs_mxu1=None,
+                imem_background_words=0):
     """Generate a complete baremetal C test.
 
     Args:
@@ -345,6 +371,7 @@ def emit_c_file(code, test_name="test", golden=None, perf_threshold=None,
             DRAM comparison for pass/fail.
         perf_macs_mxu0: total MACs issued to MXU0 in the timed window, or None.
         perf_macs_mxu1: total MACs issued to MXU1 in the timed window, or None.
+        imem_background_words: benchmark host writes into the upper IMEM half while waiting.
     """
     n = len(code)
     array_body = ""
@@ -376,6 +403,7 @@ static inline void mmio_write32(uint64_t addr, uint32_t val) {{ *(volatile uint3
 #define CSR_EXEC_CONTROL  (ATLAS_CSR_BASE + 0x18)
 
 {emit_pmu_support()}
+{emit_imem_background_support(imem_background_words)}
 
 #define ATLAS_EXEC_STOP   0U
 #define ATLAS_EXEC_START  1U
@@ -486,6 +514,7 @@ int main(void)
             }}
         #endif
 
+        {"atlas_background_imem_write(i);" if imem_background_words else ""}
         /* Original completion condition */
         dbg0 = mmio_read32(CSR_DBG0);
         if (dbg0 != 0) break;
@@ -677,7 +706,8 @@ def main():
                                perf_threshold=perf_threshold,
                                perf_report=perf_report,
                                perf_macs_mxu0=perf_macs_mxu0,
-                               perf_macs_mxu1=perf_macs_mxu1)
+                               perf_macs_mxu1=perf_macs_mxu1,
+                               imem_background_words=_parse_imem_background_words(source))
         with open(args.out_c, "w") as f:
             f.write(c_source)
         print(f"Wrote C file to {args.out_c} ({len(code)} instructions)")

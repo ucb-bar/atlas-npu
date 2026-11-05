@@ -40,6 +40,10 @@ ASM_DIR   := $(CURDIR)/assembly
 TESTS := $(patsubst $(ASM_DIR)/%.S,%,$(wildcard $(ASM_DIR)/*.S))
 GENERATED_C := $(patsubst %,$(TESTS_DIR)/atlas_%.c,$(TESTS))
 
+# DMA benchmark wrappers share their golden-data definitions.
+DMA_PERF_TESTS := $(filter-out dma_perf_baseline,$(filter dma_perf_%,$(TESTS)))
+$(foreach t,$(DMA_PERF_TESTS),$(eval $(TESTS_DIR)/atlas_$(t).c: $(GEN_DIR)/gen_$(t).py $(GEN_DIR)/gen_dma_perf.py))
+
 # ── Sim infra ─────────────────────────────────────────────────────────
 VCS_DIR_ABS  := $(CHIPYARD_ROOT)/sims/vcs
 GEN_COVERAGE ?= 1

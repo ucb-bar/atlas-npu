@@ -11,6 +11,7 @@ backpressured until fetch is inactive and can never stall the accelerator.
 
 package atlas.scalar
 
+import atlas.common.{ImemPerfEvents, ImemPerfMonitor}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
@@ -26,6 +27,7 @@ class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
     val fetch       = Flipped(new ImemFetchPort)
     val fetchActive = Input(Bool())
     val tl          = Flipped(new TLBundle(tlBundleParams))
+    val perf        = Output(new ImemPerfEvents)
   })
 
   val mem = SyncReadMem(AtlasMemMap.IMEM_WORDS, UInt(32.W))
@@ -77,6 +79,20 @@ class InstrMem(tlBundleParams: TLBundleParameters) extends Module {
   io.tl.d.bits.denied := false.B
   io.tl.d.bits.data   := Mux(respIsGet, respData, 0.U)
   io.tl.d.bits.corrupt := false.B
+
+  val perf = Module(new ImemPerfMonitor)
+  perf.io.fetchActive := io.fetchActive
+  perf.io.fetchHalf := io.fetch.addr(AtlasMemMap.IMEM_ADDR_BITS - 1)
+  perf.io.hostHalf := tlWordAddr(AtlasMemMap.IMEM_ADDR_BITS - 1)
+  perf.io.hostIsRead := io.tl.a.bits.opcode === TLMessages.Get
+  perf.io.hostIsWrite := io.tl.a.bits.opcode === TLMessages.PutFullData ||
+    io.tl.a.bits.opcode === TLMessages.PutPartialData
+  perf.io.requestValid := io.tl.a.valid
+  perf.io.requestReady := io.tl.a.ready
+  perf.io.responseValid := io.tl.d.valid
+  perf.io.responseReady := io.tl.d.ready
+  perf.io.busy := state =/= sIdle
+  io.perf := perf.io.events
 
   // ── State machine ────────────────────────────────────────────────────
   switch(state) {

@@ -107,6 +107,7 @@ class ScalarCoreIO(spP: VmemParams) extends Bundle {
   val csrPort       = Flipped(new CSRInternalPort)
   val scaleRegs     = Output(Vec(NUM_SCALE_REGS, UInt(8.W)))
   val dmaBaseReg    = Output(UInt(32.W))
+  val retiredImemHalf = Output(Bool())
   val halted        = Output(Bool())
   val execRun       = Input(Bool())
   val execRunWrite  = Input(Bool())

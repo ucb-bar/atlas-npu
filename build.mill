@@ -101,3 +101,17 @@ object atlas extends ScalaModule with ScalafmtModule {
     }
   }
 }
+
+
+// Pure monitoring logic: no Chipyard, SRAM macros, or floating-point submodules.
+object memoryPerf extends ScalaModule {
+  def scalaVersion = "2.13.16"
+  def scalacOptions = Seq("-language:reflectiveCalls")
+  override def sources = Task.Sources(millSourcePath / os.up / "src/main/scala/atlas/common/MemoryPerf.scala")
+  def ivyDeps = Agg(ivy"org.chipsalliance::chisel:7.0.0-RC4")
+  def scalacPluginIvyDeps = Agg(ivy"org.chipsalliance:::chisel-plugin:7.0.0-RC4")
+  object test extends ScalaTests with ScalaTest {
+    def ivyDeps = super.ivyDeps() ++ Agg(ivy"org.scalatest::scalatest:3.2.19")
+    override def sources = Task.Sources(millSourcePath / os.up / os.up / "src/test/scala/atlas/common/MemoryPerfSpec.scala")
+  }
+}

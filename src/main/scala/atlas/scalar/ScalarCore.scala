@@ -451,6 +451,7 @@ class ScalarCore(spP: VmemParams) extends Module {
   io.csrPort.set_ebreak  := s1_valid && dec.is_ebreak && !halted
   io.csrPort.illegal_pc  := s1_pc
   io.csrPort.inst_retire := s1_fire
+  io.retiredImemHalf := s1_pc(AtlasMemMap.IMEM_ADDR_BITS - 1)
 
   val s1WritesScalarRd = s1_fire && dec.rd_wen && dec.rd =/= 0.U
 
