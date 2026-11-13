@@ -8,11 +8,13 @@ PMU_PLATFORM ?=
 PMU_SOFTWARE_DIR ?= $(abspath ../../pmu/software)
 ATLAS_PMU_HEADER ?=
 PMU_ENABLE ?= 0
+# Comma-separated event prefixes (dot boundary); all reports every counter.
+PMU_REPORT_GROUPS ?= all
 PMU_POLL_ENABLE ?= 0
 PMU_POLL_COUNTER_ID ?= 0
 PMU_POLL_INTERVAL ?= 1000
 PMU_POLL_PRINT ?= 0
-PMU_CMAKE_ARGS = -DPMU_ENABLE=$(PMU_ENABLE) -DPMU_POLL_ENABLE=$(PMU_POLL_ENABLE) \
+PMU_CMAKE_ARGS = -DPMU_REPORT_GROUPS="$(PMU_REPORT_GROUPS)" -DPMU_ENABLE=$(PMU_ENABLE) -DPMU_POLL_ENABLE=$(PMU_POLL_ENABLE) \
  -DPMU_POLL_COUNTER_ID=$(PMU_POLL_COUNTER_ID) -DPMU_POLL_INTERVAL=$(PMU_POLL_INTERVAL) \
  -DPMU_POLL_PRINT=$(PMU_POLL_PRINT) -DATLAS_PMU_HEADER="$(ATLAS_PMU_HEADER)" \
  -DPMU_MANIFEST="$(PMU_MANIFEST)" -DPMU_PLATFORM="$(PMU_PLATFORM)" \
@@ -20,8 +22,9 @@ PMU_CMAKE_ARGS = -DPMU_ENABLE=$(PMU_ENABLE) -DPMU_POLL_ENABLE=$(PMU_POLL_ENABLE)
 
 PYTHON ?= python3
 NPU_MODEL_DIR ?= ../npu-model
+ATLAS_ASSEMBLER_PYTHON ?= $(abspath $(NPU_MODEL_DIR))/.venv/bin/python
 ATLAS_ASSEMBLER_RUN = PYTHONPATH="$(abspath $(NPU_MODEL_DIR))$${PYTHONPATH:+:$$PYTHONPATH}" \
-	uv run --locked --project "$(NPU_MODEL_DIR)" --python 3.14 python
+	"$(ATLAS_ASSEMBLER_PYTHON)"
 CONFIG ?= EE290SimConfig
 VCS_DIR ?= sims/vcs
 RUN_TIMEOUT_S ?= 0
@@ -104,7 +107,8 @@ $(TESTS_DIR)/atlas_%.c: $(ASM_DIR)/%.S atlas_asm.py $(wildcard \
     $(NPU_MODEL_DIR)/npu_model/configs/isa_definition.py \
     $(NPU_MODEL_DIR)/npu_model/software/program.py)
 	@set -e; \
-	command -v uv >/dev/null 2>&1 || { echo "Error: uv is required to assemble Atlas programs" >&2; exit 1; }; \
+	command -v "$(ATLAS_ASSEMBLER_PYTHON)" >/dev/null 2>&1 || { echo "Error: set ATLAS_ASSEMBLER_PYTHON to a Python 3.14+ environment with the model dependencies" >&2; exit 1; }; \
+	"$(ATLAS_ASSEMBLER_PYTHON)" -c 'import sys; sys.exit(sys.version_info < (3, 14))' || { echo "Error: Atlas assembly requires Python 3.14+" >&2; exit 1; }; \
 	[ -f "$(NPU_MODEL_DIR)/npu_model/util/converter.py" ] || { \
 		echo "Error: initialize the npu-model submodule (git submodule update --init npu-model)" >&2; exit 1; }; \
 	BASE=$*; \

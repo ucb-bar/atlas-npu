@@ -84,6 +84,11 @@ endfunction()
 #################################
 
 
+set(PMU_REPORT_GROUPS "all" CACHE STRING "Comma-separated PMU event prefixes, or all")
+if(NOT PMU_REPORT_GROUPS MATCHES "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*(,[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*)*$")
+  message(FATAL_ERROR "PMU_REPORT_GROUPS must be comma-separated dot-delimited names, or all")
+endif()
+
 option(PMU_ENABLE "Enable Atlas tile PMU collection and final counter dump" OFF)
 option(PMU_POLL_ENABLE "Snapshot the Atlas PMU during execution" OFF)
 set(PMU_POLL_COUNTER_ID 0 CACHE STRING "PMU counter ID or generated event macro to poll")
@@ -119,6 +124,10 @@ if(PMU_MANIFEST OR PMU_PLATFORM)
   set(ATLAS_PMU_HEADER "${_pmu_header}")
 endif()
 
+if(PMU_ENABLE AND NOT PMU_REPORT_GROUPS STREQUAL "all" AND NOT ATLAS_PMU_HEADER)
+  message(FATAL_ERROR "PMU_REPORT_GROUPS requires ATLAS_PMU_HEADER or PMU_MANIFEST and PMU_PLATFORM")
+endif()
+
 file(GLOB_RECURSE _ATLAS_ASM "${CMAKE_CURRENT_SOURCE_DIR}/../assembly/*.S")
 list(SORT _ATLAS_ASM)
 
@@ -139,6 +148,7 @@ foreach(_asm IN LISTS _ATLAS_ASM)
     if(EXISTS ${_c})
         add_executable(${_tgt} ${_c})
   target_compile_definitions(${_tgt} PRIVATE
+    PMU_REPORT_GROUPS="${PMU_REPORT_GROUPS}"
     PMU_ENABLE=$<BOOL:${PMU_ENABLE}> PMU_POLL_ENABLE=$<BOOL:${PMU_POLL_ENABLE}>
     PMU_POLL_COUNTER_ID=${PMU_POLL_COUNTER_ID} PMU_POLL_INTERVAL=${PMU_POLL_INTERVAL}
     PMU_POLL_PRINT=$<BOOL:${PMU_POLL_PRINT}>)

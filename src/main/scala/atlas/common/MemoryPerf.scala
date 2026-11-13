@@ -59,6 +59,8 @@ object DmaLatencyBuckets {
 class DmaTransactionPerf(timestampBits: Int) extends Bundle {
   val issued = Bool()
   val completed = Bool()
+  val requestCycle = UInt(timestampBits.W)
+  val responseCycle = UInt(timestampBits.W)
   val latencyCycles = UInt(timestampBits.W)
   val responseLatencyCycles = UInt(timestampBits.W)
   val responseBackpressureCycles = UInt(timestampBits.W)
@@ -66,8 +68,9 @@ class DmaTransactionPerf(timestampBits: Int) extends Bundle {
 }
 
 /** Native DMA transactions (one beat each). Timestamp state follows source IDs,
-  * independently of the PMU enable/clear window. Latencies are emitted on completion.
-  * Durations must be shorter than 2^timestampBits cycles; subtraction is modular.
+  * independently of the PMU enable/clear window. Cycle timestamps are relative to
+  * this module's reset. Durations must be shorter than 2^timestampBits cycles;
+  * subtraction is modular.
   */
 class DmaLatencyTracker(numSources: Int, timestampBits: Int = 32) extends Module {
   require(numSources > 0 && isPow2(numSources))
@@ -95,6 +98,7 @@ class DmaLatencyTracker(numSources: Int, timestampBits: Int = 32) extends Module
   // Also handle a zero-cycle responder. Reuse on completion observes OLD metadata.
   val bypassIssue = !active(source) && io.issue.valid && io.issue.bits.source === source
   val responseIsRead = Mux(bypassIssue, io.issue.bits.isRead, isRead(source))
+  val requestCycle = Mux(bypassIssue, cycle, issuedAt(source))
   val age = Mux(bypassIssue, 0.U, cycle - issuedAt(source))
   val arrivalAge = Mux(!bypassIssue && responseSeen(source), firstResponseAge(source), age)
   when(io.issue.valid) {
@@ -129,6 +133,8 @@ class DmaLatencyTracker(numSources: Int, timestampBits: Int = 32) extends Module
     val done = completed && responseIsRead === read.B
     events.issued := io.issue.valid && io.issue.bits.isRead === read.B
     events.completed := done
+    events.requestCycle := Mux(done, requestCycle, 0.U)
+    events.responseCycle := Mux(done, cycle, 0.U)
     events.latencyCycles := Mux(done, age, 0.U)
     events.responseLatencyCycles := Mux(done, arrivalAge, 0.U)
     events.responseBackpressureCycles := Mux(done, age - arrivalAge, 0.U)

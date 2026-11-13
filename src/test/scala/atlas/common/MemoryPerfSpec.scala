@@ -65,6 +65,8 @@ class MemoryPerfSpec extends AnyFlatSpec with PeekPokeAPI {
           val done = response.exists(_._2) && info.exists(_.read == read)
           e.issued.expect(issue.exists(_._2 == read).B)
           e.completed.expect(done.B)
+          e.requestCycle.expect((if (done) info.map(_.start).getOrElse(cycle) & 2047 else 0).U)
+          e.responseCycle.expect((if (done) cycle & 2047 else 0).U)
           e.latencyCycles.expect((if (done) age else 0).U)
           e.responseLatencyCycles.expect((if (done) arrival else 0).U)
           e.responseBackpressureCycles.expect((if (done) age - arrival else 0).U)

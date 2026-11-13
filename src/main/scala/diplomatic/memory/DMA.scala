@@ -23,6 +23,8 @@ import atlas.common._
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleParameters, TLMessages}
+import freechips.rocketchip.util.{PlusArgArtefacts, plusarg_reader}
+import midas.targetutils.{SynthesizePrintf, PlusArg => FirePlusArg}
 
 class MemoryRequest(dataBytes: Int, tagBits: Int) extends Bundle {
   val address = UInt(64.W)
@@ -328,6 +330,43 @@ class DmaEngine(
     latency.io.responseAccepted := io.tl.d.ready
     io.perfReadTransactions := latency.io.reads
     io.perfWriteTransactions := latency.io.writes
+
+    // Observe native DMA transactions without changing handshakes or PMU events.
+    // FireSim captures this annotated print with WithPrintfSynthesis enabled.
+    // val traceEnabled = PlusArg("atlas-dma-trace", default = 0,
+    //   docstring = "Print each completed Atlas DMA transaction and its latency", width = 1).asBool
+    val traceEnabled = {
+      val name = "atlas_dma_trace"
+      val doc  = "Print each completed Atlas DMA transaction and its latency"
+      PlusArgArtefacts.append(name + "=%d", BigInt(0), doc)
+      val reader = Module(new plusarg_reader(name + "=%d", 0, doc, 1))
+      FirePlusArg(reader)   // tells Golden Gate to turn this into a PlusArgsBridge
+      reader.io.out.asBool
+    }
+    val traceActive = RegInit(VecInit(Seq.fill(numIds)(false.B)))
+    when(io.tl.d.fire) { traceActive(io.tl.d.bits.source) := false.B }
+    val traceAddresses = Reg(Vec(numIds, UInt(io.tl.a.bits.address.getWidth.W)))
+    when(io.tl.a.fire) {
+      traceAddresses(io.tl.a.bits.source) := io.tl.a.bits.address
+      traceActive(io.tl.a.bits.source) := !(io.tl.d.fire &&
+        io.tl.d.bits.source === io.tl.a.bits.source && !traceActive(io.tl.a.bits.source))
+    }
+    // A zero-cycle response has no previously captured address. If a source is
+    // reused on completion, however, its response still belongs to the old request.
+    val zeroCycle = io.tl.a.fire && io.tl.a.bits.source === io.tl.d.bits.source &&
+      !traceActive(io.tl.d.bits.source)
+    val traceAddress = Mux(zeroCycle, io.tl.a.bits.address, traceAddresses(io.tl.d.bits.source))
+    val readCompleted = latency.io.reads.completed
+    val perf = Wire(new DmaTransactionPerf(32))
+    perf := Mux(readCompleted, latency.io.reads, latency.io.writes)
+    when(traceEnabled && io.tl.d.fire) {
+      SynthesizePrintf(printf(
+        "ATLAS_DMA_TRANSACTION source=%d read=%d address=0x%x request_cycle=%d response_cycle=%d latency_cycles=%d response_latency_cycles=%d response_backpressure_cycles=%d denied=%d corrupt=%d\n",
+        io.tl.d.bits.source, readCompleted, traceAddress,
+        perf.requestCycle, perf.responseCycle, perf.latencyCycles,
+        perf.responseLatencyCycles, perf.responseBackpressureCycles,
+        io.tl.d.bits.denied, io.tl.d.bits.corrupt))
+    }
   }
 
   when(tlAdapter.io.response.fire) {

@@ -289,6 +289,10 @@ def emit_pmu_support():
 #define PMU_MAX_COUNTERS      480U
 
 /* PMU polling configuration */
+#ifndef PMU_REPORT_GROUPS
+#define PMU_REPORT_GROUPS "all"
+#endif
+
 #ifndef PMU_POLL_ENABLE
 #define PMU_POLL_ENABLE 0
 #endif
@@ -338,14 +342,83 @@ static inline uint64_t pmu_read_counter(uint32_t id) {
     return lo | (hi << 32);
 }
 
+#ifdef TILE_PMU_EVENTS
+
+#define PMU_NAME(symbol, id, name, unit) [id] = name,
+static const char *const pmu_names[TILE_PMU_COUNTER_COUNT] = {
+    TILE_PMU_EVENTS(PMU_NAME)
+};
+#undef PMU_NAME
+
+#define PMU_UNIT(symbol, id, name, unit) [id] = unit,
+static const char *const pmu_units[TILE_PMU_COUNTER_COUNT] = {
+    TILE_PMU_EVENTS(PMU_UNIT)
+};
+#undef PMU_UNIT
+#endif
+
+/* Match a complete event name or a prefix ending at a dot boundary. */
+static int atlas_pmu_report_matches(const char *name) {
+    const char *group = PMU_REPORT_GROUPS;
+    while (*group) {
+        const char *end = group;
+        while (*end && *end != ',') ++end;
+        unsigned int length = (unsigned int)(end - group);
+        if (length == 3 && group[0] == 'a' && group[1] == 'l' && group[2] == 'l')
+            return 1;
+        unsigned int i = 0;
+        while (i < length && name[i] && name[i] == group[i]) ++i;
+        if (i == length && (name[i] == '\0' || name[i] == '.')) return 1;
+        group = *end ? end + 1 : end;
+    }
+    return 0;
+}
+
+static void print_u64(uint64_t value) {
+    char buf[21];  // 20 decimal digits + terminator
+    char *p = buf + sizeof(buf);
+    *--p = '\0';
+
+    do {
+        *--p = '0' + (value % 10);
+        value /= 10;
+    } while (value);
+
+    printf("%s", p);
+}
+
+
 static void atlas_pmu_snapshot_and_print(uint32_t counter_count) {
     pmu_write32(PMU_CONTROL, 0);
     pmu_write32(PMU_COMMAND, PMU_COMMAND_SNAPSHOT);
+
     printf("PMU counters (%u):\n", counter_count);
-    for (uint32_t id = 0; id < counter_count; id++) {
+
+    uint32_t count = counter_count;
+#ifdef TILE_PMU_EVENTS
+    if (count > TILE_PMU_COUNTER_COUNT)
+        count = TILE_PMU_COUNTER_COUNT;
+#endif
+    uint32_t reported = 0;
+    for (uint32_t id = 0; id < count; id++) {
+#ifdef TILE_PMU_EVENTS
+        if (!atlas_pmu_report_matches(pmu_names[id])) continue;
+#else
+        if (!atlas_pmu_report_matches("")) continue;
+#endif
         uint64_t value = pmu_read_counter(id);
-        printf("  pmu[%u] = %llu\n", id, (unsigned long long)value);
+#ifdef TILE_PMU_EVENTS
+        printf("  pmu[%u] %s = ", id, pmu_names[id]);
+        print_u64(value);
+        printf(" %s\n", pmu_units[id]);
+#else
+        printf("  pmu[%u] = ", id);
+        print_u64(value);
+        printf("\n");
+#endif
+        ++reported;
     }
+    printf("PMU reported %u counters (groups: %s)\n", reported, PMU_REPORT_GROUPS);
 }
 
 #endif
